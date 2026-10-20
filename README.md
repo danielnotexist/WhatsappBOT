@@ -53,12 +53,12 @@ lib/
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
   hyp/sign.ts           HYP APISign: בניית SIGN / VERIFY, URL דף תשלום, פרסור תשובות, redact ללוגים
 proxy.ts                כותרות אבטחה (CSP report-only, HSTS, nosniff, referrer, permissions). ב-Next 16 זה השם של middleware
-docs/                   תוכנית ומסמכים (לא חלק מה-build)
+docs/                   תוכנית (PLAN.md), יומן התקדמות (PROGRESS.md), טקסטים (copy/), משפטי (legal/)
 scripts/, supabase/, design/   נכתבים בנפרד; מוחרגים מ-lint/typecheck/prettier/vitest
 ```
 
 קבצי קונפיגורציה: `components.json` (shadcn, `rtl: true`), `next.config.ts`, `tsconfig.json`, `eslint.config.mjs`,
-`.prettierrc`, `vitest.config.ts` + `vitest.setup.ts`, `vercel.json` (regions: fra1), `.editorconfig`, `.nvmrc`.
+`.prettierrc`, `vitest.config.mts` + `vitest.setup.ts`, `vercel.json` (regions: fra1), `.editorconfig`, `.nvmrc`.
 
 ## RTL ופונטים
 

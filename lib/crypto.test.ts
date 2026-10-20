@@ -19,7 +19,8 @@ describe("lib/crypto (AES-256-GCM)", () => {
   it("round-trips Hebrew, emoji and long tokens", () => {
     for (const plaintext of ["ya29.a0AfH6SMB-שלום-👋", "x", "M.R3_BAY." + "a".repeat(4000)]) {
       const sealed = encryptToken(plaintext, { key });
-      expect(sealed).not.toContain(plaintext);
+      // A one-character plaintext can legitimately appear inside random base64url output.
+      if (plaintext.length > 1) expect(sealed).not.toContain(plaintext);
       expect(decryptToken(sealed, { key })).toBe(plaintext);
     }
   });
