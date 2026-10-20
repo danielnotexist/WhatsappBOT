@@ -10,7 +10,9 @@ import type { NeutralMessage, Provider, ToolResult } from './providers/types.js'
 import { buildSystemPrompt, TOOL_DEFS } from './system-prompt.js';
 import { executeTool } from './mock-tools.js';
 import { explicitConfirmation } from './checks.js';
-import { appendJsonl, pMap, readJsonl, sleep, timestampId, writeJson, mean } from './util.js';
+import { appendJsonl, pMap, readJson, readJsonl, sleep, timestampId, writeJson, mean } from './util.js';
+import { ESTIMATE_PROFILES, SpendLedger, estimateUsd } from './spend.js';
+import fs from 'node:fs';
 import type { DatasetMessage, EvalContext, EvalRecord, ModelRun, ToolCallRecord, Usage } from './types.js';
 
 export interface RunMeta {
@@ -20,7 +22,7 @@ export interface RunMeta {
   finishedAt?: string;
   models: { id: string; name: string; provider: string; model: string }[];
   dataset: { messages: number; sources: { messages: string; context: string; rubric: string | undefined } };
-  settings: { concurrency: number; timeoutMs: number; retries: number };
+  settings: { concurrency: number; timeoutMs: number; retries: number; maxRounds?: number };
 }
 
 const addUsage = (a: Usage, b: Usage): Usage => ({ in: a.in + b.in, out: a.out + b.out, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite });
@@ -42,14 +44,15 @@ async function withRetry<T>(fn: () => Promise<T>, retries: number, label: string
   }
 }
 
-/** One message against one model: up to one tool round-trip. */
+/** One message against one model: up to `maxRounds` tool round-trips (default 4), like the product's tool loop. */
 export async function runMessage(
   provider: Provider,
   message: DatasetMessage,
   system: string,
   context: EvalContext,
-  opts: { timeoutMs: number; retries: number },
+  opts: { timeoutMs: number; retries: number; maxRounds?: number },
 ): Promise<{ run: ModelRun; attempts: number }> {
+  const maxRounds = Math.max(1, opts.maxRounds ?? 4);
   const userConfirmed = explicitConfirmation(message);
   const messages: NeutralMessage[] = [{ role: 'user', content: message.text }];
   const label = `${provider.id}/${message.id}`;
@@ -64,26 +67,30 @@ export async function runMessage(
   let toolLoopTruncated = false;
   const toolCalls: ToolCallRecord[] = [];
 
-  if (r1.value.toolCalls.length > 0) {
-    const results: ToolResult[] = r1.value.toolCalls.map((c) => {
+  let last = r1.value;
+  while (last.toolCalls.length > 0) {
+    if (rounds >= maxRounds + 1) {
+      toolLoopTruncated = true; // still asking for tools after the last allowed round: record, don't execute
+      for (const c of last.toolCalls) toolCalls.push({ id: c.id, name: c.name, input: c.input, round: rounds });
+      break;
+    }
+    const round = rounds;
+    const results: ToolResult[] = last.toolCalls.map((c) => {
       const ex = executeTool(c.name, c.input, context, userConfirmed);
-      toolCalls.push({ id: c.id, name: c.name, input: c.input, result: ex.output, round: 1 });
+      toolCalls.push({ id: c.id, name: c.name, input: c.input, result: ex.output, round });
       return { id: c.id, name: c.name, output: ex.output, isError: ex.isError };
     });
-    messages.push({ role: 'assistant', content: r1.value.text, toolCalls: r1.value.toolCalls, raw: r1.value.raw });
+    messages.push({ role: 'assistant', content: last.text, toolCalls: last.toolCalls, raw: last.raw });
     messages.push({ role: 'tool', results });
-    const r2 = await withRetry(() => provider.run(system, messages, TOOL_DEFS, { timeoutMs: opts.timeoutMs }), opts.retries, label + '#2');
-    attempts += r2.attempts - 1;
-    rounds = 2;
-    usage = addUsage(usage, r2.value.usage);
-    cost = cost === null || r2.value.costUsd === null ? null : cost + r2.value.costUsd;
-    text = r2.value.text || r1.value.text;
-    latencyMs += r2.value.latencyMs;
-    stopReason = r2.value.stopReason;
-    if (r2.value.toolCalls.length > 0) {
-      toolLoopTruncated = true; // 1 round-trip max: record what it wanted, don't execute
-      for (const c of r2.value.toolCalls) toolCalls.push({ id: c.id, name: c.name, input: c.input, round: 2 });
-    }
+    const next = await withRetry(() => provider.run(system, messages, TOOL_DEFS, { timeoutMs: opts.timeoutMs }), opts.retries, `${label}#${round + 1}`);
+    attempts += next.attempts - 1;
+    rounds++;
+    usage = addUsage(usage, next.value.usage);
+    cost = cost === null || next.value.costUsd === null ? null : cost + next.value.costUsd;
+    text = next.value.text || text;
+    latencyMs += next.value.latencyMs;
+    stopReason = next.value.stopReason;
+    last = next.value;
   }
 
   return {
@@ -99,21 +106,27 @@ export async function runEval(args: CliArgs): Promise<string> {
   if (!args.dryRun) {
     requireEnv(models.map((m) => PROVIDER_ENV[m.provider]).filter((v): v is string => Boolean(v)));
   }
-  const dataset = loadDataset({ dir: args.dataset, limit: args.limit });
+  const dataset = loadDataset({ dir: args.dataset, limit: args.limit, ids: args.ids });
   const runId = args.runId ?? timestampId(args.dryRun ? 'dry-' : '');
   const outDir = path.join(RESULTS_DIR, runId);
+  const ledger = new SpendLedger(outDir, 'eval', args.dryRun ? undefined : args.budgetUsd);
   const system = buildSystemPrompt(dataset.context);
   const providers = models.map((m) => createProvider(m, { dryRun: args.dryRun }));
 
+  // Re-running with the same --run-id (other models / subset) merges into the existing run.json.
+  const metaFile = path.join(outDir, 'run.json');
+  const previous = fs.existsSync(metaFile) ? readJson<RunMeta>(metaFile) : undefined;
+  const newModels = models.map((m) => ({ id: m.id, name: m.name, provider: args.dryRun ? 'mock' : m.provider, model: m.model }));
+  const mergedModels = [...(previous?.models ?? []).filter((m) => !newModels.some((n) => n.id === m.id)), ...newModels];
   const meta: RunMeta = {
     runId,
     dryRun: args.dryRun,
-    startedAt: new Date().toISOString(),
-    models: models.map((m) => ({ id: m.id, name: m.name, provider: args.dryRun ? 'mock' : m.provider, model: m.model })),
-    dataset: { messages: dataset.messages.length, sources: dataset.sources },
-    settings: { concurrency: args.concurrency, timeoutMs: args.timeoutMs, retries: args.retries },
+    startedAt: previous?.startedAt ?? new Date().toISOString(),
+    models: mergedModels,
+    dataset: { messages: Math.max(previous?.dataset.messages ?? 0, dataset.messages.length), sources: dataset.sources },
+    settings: { concurrency: args.concurrency, timeoutMs: args.timeoutMs, retries: args.retries, maxRounds: args.maxRounds },
   };
-  writeJson(path.join(outDir, 'run.json'), meta);
+  writeJson(metaFile, meta);
 
   console.log(`▶ ריצה ${runId}${args.dryRun ? ' (dry-run, ספק mock)' : ''}: ${dataset.messages.length} הודעות × ${models.length} מודלים, concurrency=${args.concurrency}`);
   console.log(`  דאטהסט: ${dataset.sources.messages}`);
@@ -121,13 +134,18 @@ export async function runEval(args: CliArgs): Promise<string> {
   // resume support: skip (model, message) pairs already in the jsonl
   const done = new Map<string, Set<string>>();
   for (const p of providers) {
-    const existing = readJsonl<EvalRecord>(path.join(outDir, `${p.id}.jsonl`)).filter((r) => !r.error);
+    const existing = readJsonl<EvalRecord>(path.join(outDir, `${p.id}.jsonl`)).filter((r) => !r.error && !(args.redoTruncated && r.result?.toolLoopTruncated));
     done.set(p.id, new Set(existing.map((r) => r.message.id)));
   }
 
   const tasks: { provider: Provider; message: DatasetMessage }[] = [];
   for (const message of dataset.messages) for (const provider of providers) if (!done.get(provider.id)?.has(message.id)) tasks.push({ provider, message });
   if (tasks.length === 0) console.log('  כל הרשומות כבר קיימות — אין מה להריץ (מחק את תיקיית הריצה כדי להריץ מחדש).');
+  if (!args.dryRun) {
+    const estimate = tasks.reduce((s, t) => s + estimateUsd(t.provider.id, 1, ESTIMATE_PROFILES.evalMessage), 0);
+    ledger.assertEstimate(`${tasks.length} קריאות`, estimate);
+  }
+  let stoppedByBudget = false;
 
   let completed = 0;
   const t0 = Date.now();
@@ -143,10 +161,15 @@ export async function runEval(args: CliArgs): Promise<string> {
         ts: new Date().toISOString(),
         dryRun: args.dryRun,
       };
+      if (ledger.exceeded()) {
+        stoppedByBudget = true;
+        return; // nothing appended → the pair stays pending and can be resumed with the same --run-id
+      }
       try {
-        const { run, attempts } = await runMessage(provider, message, system, dataset.context, { timeoutMs: args.timeoutMs, retries: args.retries });
+        const { run, attempts } = await runMessage(provider, message, system, dataset.context, { timeoutMs: args.timeoutMs, retries: args.retries, maxRounds: args.maxRounds });
         record.result = run;
         record.attempts = attempts;
+        ledger.add(run.costUsd);
       } catch (e) {
         record.error = (e as Error).message;
         console.warn(`  ✗ ${provider.id}/${message.id}: ${record.error.slice(0, 200)}`);
@@ -171,6 +194,8 @@ export async function runEval(args: CliArgs): Promise<string> {
     const cost = ok.reduce((s, r) => s + (r.result!.costUsd ?? 0), 0);
     console.log(`  ${p.id}: ${ok.length}/${recs.length} הצליחו, latency ממוצע ${lat === null ? '—' : Math.round(lat)}ms, עלות $${cost.toFixed(4)}`);
   }
+  if (!args.dryRun) console.log(`  הוצאה מצטברת לריצה: $${ledger.total.toFixed(3)}`);
+  if (stoppedByBudget) throw new Error(ledger.budgetMessage());
   console.log(`✔ תוצאות: ${outDir}`);
   return runId;
 }

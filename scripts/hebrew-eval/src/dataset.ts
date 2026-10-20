@@ -47,7 +47,7 @@ function normalizeContext(c: Partial<EvalContext>): EvalContext {
  * Loads dataset/messages.json + dataset/context.json (+ rubric.md).
  * Falls back to dataset/_sample.json (3 items) when the real files are missing — with a loud warning.
  */
-export function loadDataset(opts: { dir?: string; limit?: number } = {}): Dataset {
+export function loadDataset(opts: { dir?: string; limit?: number; ids?: string[] } = {}): Dataset {
   const dir = opts.dir ? path.resolve(opts.dir) : DATASET_DIR;
   const messagesFile = path.join(dir, 'messages.json');
   const contextFile = path.join(dir, 'context.json');
@@ -94,6 +94,12 @@ export function loadDataset(opts: { dir?: string; limit?: number } = {}): Datase
     ids.add(m.id);
   }
 
+  if (opts.ids && opts.ids.length > 0) {
+    const want = new Set(opts.ids);
+    const missing = opts.ids.filter((id) => !ids.has(id));
+    if (missing.length) throw new Error(`--ids: מזהים שלא קיימים בדאטהסט: ${missing.join(', ')}`);
+    messages = messages.filter((m) => want.has(m.id));
+  }
   if (opts.limit && opts.limit > 0) messages = messages.slice(0, opts.limit);
 
   const rubricMarkdown = fs.existsSync(rubricFile) ? fs.readFileSync(rubricFile, 'utf8') : undefined;

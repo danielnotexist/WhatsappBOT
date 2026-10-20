@@ -33,7 +33,13 @@ export function readJsonl<T>(file: string): T[] {
     .readFileSync(file, 'utf8')
     .split('\n')
     .filter((l) => l.trim())
-    .map((l) => JSON.parse(l) as T);
+    .flatMap((l) => {
+      try {
+        return [JSON.parse(l) as T];
+      } catch {
+        return []; // a half-written line (process killed mid-append) is simply re-run
+      }
+    });
 }
 
 export function appendJsonl(file: string, obj: unknown): void {

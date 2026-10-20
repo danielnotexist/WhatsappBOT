@@ -118,6 +118,8 @@ export interface ScoreRecord {
   overall: number;
   checks: Checks;
   judge: JudgeVerdict;
+  /** ts of the eval record that was judged — a re-run record (newer ts) is judged again */
+  evalTs?: string;
   latencyMs: number | null;
   firstRoundLatencyMs: number | null;
   costUsd: number | null;

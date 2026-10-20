@@ -7,7 +7,11 @@
       "provider": "anthropic",
       "model": "claude-haiku-5-5",
       "enabled": true,
-      "params": { "thinking": "disabled", "effort": "low", "max_tokens": 2048 }
+      "params": {
+        "thinking": "disabled",
+        "effort": "low",
+        "max_tokens": 2048
+      }
     },
     {
       "id": "claude-sonnet-5-5",
@@ -15,7 +19,24 @@
       "provider": "anthropic",
       "model": "claude-sonnet-5-5",
       "enabled": true,
-      "params": { "thinking": "adaptive", "effort": "low", "max_tokens": 4096 }
+      "params": {
+        "thinking": "adaptive",
+        "effort": "low",
+        "max_tokens": 4096
+      }
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5 (effort low)",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "enabled": false,
+      "params": {
+        "thinking": "adaptive",
+        "effort": "low",
+        "max_tokens": 4096
+      },
+      "$comment": "Expensive — disabled by default; run on a subset with --models claude-opus-5-5 --ids ..."
     },
     {
       "id": "gemini-3.1-flash-lite",
@@ -23,7 +44,14 @@
       "provider": "gemini",
       "model": "gemini-3.1-flash-lite",
       "enabled": true,
-      "params": { "generationConfig": { "maxOutputTokens": 2048, "thinkingConfig": { "thinkingBudget": 0 } } }
+      "params": {
+        "generationConfig": {
+          "maxOutputTokens": 2048,
+          "thinkingConfig": {
+            "thinkingBudget": 0
+          }
+        }
+      }
     },
     {
       "id": "gemini-3.8-flash",
@@ -31,7 +59,14 @@
       "provider": "gemini",
       "model": "gemini-3.8-flash",
       "enabled": true,
-      "params": { "generationConfig": { "maxOutputTokens": 4096, "thinkingConfig": { "thinkingLevel": "low" } } }
+      "params": {
+        "generationConfig": {
+          "maxOutputTokens": 4096,
+          "thinkingConfig": {
+            "thinkingLevel": "low"
+          }
+        }
+      }
     },
     {
       "id": "gpt-5.6-luna",
@@ -39,7 +74,12 @@
       "provider": "openai",
       "model": "gpt-5.6-luna",
       "enabled": true,
-      "params": { "request": { "reasoning_effort": "low", "max_completion_tokens": 4096 } }
+      "params": {
+        "request": {
+          "reasoning_effort": "low",
+          "max_completion_tokens": 4096
+        }
+      }
     },
     {
       "id": "gpt-5.6-terra",
@@ -47,13 +87,23 @@
       "provider": "openai",
       "model": "gpt-5.6-terra",
       "enabled": true,
-      "params": { "request": { "reasoning_effort": "low", "max_completion_tokens": 4096 } }
+      "params": {
+        "request": {
+          "reasoning_effort": "low",
+          "max_completion_tokens": 4096
+        }
+      }
     }
   ],
   "judge": {
     "provider": "anthropic",
     "model": "claude-sonnet-5-5",
-    "params": { "thinking": "adaptive", "effort": "medium", "max_tokens": 4096 }
+    "params": {
+      "thinking": "between_tools",
+      "effort": "low",
+      "max_tokens": 1024
+    },
+    "$comment": "between_tools = thinking off on Sonnet 5.5 (no tools → no thinking); keeps judge cost ≈ $0.007/record"
   },
   "usageProfiles": {
     "$comment": "Messages per customer per month. light ≈ 5/day; medium = Basic plan cap (750, PLAN §4); heavy = Pro fair use (3,000, PLAN §4). Used for the monthly cost projection in the report.",
