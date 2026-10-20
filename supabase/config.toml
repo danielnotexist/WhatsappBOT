@@ -1,0 +1,38 @@
+# Supabase CLI config — מינימלי.
+# `project_id` הוא שם הפרויקט *המקומי* בלבד (supabase start).
+# הפרויקט המרוחק מקושר עם:  supabase link --project-ref <PROJECT_REF>
+# אזור הפרויקט המרוחק: EU Frankfurt (eu-central-1) — נבחר בעת יצירת הפרויקט בדשבורד ואי-אפשר לשנות אחר כך.
+project_id = "whatsappbot"
+
+[api]
+enabled = true
+port = 54321
+# רק public חשוף דרך PostgREST. auth/vault/cron/net לא נחשפים ללקוח.
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+# חייב להתאים לגרסה של הפרויקט המרוחק (פרויקטים חדשים = 17). לבדוק: select version();
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+jwt_expiry = 3600
+# ההרשמה אצלנו היא OTP משלנו (auth_otps + Resend). אין הרשמה עצמית דרך GoTrue.
+# השרת יוצר/מאתר משתמש ב-auth (admin API) או מנפיק JWT עם SUPABASE_JWT_SECRET כש-sub = users.id.
+enable_signup = false
+
+[analytics]
+enabled = false

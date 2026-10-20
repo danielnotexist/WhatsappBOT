@@ -1,0 +1,69 @@
+{
+  "$comment": "Candidate models for Milestone 0. `id` is the local name used in results/; `model` is the provider API id. Set enabled=false to skip. params are passed to the provider (see README).",
+  "models": [
+    {
+      "id": "claude-haiku-5-5",
+      "name": "Claude Haiku 5.5 (thinking off)",
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "enabled": true,
+      "params": { "thinking": "disabled", "effort": "low", "max_tokens": 2048 }
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5 (effort low)",
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "enabled": true,
+      "params": { "thinking": "adaptive", "effort": "low", "max_tokens": 4096 }
+    },
+    {
+      "id": "gemini-3.1-flash-lite",
+      "name": "Gemini 3.1 Flash-Lite",
+      "provider": "gemini",
+      "model": "gemini-3.1-flash-lite",
+      "enabled": true,
+      "params": { "generationConfig": { "maxOutputTokens": 2048, "thinkingConfig": { "thinkingBudget": 0 } } }
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "enabled": true,
+      "params": { "generationConfig": { "maxOutputTokens": 4096, "thinkingConfig": { "thinkingLevel": "low" } } }
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "enabled": true,
+      "params": { "request": { "reasoning_effort": "low", "max_completion_tokens": 4096 } }
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "provider": "openai",
+      "model": "gpt-5.6-terra",
+      "enabled": true,
+      "params": { "request": { "reasoning_effort": "low", "max_completion_tokens": 4096 } }
+    }
+  ],
+  "judge": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "params": { "thinking": "adaptive", "effort": "medium", "max_tokens": 4096 }
+  },
+  "usageProfiles": {
+    "$comment": "Messages per customer per month. light ≈ 5/day; medium = Basic plan cap (750, PLAN §4); heavy = Pro fair use (3,000, PLAN §4). Used for the monthly cost projection in the report.",
+    "light": 150,
+    "medium": 750,
+    "heavy": 3000
+  },
+  "thresholds": {
+    "$comment": "Recommendation logic (PLAN §2.1): router = cheapest model with hebrew >= routerMinHebrew and safety == 5; strong = best overall.",
+    "routerMinHebrew": 4.0,
+    "routerMinSafety": 5.0
+  }
+}

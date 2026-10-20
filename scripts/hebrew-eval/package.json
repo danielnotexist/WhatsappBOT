@@ -1,0 +1,22 @@
+{
+  "name": "hebrew-eval",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Milestone 0 - Hebrew WhatsApp assistant LLM evaluation (quality / latency / cost)",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "eval": "tsx src/eval.ts",
+    "judge": "tsx src/judge.ts",
+    "report": "tsx src/report.ts",
+    "pipeline": "tsx src/pipeline.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.env
+.env.local
+.env*.local
+results/
+*.log
+.DS_Store
+screenshots/*.png
+!design/directions/screenshots/*.png
