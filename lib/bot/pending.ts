@@ -25,6 +25,14 @@ export async function presentPendingAction(ctx: BotContext, to: string, action: 
       copy["act.cal.create_confirm"]({ title: p.title ?? "", date: formatDateHe(p.date ?? ""), start: p.start ?? "", end: p.end ?? "", location: p.location || undefined, attendees: Array.isArray(action.payload.attendees) && (action.payload.attendees as string[]).length ? (action.payload.attendees as string[]).join(", ") : undefined }),
       buttons.approve(action.id, "קבע"),
     );
+  } else if (action.kind === "update_event") {
+    const changes = [p.date ? `תאריך: ${formatDateHe(p.date)}` : "", p.start || p.end ? `שעה: ${p.start || "—"}–${p.end || "—"}` : "", p.subject ? `כותרת: ${p.subject}` : "", p.location ? `מקום: ${p.location}` : ""].filter(Boolean).join("\n");
+    await ctx.wa.sendButtons(to, `*שינוי פגישה*\n${changes || "(אין שינויים)"}\nלהזיז?`, buttons.approve(action.id, "הזז"));
+  } else if (action.kind === "delete_event") {
+    await ctx.wa.sendButtons(to, copy["act.cal.cancel_confirm"](p.subject ?? "", "", ""), [
+      { id: `pa:approve:${action.id}`, title: "בטל פגישה" },
+      { id: `pa:cancel:${action.id}`, title: "השאר" },
+    ]);
   } else {
     await ctx.wa.sendButtons(to, `*פעולה ממתינה לאישור*\n${JSON.stringify(action.payload)}`, buttons.approve(action.id, "אשר"));
   }

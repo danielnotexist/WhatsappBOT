@@ -56,6 +56,9 @@ app/
   api/pay/return        ה-success URL של HYP: APISign VERIFY → getToken → הפעלת מנוי + משימת חיוב חודשית → הודעה בוואטסאפ
   api/pay/mock          DATA_MODE=memory בלבד — מדמה את דף התשלום של HYP
   api/jobs/run          worker למשימות מתוזמנות (pg_cron → QStash): charge (אבני דרך 5: סיכום בוקר, תזכורות)
+  api/auth/microsoft/start     GET (session או קישור חד-פעמי מהשיחה ?t=) → Microsoft authorize עם PKCE; ?admin=1 → admin consent לארגון
+  api/auth/microsoft/callback  code → tokens (מוצפנים) → connection + Graph subscription + הודעה בוואטסאפ; מטפל גם ב-admin_consent ובשגיאות AADSTS65001
+  api/graph/notify             Change notifications של Graph: validationToken + אימות clientState → 202
   api/health/route.ts   בדיקת חיות
 components/ui/          shadcn: button, input, card, input-otp, dialog, sonner, direction (נוצרו ב-CLI, RTL-aware)
 lib/
@@ -72,6 +75,7 @@ lib/
   ai/                   types.ts (ממשק ספק), anthropic.ts (SDK, Haiku 5.5 router / Sonnet 5.5 strong, adaptive+low, caching), mock.ts, system-prompt.ts, tools.ts (draft_email, create_event, set_morning_time, remember_fact), memory.ts (סיכום מתגלגל + עובדות), orchestrator.ts (router → strong + לולאת כלים)
   bot/                  process-inbound.ts (הצינור: dedupe → זהות → ✅/typing → כפתורים → היכרות → מכסה → עוזר → זיכרון), linking.ts, onboarding.ts, pending.ts (שלח/ערוך/בטל + executors), context.ts
   copy/bot.ts           כל הטקסטים של הבוט לפי ה-ids ב-docs/copy/bot-copy.md (בדיקה מוודאת שכל id מתועד)
+  ms/                   oauth.ts (PKCE, authorize/admin-consent URLs, token exchange/refresh, סיווג AADSTS), graph.ts (מייל/יומן/קבצים/subscriptions, HTML→טקסט), token-store.ts (רענון + הצפנה), files-text.ts (PDF/Office→טקסט עם unpdf), tools.ts (כלי Graph למודל + executors לשליחה/יומן), subscriptions.ts + renewal.ts, connect-link.ts (קישור 30 דק'), __fixtures__/ (Graph מוקלט לבדיקות ול-DATA_MODE=memory)
   product.ts            PRODUCT_NAME = "{{שם}}" עד שייבחר שם
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
   hyp/                  sign.ts (APISign SIGN/VERIFY), client.ts (HypClient: דף תשלום, VERIFY, getToken, soft עם טוקן + SendHesh, PrintHesh; MockHypGateway), index.ts

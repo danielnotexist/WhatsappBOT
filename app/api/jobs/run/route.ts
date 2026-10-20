@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { getBillingContext } from "@/lib/billing";
 import { runChargeJob } from "@/lib/billing/service";
 import { getDb } from "@/lib/db";
+import { renewExpiringSubscriptions } from "@/lib/ms/renewal";
 import type { JobKind } from "@/lib/db/types";
 import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
 import { QSTASH_SIGNATURE_HEADER, verifyQStashSignature } from "@/lib/queue/qstash";
@@ -55,6 +56,9 @@ export async function POST(request: Request) {
       case "charge":
         if (!job.user_id) throw new Error("charge job without user_id");
         result = await runChargeJob(getBillingContext(), job.user_id);
+        break;
+      case "renew_subscription":
+        result = await renewExpiringSubscriptions(db, process.env.APP_URL || new URL(request.url).origin);
         break;
       default:
         result = { skipped: `kind ${job.kind} not handled yet` };

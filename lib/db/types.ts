@@ -64,8 +64,38 @@ export interface ConnectionRow {
   scopes: string[];
   status: ConnectionStatus;
   consent_type: "user" | "admin";
+  /** access-token expiry */
+  expires_at: string | null;
   created_at: string;
   revoked_at: string | null;
+}
+
+/** Encrypted tokens — read only by the token store, never listed with the row. */
+export interface ConnectionSecret {
+  enc_access: string | null;
+  enc_refresh: string | null;
+  expires_at: string | null;
+}
+
+export interface NewConnection {
+  user_id: string;
+  provider: ConnectionProvider;
+  account_email: string | null;
+  tenant_id: string | null;
+  scopes: string[];
+  consent_type: "user" | "admin";
+  enc_access: string;
+  enc_refresh: string | null;
+  expires_at: string;
+}
+
+export interface GraphSubscriptionRow {
+  id: string;
+  connection_id: string;
+  subscription_id: string;
+  resource: string;
+  expires_at: string;
+  client_state: string;
 }
 
 export interface SubscriptionRow {
@@ -220,6 +250,8 @@ export interface Db {
   latestLinkToken(userId: string): Promise<LinkTokenRow | null>;
   markLinkTokenUsed(id: string): Promise<void>;
 
+  /** user whose profile.oauth_pending.<provider>.state equals `state` (OAuth callback lookup) */
+  findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null>;
   /** Deep-merges into users.profile (top-level keys replaced). */
   mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow>;
 
@@ -255,6 +287,19 @@ export interface Db {
   // connections
   listConnections(userId: string): Promise<ConnectionRow[]>;
   revokeConnection(userId: string, id: string): Promise<ConnectionRow | null>;
+  getConnection(id: string): Promise<ConnectionRow | null>;
+  /** one active connection per (user, provider, account) — re-connecting replaces the tokens */
+  upsertConnection(row: NewConnection): Promise<ConnectionRow>;
+  getConnectionSecret(id: string): Promise<ConnectionSecret | null>;
+  updateConnectionTokens(id: string, patch: { enc_access: string; enc_refresh?: string | null; expires_at: string }): Promise<void>;
+  setConnectionStatus(id: string, status: ConnectionStatus): Promise<void>;
+
+  // graph_subscriptions
+  upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow>;
+  findGraphSubscription(subscriptionId: string): Promise<GraphSubscriptionRow | null>;
+  listGraphSubscriptionsForConnection(connectionId: string): Promise<GraphSubscriptionRow[]>;
+  listGraphSubscriptionsExpiring(before: Date, limit: number): Promise<GraphSubscriptionRow[]>;
+  deleteGraphSubscription(subscriptionId: string): Promise<void>;
 
   // subscriptions / usage
   getSubscription(userId: string): Promise<SubscriptionRow | null>;

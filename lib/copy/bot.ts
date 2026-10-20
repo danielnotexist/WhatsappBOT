@@ -55,11 +55,20 @@ export const copy = {
   "act.mail.cancelled": () => "בוטל. הטיוטה נמחקה ולא נשלחה.",
   "act.cal.create_confirm": (e: { title: string; date: string; start: string; end: string; location?: string; attendees?: string }) =>
     `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}\nלקבוע?`,
+  "act.cal.created": (title: string, date: string, start: string) => `נקבע: ${title}, ${date} ב-${start}.`,
+  "act.cal.move_confirm": (e: { title: string; oldDate: string; oldStart: string; newDate: string; newStart: string; newEnd: string }) => `*הזזת פגישה*\n${e.title}\nמ: ${e.oldDate}, ${e.oldStart}\nאל: ${e.newDate}, ${e.newStart}–${e.newEnd}\nלהזיז?`,
+  "act.cal.moved": (title: string, newDate: string, newStart: string) => `הוזז. ${title} עכשיו ב-${newDate}, ${newStart}.`,
+  "act.cal.cancel_confirm": (title: string, date: string, start: string) => `*ביטול פגישה*\n${title}\n${date}, ${start}\nלבטל? המשתתפים יקבלו הודעת ביטול.`,
+  "act.cal.cancelled": (title: string) => `הפגישה "${title}" בוטלה.`,
   "act.pending_expired": () => "האישור הזה כבר לא בתוקף (עברו יותר מ-10 דקות). אם עדיין רלוונטי — אפשר לבקש שוב ואכין מחדש.",
   "act.pending_replaced": () => `שמתי את הטיוטה הקודמת בצד. אפשר לחזור אליה — פשוט לכתוב "חזור לטיוטה".`,
   "act.generic_done": () => "עודכן.",
 
   // ---- 5. errors ----
+  "err.connection_expired": (provider: string, link: string) => `החיבור ל-${provider} פג תוקף — זה קורה מדי פעם, בדרך כלל אחרי החלפת סיסמה.\nכדי לחדש:\n${link}\nהקישור עובד פעם אחת, ל-30 הדקות הקרובות.`,
+  "err.admin_consent_needed": (tenantName: string, adminLink: string) =>
+    `בארגון שלך (${tenantName}) חיבור של אפליקציות דורש אישור חד-פעמי של מנהל המערכת — ככה Microsoft מוגדרת היום ברוב העסקים.\n\nאפשר להעביר למנהל ה-IT את ההודעה הזו כמו שהיא:\n\n"היי, אני רוצה לחבר את ${P} — עוזר למייל וליומן בוואטסאפ — לחשבון ה-Microsoft 365 שלי. נדרש אישור מנהל חד-פעמי להרשאות מייל, יומן וקבצים (קריאה ושליחה בשמי בלבד, בלי גישה לחשבונות אחרים). הקישור לאישור:\n${adminLink}\nתודה."\n\nאחרי האישור — לכתוב לי "חבר שוב" ואשלח קישור חדש.`,
+  "err.admin_consent_pending": () => `עדיין אין אישור מנהל לארגון. כשמנהל ה-IT יאשר — לכתוב לי "חבר שוב".`,
   "err.rate_limit": () => "קיבלתי הרבה הודעות ברצף. אני מטפל בהן לפי הסדר — אפשר להמתין רגע לפני ההודעה הבאה.",
   "err.model": () => "משהו נתקע אצלי באמצע. ההודעה שלך לא אבדה — אפשר לשלוח אותה שוב, או לחכות דקה ואנסה בעצמי.",
   "err.provider_down": (provider: string) => `אין תגובה כרגע מ-${provider} — זה אצלם, לא אצלך. אנסה שוב בעוד כמה דקות ואעדכן. בינתיים אפשר להמשיך בכל מה שלא תלוי במייל וביומן.`,

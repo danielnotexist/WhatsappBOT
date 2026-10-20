@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 import type {
   AuditEntry,
   ConnectionRow,
+  ConnectionSecret,
+  ConnectionStatus,
   ConversationStateRow,
   Db,
+  GraphSubscriptionRow,
+  NewConnection,
   JobKind,
   JobRow,
   PaymentRow,
@@ -42,6 +46,8 @@ export class MemoryDb implements Db {
   pendingActions: PendingActionRow[] = [];
   linkAttempts = new Map<string, { attempts: number; last: number; blockedUntil: number | null }>();
   secrets = new Map<string, SubscriptionSecret>();
+  connectionSecrets = new Map<string, ConnectionSecret>();
+  graphSubscriptions: GraphSubscriptionRow[] = [];
   payments: PaymentRow[] = [];
   jobs: JobRow[] = [];
   /** test clock */
@@ -74,6 +80,14 @@ export class MemoryDb implements Db {
     };
     this.users.set(user.id, user);
     return user;
+  }
+
+  async findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null> {
+    for (const u of this.users.values()) {
+      const pending = u.profile.oauth_pending as Record<string, { state?: string } | null> | undefined;
+      if (pending?.[provider]?.state === state && !u.deleted_at) return u;
+    }
+    return null;
   }
 
   async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
@@ -300,7 +314,67 @@ export class MemoryDb implements Db {
     if (!row) return null;
     row.status = "revoked";
     row.revoked_at = iso();
+    this.connectionSecrets.delete(id);
+    this.graphSubscriptions = this.graphSubscriptions.filter((s) => s.connection_id !== id);
     return row;
+  }
+
+  async getConnection(id: string): Promise<ConnectionRow | null> {
+    return this.connections.find((c) => c.id === id) ?? null;
+  }
+
+  async upsertConnection(row: NewConnection): Promise<ConnectionRow> {
+    let existing = this.connections.find((c) => c.user_id === row.user_id && c.provider === row.provider && c.account_email === row.account_email);
+    if (!existing) {
+      existing = { id: randomUUID(), user_id: row.user_id, provider: row.provider, account_email: row.account_email, tenant_id: row.tenant_id, scopes: row.scopes, status: "active", consent_type: row.consent_type, expires_at: row.expires_at, created_at: iso(this.now()), revoked_at: null };
+      this.connections.push(existing);
+    } else {
+      Object.assign(existing, { tenant_id: row.tenant_id, scopes: row.scopes, status: "active", consent_type: row.consent_type, expires_at: row.expires_at, revoked_at: null });
+    }
+    this.connectionSecrets.set(existing.id, { enc_access: row.enc_access, enc_refresh: row.enc_refresh, expires_at: row.expires_at });
+    return existing;
+  }
+
+  async getConnectionSecret(id: string): Promise<ConnectionSecret | null> {
+    return this.connectionSecrets.get(id) ?? null;
+  }
+
+  async updateConnectionTokens(id: string, patch: { enc_access: string; enc_refresh?: string | null; expires_at: string }): Promise<void> {
+    const cur = this.connectionSecrets.get(id) ?? { enc_access: null, enc_refresh: null, expires_at: null };
+    this.connectionSecrets.set(id, { enc_access: patch.enc_access, enc_refresh: patch.enc_refresh === undefined ? cur.enc_refresh : patch.enc_refresh, expires_at: patch.expires_at });
+    const row = this.connections.find((c) => c.id === id);
+    if (row) row.expires_at = patch.expires_at;
+  }
+
+  async setConnectionStatus(id: string, status: ConnectionStatus): Promise<void> {
+    const row = this.connections.find((c) => c.id === id);
+    if (row) row.status = status;
+  }
+
+  async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {
+    let existing = this.graphSubscriptions.find((s) => s.subscription_id === row.subscription_id);
+    if (existing) Object.assign(existing, row);
+    else {
+      existing = { id: randomUUID(), ...row };
+      this.graphSubscriptions.push(existing);
+    }
+    return existing;
+  }
+
+  async findGraphSubscription(subscriptionId: string): Promise<GraphSubscriptionRow | null> {
+    return this.graphSubscriptions.find((s) => s.subscription_id === subscriptionId) ?? null;
+  }
+
+  async listGraphSubscriptionsForConnection(connectionId: string): Promise<GraphSubscriptionRow[]> {
+    return this.graphSubscriptions.filter((s) => s.connection_id === connectionId);
+  }
+
+  async listGraphSubscriptionsExpiring(before: Date, limit: number): Promise<GraphSubscriptionRow[]> {
+    return this.graphSubscriptions.filter((s) => Date.parse(s.expires_at) <= before.getTime()).slice(0, limit);
+  }
+
+  async deleteGraphSubscription(subscriptionId: string): Promise<void> {
+    this.graphSubscriptions = this.graphSubscriptions.filter((s) => s.subscription_id !== subscriptionId);
   }
 
   async getSubscription(userId: string): Promise<SubscriptionRow | null> {
@@ -396,6 +470,7 @@ export class MemoryDb implements Db {
       scopes: [],
       status: "active",
       consent_type: "user",
+      expires_at: null,
       created_at: iso(),
       revoked_at: null,
     };

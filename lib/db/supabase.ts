@@ -4,8 +4,12 @@ import { requireEnv } from "@/lib/env";
 import type {
   AuditEntry,
   ConnectionRow,
+  ConnectionSecret,
+  ConnectionStatus,
   ConversationStateRow,
   Db,
+  GraphSubscriptionRow,
+  NewConnection,
   JobKind,
   JobRow,
   PaymentRow,
@@ -44,7 +48,8 @@ export class SupabaseDb implements Db {
   private static PA_COLS = "id,user_id,kind,payload,status,expires_at,approved_msg_id,executed_at,error,created_at";
   private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,created_at";
   private static CONN_COLS =
-    "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,created_at,revoked_at";
+    "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,expires_at,created_at,revoked_at";
+  private static GSUB_COLS = "id,connection_id,subscription_id,resource,expires_at,client_state";
   private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef";
   private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at";
   private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
@@ -94,6 +99,18 @@ export class SupabaseDb implements Db {
       .single();
     if (error) this.fail("updateUserProfile", error);
     return data as unknown as UserRow;
+  }
+
+  async findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null> {
+    const { data, error } = await this.client
+      .from("users")
+      .select(SupabaseDb.USER_COLS)
+      .eq(`profile->oauth_pending->${provider}->>state`, state)
+      .is("deleted_at", null)
+      .limit(1)
+      .maybeSingle();
+    if (error) this.fail("findUserByOauthState", error);
+    return (data as unknown as UserRow | null) ?? null;
   }
 
   async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
@@ -374,6 +391,67 @@ export class SupabaseDb implements Db {
       .maybeSingle();
     if (error) this.fail("revokeConnection", error);
     return (data as unknown as ConnectionRow | null) ?? null;
+  }
+
+  async getConnection(id: string): Promise<ConnectionRow | null> {
+    const { data, error } = await this.client.from("connections").select(SupabaseDb.CONN_COLS).eq("id", id).maybeSingle();
+    if (error) this.fail("getConnection", error);
+    return (data as unknown as ConnectionRow | null) ?? null;
+  }
+
+  async upsertConnection(row: NewConnection): Promise<ConnectionRow> {
+    const { data, error } = await this.client
+      .from("connections")
+      .upsert({ ...row, status: "active", revoked_at: null }, { onConflict: "user_id,provider,account_email" })
+      .select(SupabaseDb.CONN_COLS)
+      .single();
+    if (error) this.fail("upsertConnection", error);
+    return data as unknown as ConnectionRow;
+  }
+
+  async getConnectionSecret(id: string): Promise<ConnectionSecret | null> {
+    const { data, error } = await this.client.from("connections").select("enc_access,enc_refresh,expires_at").eq("id", id).maybeSingle();
+    if (error) this.fail("getConnectionSecret", error);
+    return (data as unknown as ConnectionSecret | null) ?? null;
+  }
+
+  async updateConnectionTokens(id: string, patch: { enc_access: string; enc_refresh?: string | null; expires_at: string }): Promise<void> {
+    const { error } = await this.client.from("connections").update(patch).eq("id", id);
+    if (error) this.fail("updateConnectionTokens", error);
+  }
+
+  async setConnectionStatus(id: string, status: ConnectionStatus): Promise<void> {
+    const { error } = await this.client.from("connections").update({ status }).eq("id", id);
+    if (error) this.fail("setConnectionStatus", error);
+  }
+
+  async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {
+    const { data, error } = await this.client.from("graph_subscriptions").upsert(row, { onConflict: "subscription_id" }).select(SupabaseDb.GSUB_COLS).single();
+    if (error) this.fail("upsertGraphSubscription", error);
+    return data as unknown as GraphSubscriptionRow;
+  }
+
+  async findGraphSubscription(subscriptionId: string): Promise<GraphSubscriptionRow | null> {
+    const { data, error } = await this.client.from("graph_subscriptions").select(SupabaseDb.GSUB_COLS).eq("subscription_id", subscriptionId).maybeSingle();
+    if (error) this.fail("findGraphSubscription", error);
+    return (data as unknown as GraphSubscriptionRow | null) ?? null;
+  }
+
+  async listGraphSubscriptionsForConnection(connectionId: string): Promise<GraphSubscriptionRow[]> {
+    const { data, error } = await this.client.from("graph_subscriptions").select(SupabaseDb.GSUB_COLS).eq("connection_id", connectionId);
+    if (error) this.fail("listGraphSubscriptionsForConnection", error);
+    return (data as unknown as GraphSubscriptionRow[]) ?? [];
+  }
+
+  async listGraphSubscriptionsExpiring(before: Date, limit: number): Promise<GraphSubscriptionRow[]> {
+    const { data, error } = await this.client.from("graph_subscriptions").select(SupabaseDb.GSUB_COLS).lte("expires_at", before.toISOString()).order("expires_at", { ascending: true }).limit(limit);
+    if (error) this.fail("listGraphSubscriptionsExpiring", error);
+    return (data as unknown as GraphSubscriptionRow[]) ?? [];
+  }
+
+  async deleteGraphSubscription(subscriptionId: string): Promise<void> {
+    const { error } = await this.client.from("graph_subscriptions").delete().eq("subscription_id", subscriptionId);
+    if (error) this.fail("deleteGraphSubscription", error);
   }
 
   async getSubscription(userId: string): Promise<SubscriptionRow | null> {

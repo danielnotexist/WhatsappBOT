@@ -1,6 +1,8 @@
 import type { AiProvider } from "@/lib/ai/types";
-import type { Db } from "@/lib/db/types";
+import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
+import type { Tool } from "@/lib/ai/tools";
 import type { WaSender } from "@/lib/wa/sender";
+import { createConnectLinkToken } from "@/lib/ms/connect-link";
 
 /** Everything a bot handler needs — injected so tests run with MemoryDb + RecordingWaSender + MockProvider. */
 export interface BotContext {
@@ -10,12 +12,20 @@ export interface BotContext {
   now: () => Date;
   /** public site URL (APP_URL) for links sent in chat */
   appUrl: string;
+  /** provider tools (Graph / Google) for the strong model, by user and connections */
+  extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
 }
 
 export const LINK = {
   maxTokenAttempts: 3,
   blockMs: 24 * 3_600_000,
 } as const;
+
+/** One-time 30-minute OAuth start link for the chat (Microsoft now; Google in Milestone 6 lands on /start/connect). */
+export function connectLinkFor(ctx: BotContext, userId: string, provider: "microsoft" | "google"): string {
+  if (provider === "google") return new URL("/start/connect", ctx.appUrl).toString();
+  return new URL(`/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(userId, provider, { now: ctx.now() }))}`, ctx.appUrl).toString();
+}
 
 export function siteLink(ctx: BotContext, path: string): string {
   return new URL(path, ctx.appUrl).toString();

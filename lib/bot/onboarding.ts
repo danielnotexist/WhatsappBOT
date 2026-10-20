@@ -1,7 +1,7 @@
 import { copy, buttons, lists } from "@/lib/copy/bot";
 import type { Db, UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
-import type { BotContext } from "./context";
+import { connectLinkFor, type BotContext } from "./context";
 
 /**
  * First-contact state machine (PLAN §1), persisted in users.profile.onboarding:
@@ -121,9 +121,8 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
     }
     case "connect": {
       if (reply === "onb:connect:microsoft" || reply === "onb:connect:google") {
-        // The one-time OAuth link is issued by Milestone 4/6; until then point to the site.
         const provider = reply.endsWith("microsoft") ? "Microsoft 365" : "Google";
-        await ctx.wa.sendText(to, copy["onb.connect_link"](provider, new URL("/start/connect", ctx.appUrl).toString()));
+        await ctx.wa.sendText(to, copy["onb.connect_link"](provider, connectLinkFor(ctx, user.id, reply.endsWith("microsoft") ? "microsoft" : "google")));
         await finish(ctx, user.id, to);
         return true;
       }
