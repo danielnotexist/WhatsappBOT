@@ -6,7 +6,7 @@ import { globalSingleton } from "@/lib/global-singleton";
  * Sub-keys derived from TOKEN_ENC_KEY with HKDF, so one secret in Vercel covers token encryption,
  * session signing and OTP hashing without three env vars. Different `info` → independent keys.
  */
-export type KeyPurpose = "session" | "otp";
+export type KeyPurpose = "session" | "otp" | "internal";
 
 function masterKey(): Buffer {
   const fromEnv = process.env.TOKEN_ENC_KEY;
