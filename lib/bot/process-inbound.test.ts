@@ -34,7 +34,7 @@ describe("processInbound", () => {
     const r = await processInbound(h.ctx, h.inbound("שאלה 11"));
     expect(r.note).toBe("quota exhausted");
     expect(h.wa.texts.at(-1)).toContain("10 ההודעות של הניסיון נגמרו");
-    expect(h.wa.texts.at(-1)).toContain("https://app.example.co.il/account");
+    expect(h.wa.texts.at(-1)).toMatch(/https:\/\/app\.example\.co\.il\/pay\/\S+/);
     // button presses do not count
     const usage = await h.db.getCurrentUsage(user.id);
     expect(usage?.counted_messages).toBe(10);

@@ -52,6 +52,10 @@ app/
   api/auth/otp/send     POST {email} → קוד במייל (Resend) · api/auth/otp/verify POST {email, code} → עוגיית session
   api/wa/webhook        GET אימות רישום (WA_VERIFY_TOKEN) · POST אימות X-Hub-Signature-256 על ה-body הגולמי → תור (QStash / מקומי) → 200 מיידי
   api/wa/worker         מריץ משימה אחת מהתור (אימות חתימת QStash או סוד פנימי) → lib/bot
+  pay/[token]/          דף תשלום אישי (קישור חתום מהשיחה, בלי session): בחירת מסלול → HYP
+  api/pay/return        ה-success URL של HYP: APISign VERIFY → getToken → הפעלת מנוי + משימת חיוב חודשית → הודעה בוואטסאפ
+  api/pay/mock          DATA_MODE=memory בלבד — מדמה את דף התשלום של HYP
+  api/jobs/run          worker למשימות מתוזמנות (pg_cron → QStash): charge (אבני דרך 5: סיכום בוקר, תזכורות)
   api/health/route.ts   בדיקת חיות
 components/ui/          shadcn: button, input, card, input-otp, dialog, sonner, direction (נוצרו ב-CLI, RTL-aware)
 lib/
@@ -70,7 +74,8 @@ lib/
   copy/bot.ts           כל הטקסטים של הבוט לפי ה-ids ב-docs/copy/bot-copy.md (בדיקה מוודאת שכל id מתועד)
   product.ts            PRODUCT_NAME = "{{שם}}" עד שייבחר שם
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
-  hyp/sign.ts           HYP APISign: בניית SIGN / VERIFY, URL דף תשלום, פרסור תשובות, redact ללוגים
+  hyp/                  sign.ts (APISign SIGN/VERIFY), client.ts (HypClient: דף תשלום, VERIFY, getToken, soft עם טוקן + SendHesh, PrintHesh; MockHypGateway), index.ts
+  billing/              plans.ts (99/750, 299/3000, ימי ניסיון חוזר 1/3/5), pay-link.ts (קישור /pay/<token> חתום, 7 ימים), subscription.ts (מכונת מצבים: הפעלה, חיוב חודשי, past_due), service.ts (startPayment, completePayment, runChargeJob + הודעות/תבניות)
 proxy.ts                כותרות אבטחה (CSP report-only, HSTS, nosniff, referrer, permissions). ב-Next 16 זה השם של middleware
 docs/                   תוכנית (PLAN.md), יומן התקדמות (PROGRESS.md), טקסטים (copy/), משפטי (legal/)
 scripts/, supabase/, design/   נכתבים בנפרד; מוחרגים מ-lint/typecheck/prettier/vitest

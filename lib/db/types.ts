@@ -76,6 +76,43 @@ export interface SubscriptionRow {
   next_charge_at: string | null;
   cancelled_at: string | null;
   started_at: string | null;
+  charge_failures: number;
+  /** card expiry YYMM from HYP getToken */
+  hyp_tokef: string | null;
+}
+
+/** Only the billing module reads the encrypted token (separate call, never listed with the row). */
+export interface SubscriptionSecret {
+  hyp_token_enc: string | null;
+  hyp_tokef: string | null;
+}
+
+export interface PaymentRow {
+  id: string;
+  user_id: string;
+  hyp_trans_id: string;
+  amount_ils: number;
+  ccode: string;
+  acode: string | null;
+  invoice_url: string | null;
+  raw: Record<string, unknown>;
+  created_at: string;
+}
+
+export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry";
+export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+
+export interface JobRow {
+  id: string;
+  user_id: string | null;
+  kind: JobKind;
+  run_at: string;
+  payload: Record<string, unknown>;
+  status: JobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  dedupe_key: string | null;
 }
 
 export interface UsageRow {
@@ -223,6 +260,20 @@ export interface Db {
   getSubscription(userId: string): Promise<SubscriptionRow | null>;
   cancelSubscription(userId: string): Promise<SubscriptionRow | null>;
   getCurrentUsage(userId: string): Promise<UsageRow | null>;
+  upsertSubscription(userId: string, patch: Partial<Omit<SubscriptionRow, "id" | "user_id">> & { hyp_token_enc?: string | null }): Promise<SubscriptionRow>;
+  getSubscriptionSecret(userId: string): Promise<SubscriptionSecret | null>;
+  /** subscriptions whose next_charge_at <= now and that still have a token (active / past_due) */
+  listSubscriptionsDue(now: Date, limit: number): Promise<SubscriptionRow[]>;
+
+  // payments
+  /** null when hyp_trans_id already recorded (idempotent redirect / retry) */
+  insertPayment(row: Omit<PaymentRow, "id" | "created_at">): Promise<PaymentRow | null>;
+  listPayments(userId: string, limit: number): Promise<PaymentRow[]>;
+
+  // jobs (pg_cron claims and dispatches; the worker finishes)
+  createJob(job: { kind: JobKind; user_id: string | null; run_at: Date; payload?: Record<string, unknown>; dedupe_key?: string | null; max_attempts?: number }): Promise<JobRow | null>;
+  finishJob(id: string, error?: string | null, retryAt?: Date | null): Promise<JobRow | null>;
+  cancelJobs(userId: string, kind: JobKind): Promise<number>;
 
   // audit
   addAudit(entry: AuditEntry): Promise<void>;

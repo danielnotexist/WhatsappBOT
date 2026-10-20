@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { MockProvider } from "@/lib/ai/mock";
 import { MemoryDb } from "@/lib/db/memory";
 import { RecordingWaSender } from "@/lib/wa/sender";
@@ -6,6 +7,7 @@ import type { BotContext } from "./context";
 
 /** In-memory bot stack for tests (used across the bot test files). */
 export function makeHarness(start = new Date("2026-10-20T08:00:00Z")) {
+  process.env.TOKEN_ENC_KEY ||= randomBytes(32).toString("base64"); // pay links / sessions derive keys from it
   let now = start;
   const db = new MemoryDb();
   db.now = () => now;

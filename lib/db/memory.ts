@@ -4,6 +4,10 @@ import type {
   ConnectionRow,
   ConversationStateRow,
   Db,
+  JobKind,
+  JobRow,
+  PaymentRow,
+  SubscriptionSecret,
   LinkAttemptResult,
   LinkTokenRow,
   MessageRow,
@@ -37,6 +41,9 @@ export class MemoryDb implements Db {
   states = new Map<string, ConversationStateRow>();
   pendingActions: PendingActionRow[] = [];
   linkAttempts = new Map<string, { attempts: number; last: number; blockedUntil: number | null }>();
+  secrets = new Map<string, SubscriptionSecret>();
+  payments: PaymentRow[] = [];
+  jobs: JobRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
 
@@ -308,6 +315,67 @@ export class MemoryDb implements Db {
     return row;
   }
 
+  async upsertSubscription(userId: string, patch: Partial<Omit<SubscriptionRow, "id" | "user_id">> & { hyp_token_enc?: string | null }): Promise<SubscriptionRow> {
+    const { hyp_token_enc, ...rest } = patch;
+    const cur = this.subscriptions.get(userId) ?? { id: randomUUID(), user_id: userId, plan: "trial" as const, status: "trial" as const, next_charge_at: null, cancelled_at: null, started_at: null, charge_failures: 0, hyp_tokef: null };
+    const next: SubscriptionRow = { ...cur, ...rest };
+    this.subscriptions.set(userId, next);
+    if (hyp_token_enc !== undefined || rest.hyp_tokef !== undefined) {
+      const sec = this.secrets.get(userId) ?? { hyp_token_enc: null, hyp_tokef: null };
+      this.secrets.set(userId, { hyp_token_enc: hyp_token_enc === undefined ? sec.hyp_token_enc : hyp_token_enc, hyp_tokef: rest.hyp_tokef === undefined ? sec.hyp_tokef : rest.hyp_tokef });
+    }
+    return next;
+  }
+
+  async getSubscriptionSecret(userId: string): Promise<SubscriptionSecret | null> {
+    return this.subscriptions.has(userId) ? (this.secrets.get(userId) ?? { hyp_token_enc: null, hyp_tokef: null }) : null;
+  }
+
+  async listSubscriptionsDue(now: Date, limit: number): Promise<SubscriptionRow[]> {
+    return [...this.subscriptions.values()]
+      .filter((s) => (s.status === "active" || s.status === "past_due") && s.next_charge_at && Date.parse(s.next_charge_at) <= now.getTime() && this.secrets.get(s.user_id)?.hyp_token_enc)
+      .slice(0, limit);
+  }
+
+  async insertPayment(row: Omit<PaymentRow, "id" | "created_at">): Promise<PaymentRow | null> {
+    if (this.payments.some((p) => p.hyp_trans_id === row.hyp_trans_id)) return null;
+    const full: PaymentRow = { ...row, id: randomUUID(), created_at: iso(this.now()) };
+    this.payments.push(full);
+    return full;
+  }
+
+  async listPayments(userId: string, limit: number): Promise<PaymentRow[]> {
+    return this.payments.filter((p) => p.user_id === userId).slice(-limit).reverse();
+  }
+
+  async createJob(job: { kind: JobKind; user_id: string | null; run_at: Date; payload?: Record<string, unknown>; dedupe_key?: string | null; max_attempts?: number }): Promise<JobRow | null> {
+    if (job.dedupe_key && this.jobs.some((j) => j.dedupe_key === job.dedupe_key)) return null;
+    const row: JobRow = { id: randomUUID(), user_id: job.user_id, kind: job.kind, run_at: iso(job.run_at), payload: job.payload ?? {}, status: "queued", attempts: 0, max_attempts: job.max_attempts ?? 3, last_error: null, dedupe_key: job.dedupe_key ?? null };
+    this.jobs.push(row);
+    return row;
+  }
+
+  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null): Promise<JobRow | null> {
+    const job = this.jobs.find((j) => j.id === id);
+    if (!job) return null;
+    if (!error) job.status = "done";
+    else if (job.attempts < job.max_attempts) {
+      job.status = "queued";
+      job.last_error = error;
+      job.run_at = iso(retryAt ?? new Date(this.now().getTime() + 5 * 60_000 * 2 ** Math.max(job.attempts - 1, 0)));
+    } else {
+      job.status = "failed";
+      job.last_error = error;
+    }
+    return job;
+  }
+
+  async cancelJobs(userId: string, kind: JobKind): Promise<number> {
+    let n = 0;
+    for (const j of this.jobs) if (j.user_id === userId && j.kind === kind && j.status === "queued") { j.status = "cancelled"; n++; }
+    return n;
+  }
+
   async getCurrentUsage(userId: string): Promise<UsageRow | null> {
     const rows = this.usage.filter((u) => u.user_id === userId);
     return rows.length ? rows[rows.length - 1]! : null;
@@ -344,6 +412,8 @@ export class MemoryDb implements Db {
       next_charge_at: status === "active" ? iso(new Date(Date.now() + 20 * 86_400_000)) : null,
       cancelled_at: null,
       started_at: iso(),
+      charge_failures: 0,
+      hyp_tokef: null,
     };
     this.subscriptions.set(userId, row);
     return row;

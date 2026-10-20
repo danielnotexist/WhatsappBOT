@@ -6,6 +6,10 @@ import type {
   ConnectionRow,
   ConversationStateRow,
   Db,
+  JobKind,
+  JobRow,
+  PaymentRow,
+  SubscriptionSecret,
   LinkAttemptResult,
   LinkTokenRow,
   MessageRow,
@@ -41,7 +45,9 @@ export class SupabaseDb implements Db {
   private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,created_at";
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,created_at,revoked_at";
-  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at";
+  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef";
+  private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at";
+  private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
 
   private fail(op: string, error: { message: string } | null): never {
     throw new Error(`Supabase ${op}: ${error?.message ?? "unknown error"}`);
@@ -389,6 +395,75 @@ export class SupabaseDb implements Db {
       .maybeSingle();
     if (error) this.fail("cancelSubscription", error);
     return (data as unknown as SubscriptionRow | null) ?? null;
+  }
+
+  async upsertSubscription(userId: string, patch: Partial<Omit<SubscriptionRow, "id" | "user_id">> & { hyp_token_enc?: string | null }): Promise<SubscriptionRow> {
+    const { data, error } = await this.client
+      .from("subscriptions")
+      .upsert({ user_id: userId, ...patch }, { onConflict: "user_id" })
+      .select(SupabaseDb.SUB_COLS)
+      .single();
+    if (error) this.fail("upsertSubscription", error);
+    return data as unknown as SubscriptionRow;
+  }
+
+  async getSubscriptionSecret(userId: string): Promise<SubscriptionSecret | null> {
+    const { data, error } = await this.client.from("subscriptions").select("hyp_token_enc,hyp_tokef").eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getSubscriptionSecret", error);
+    return (data as unknown as SubscriptionSecret | null) ?? null;
+  }
+
+  async listSubscriptionsDue(now: Date, limit: number): Promise<SubscriptionRow[]> {
+    const { data, error } = await this.client
+      .from("subscriptions")
+      .select(SupabaseDb.SUB_COLS)
+      .in("status", ["active", "past_due"])
+      .lte("next_charge_at", now.toISOString())
+      .not("hyp_token_enc", "is", null)
+      .order("next_charge_at", { ascending: true })
+      .limit(limit);
+    if (error) this.fail("listSubscriptionsDue", error);
+    return (data as unknown as SubscriptionRow[]) ?? [];
+  }
+
+  async insertPayment(row: Omit<PaymentRow, "id" | "created_at">): Promise<PaymentRow | null> {
+    const { data, error } = await this.client.from("payments").insert(row).select(SupabaseDb.PAY_COLS).single();
+    if (error) {
+      if (error.code === "23505") return null;
+      this.fail("insertPayment", error);
+    }
+    return data as unknown as PaymentRow;
+  }
+
+  async listPayments(userId: string, limit: number): Promise<PaymentRow[]> {
+    const { data, error } = await this.client.from("payments").select(SupabaseDb.PAY_COLS).eq("user_id", userId).order("created_at", { ascending: false }).limit(limit);
+    if (error) this.fail("listPayments", error);
+    return (data as unknown as PaymentRow[]) ?? [];
+  }
+
+  async createJob(job: { kind: JobKind; user_id: string | null; run_at: Date; payload?: Record<string, unknown>; dedupe_key?: string | null; max_attempts?: number }): Promise<JobRow | null> {
+    const { data, error } = await this.client
+      .from("jobs")
+      .insert({ kind: job.kind, user_id: job.user_id, run_at: job.run_at.toISOString(), payload: job.payload ?? {}, dedupe_key: job.dedupe_key ?? null, max_attempts: job.max_attempts ?? 3 })
+      .select(SupabaseDb.JOB_COLS)
+      .single();
+    if (error) {
+      if (error.code === "23505") return null;
+      this.fail("createJob", error);
+    }
+    return data as unknown as JobRow;
+  }
+
+  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null): Promise<JobRow | null> {
+    const { data, error: rpcError } = await this.client.rpc("finish_job", { p_job_id: id, p_error: error, p_retry_at: retryAt ? retryAt.toISOString() : null });
+    if (rpcError) this.fail("finishJob", rpcError);
+    return (data as unknown as JobRow | null) ?? null;
+  }
+
+  async cancelJobs(userId: string, kind: JobKind): Promise<number> {
+    const { data, error } = await this.client.from("jobs").update({ status: "cancelled" }).eq("user_id", userId).eq("kind", kind).eq("status", "queued").select("id");
+    if (error) this.fail("cancelJobs", error);
+    return data?.length ?? 0;
   }
 
   async getCurrentUsage(userId: string): Promise<UsageRow | null> {

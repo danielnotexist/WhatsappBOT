@@ -74,6 +74,20 @@ export const copy = {
   "bill.trial_ended": (name: string | null, payLink: string) =>
     `${name ? `${name}, 10 ההודעות של הניסיון נגמרו. תודה שניסית.` : "10 ההודעות של הניסיון נגמרו. תודה שניסית."}\n\nכדי להמשיך — מנוי של 99 ₪ לחודש (עד 750 הודעות), ביטול בכל רגע:\n${payLink}\n\nההודעה האחרונה שלך שמורה אצלי. ברגע שהתשלום יעבור, אמשיך ממנה.`,
   "bill.trial_ended_repeat": (payLink: string) => `הניסיון הסתיים. אני כאן ברגע שהמנוי יופעל:\n${payLink}`,
+  "bill.payment_success": (planName: string, invoiceNote: string) => `החשבון פעיל. תודה.\nמסלול ${planName}, ${invoiceNote}\n\nממשיך מאיפה שעצרנו.`,
+  "bill.payment_success_no_pending": (planName: string, invoiceNote: string) => `החשבון פעיל. תודה.\nמסלול ${planName}, ${invoiceNote}\n\nמה עושים קודם?`,
+  "bill.payment_failed_initial": (payLink: string) => `התשלום לא עבר. לפעמים זה הבנק, לפעמים ספרה שגויה.\nאפשר לנסות שוב, גם עם כרטיס אחר:\n${payLink}`,
+  "bill.past_due_day1": (amount: string, updateLink: string) => `החיוב החודשי (${amount} ₪) לא עבר הפעם. השירות ממשיך כרגיל, ואנסה שוב בעוד יומיים.\nאם הכרטיס התחלף — אפשר לעדכן כאן:\n${updateLink}`,
+  "bill.past_due_day3": (updateLink: string) => `ניסיתי שוב לחייב והתשלום עדיין לא עובר. כדאי לבדוק עם הבנק או לעדכן כרטיס:\n${updateLink}\nניסיון אחרון בעוד יומיים; אחריו החשבון יושהה עד להסדרה.`,
+  "bill.past_due_day5": (updateLink: string) => `החיוב לא עבר גם בניסיון השלישי, והחשבון מושהה. כל ההגדרות והחיבורים שמורים.\nברגע שהתשלום יוסדר — ממשיכים מאותו מקום:\n${updateLink}`,
+  "bill.past_due_blocked_reply": (updateLink: string) => `החשבון מושהה עד להסדרת התשלום:\n${updateLink}`,
+  "bill.reactivated": () => "החשבון פעיל שוב. ממשיכים.",
+  "bill.cancel_confirm": (periodEnd: string) => `לבטל את המנוי? הוא יישאר פעיל עד ${periodEnd}, ואחרי זה לא יחויב. ההגדרות נשמרות 90 יום למקרה שתרצו לחזור.`,
+  "bill.cancelled": (periodEnd: string) => `המנוי בוטל. אפשר להמשיך להשתמש עד ${periodEnd}. לחזור בכל רגע — פשוט לכתוב "חדש מנוי".`,
+  "bill.cancel_kept": () => "המנוי נשאר פעיל. לא שיניתי כלום.",
+  "bill.plan_limit_reached": (resetDate: string, upgradeLink: string) => `הגעת ל-750 ההודעות של המסלול הבסיסי החודש. המכסה מתחדשת ב-${resetDate}.\n\nכדי להמשיך כבר עכשיו — מסלול פרו (299 ₪): עד 3,000 הודעות, סוכנים מובנים ואוטומציות:\n${upgradeLink}\n\nתזכורות וסיכום הבוקר ממשיכים לעבוד כרגיל.`,
+  "bill.upgraded": () => `עברת למסלול פרו. המכסה החודשית עודכנה ל-3,000 הודעות, והסוכנים המובנים זמינים — "מה הסוכנים יודעים לעשות?" יסביר.`,
+  "bill.status": (s: { planName: string; used: number; limit: number; nextCharge: string; amount: string }) => `*המנוי שלך*\nמסלול: ${s.planName}\nהודעות החודש: ${s.used} מתוך ${s.limit}\nחיוב הבא: ${s.nextCharge}, ${s.amount} ₪\n\nלשנות מסלול או לבטל — פשוט לכתוב.`,
 
   // ---- 7. meta ----
   "meta.capabilities": (connected: string) =>
@@ -97,6 +111,10 @@ export const buttons = {
     { id: "onb:connect:microsoft", title: "Microsoft 365" },
     { id: "onb:connect:google", title: "Google" },
     { id: "onb:connect:later", title: "אחר כך" },
+  ] satisfies ReplyButton[],
+  cancelSubscription: [
+    { id: "bill:cancel:yes", title: "בטל מנוי" },
+    { id: "bill:cancel:no", title: "השאר פעיל" },
   ] satisfies ReplyButton[],
   /** approval buttons for a pending action; `kind` picks the first label (שלח / קבע) */
   approve: (actionId: string, firstLabel = "שלח") =>

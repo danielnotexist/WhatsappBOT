@@ -1,6 +1,8 @@
 import { maybeSummarize } from "@/lib/ai/memory";
 import { runAssistant } from "@/lib/ai/orchestrator";
 import { AiProviderError } from "@/lib/ai/types";
+import { payLinkFor } from "@/lib/billing/pay-link";
+import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import type { MessageType } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -58,12 +60,36 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   const text = (msg.text ?? "").trim();
   if (!text) return { handled: true, note: "empty" };
 
-  // 5. trial / plan counter (PLAN §3) — Milestone 3 adds the payment link
+  // 5. billing gates (PLAN §3/§4): suspended account, trial / monthly quota
+  const sub = await ctx.db.getSubscription(user.id);
+  const payLink = payLinkFor(ctx.appUrl, user.id);
+  if (sub?.status === "past_due") {
+    const lastBlock = typeof user.profile.past_due_notified_at === "string" ? Date.parse(user.profile.past_due_notified_at) : 0;
+    if (ctx.now().getTime() - lastBlock > 24 * 3_600_000) {
+      await ctx.db.mergeUserProfile(user.id, { past_due_notified_at: ctx.now().toISOString(), pending_input: text });
+      await say(copy["bill.past_due_blocked_reply"](payLink));
+    }
+    return { handled: true, note: "past_due" };
+  }
   const remaining = await ctx.db.countTrialMessage(user.id);
   if (remaining < 0) {
-    const sub = await ctx.db.getSubscription(user.id);
-    const payLink = new URL("/account", ctx.appUrl).toString();
-    await say(sub && sub.status !== "trial" ? copy["bill.trial_ended_repeat"](payLink) : copy["bill.trial_ended"](user.name, payLink));
+    const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
+    if (paidPlan === "basic") {
+      const now = ctx.now();
+      const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+      await say(copy["bill.plan_limit_reached"](`${reset.getUTCDate()}.${reset.getUTCMonth() + 1}`, payLink));
+    } else if (paidPlan === "pro") {
+      await say(copy["err.rate_limit"]());
+    } else {
+      const lastNotice = typeof user.profile.trial_ended_notified_at === "string" ? Date.parse(user.profile.trial_ended_notified_at) : 0;
+      const first = !lastNotice;
+      await ctx.db.mergeUserProfile(user.id, { pending_input: text, trial_ended_notified_at: ctx.now().toISOString() });
+      if (first) await say(copy["bill.trial_ended"](user.name, payLink));
+      else if (ctx.now().getTime() - lastNotice > 24 * 3_600_000) {
+        await ctx.db.mergeUserProfile(user.id, { trial_ended_notified_at: ctx.now().toISOString() });
+        await say(copy["bill.trial_ended_repeat"](payLink));
+      }
+    }
     return { handled: true, note: "quota exhausted" };
   }
 
@@ -86,8 +112,9 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   }
 
   // 7. trial nudges (appended as a separate short bubble; not counted)
-  if (remaining === 3) await say(copy["bill.trial_left_3"]());
-  else if (remaining === 1) await say(copy["bill.trial_left_1"](new URL("/account", ctx.appUrl).toString()));
+  const onTrial = !(sub && isPaidPlan(sub.plan) && sub.status !== "trial");
+  if (remaining === 3 && onTrial) await say(copy["bill.trial_left_3"]());
+  else if (remaining === 1 && onTrial) await say(copy["bill.trial_left_1"](payLink));
 
   // 8. onboarding continues after the first task
   await afterFirstTask(ctx, freshUser, to);
