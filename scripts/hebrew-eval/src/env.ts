@@ -14,6 +14,14 @@ export function loadDotEnv(): void {
   } catch (e) {
     console.warn(`אזהרה: לא הצלחתי לקרוא את ${file}: ${(e as Error).message}`);
   }
+  applyEnvAliases();
+}
+
+/** GOOGLE_API_KEY is accepted as an alias of GEMINI_API_KEY (Google's own docs use both names). */
+export function applyEnvAliases(): void {
+  if (!process.env.GEMINI_API_KEY?.trim() && process.env.GOOGLE_API_KEY?.trim()) {
+    process.env.GEMINI_API_KEY = process.env.GOOGLE_API_KEY;
+  }
 }
 
 export class MissingEnvError extends Error {

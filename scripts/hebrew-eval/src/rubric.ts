@@ -30,8 +30,10 @@ ${DEFAULT_DIMENSIONS.map((d) => `## ${d.id} — ${d.label}\n${d.description}`).j
 export function parseDimensions(markdown: string | undefined): { dimensions: Dimension[]; source: 'rubric.md' | 'default' } {
   if (!markdown) return { dimensions: DEFAULT_DIMENSIONS, source: 'default' };
   const found = new Map<string, Dimension>();
+  // dataset/rubric.md names the Hebrew dimension `hebrew_naturalness`; the report keys on `hebrew`.
+  const ALIASES: Record<string, string> = { hebrew_naturalness: 'hebrew', hebrew_quality: 'hebrew' };
   const add = (id: string, rest: string) => {
-    const key = id.toLowerCase();
+    const key = ALIASES[id.toLowerCase()] ?? id.toLowerCase();
     if (found.has(key)) return;
     const label = rest.replace(/^[\s—–\-:|*]+/, '').replace(/[|*]+$/, '').trim().split(/[|—–\-:]/)[0]?.trim() || key;
     found.set(key, { id: key, label, description: rest.trim() });
