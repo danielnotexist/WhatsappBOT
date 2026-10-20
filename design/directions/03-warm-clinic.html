@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>קליניקה חמה</title>
+<meta name="description" content="כיוון עיצוב 3 לדף הנחיתה: אפור חם, טורקיז עמוק ואקסנט אלמוגי. Karantina לכותרת הראשית + Heebo לגוף. מעוגל, ידידותי, mobile-first.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Google Fonts css2 serves the hebrew + latin subsets automatically via unicode-range -->
+<link href="https://fonts.googleapis.com/css2?family=Karantina:wght@400;700&family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+/* Direction 3 — "warm clinic": warm grey paper, deep teal as the working colour, one coral accent for
+   the thing we want the eye on (CTA, step numbers). Everything rounded, soft shadows, friendly rhythm.
+   Mobile-first: single column by default, grid only from 760px / 960px. */
+:root{
+  --paper:#F4F2EF;        /* warm grey */
+  --paper-2:#EAE6E1;      /* bands */
+  --card:#FFFFFF;
+  --ink:#1E2A2E;          /* near-black with a teal tint */
+  --ink-2:#5A6670;        /* secondary text */
+  --teal:#0E6B68;         /* deep teal — buttons, icons, links */
+  --teal-2:#128C88;       /* lighter teal for hover/accents */
+  --teal-soft:#D6ECEA;    /* icon circles, soft backgrounds */
+  --coral:#EF6A58;        /* the accent — one per screen */
+  --coral-soft:#FBE3DE;
+  --line:rgba(30,42,46,.12);
+  --shadow:0 10px 30px -14px rgba(30,42,46,.25);
+  --wa-bg:#EFE7DD; --wa-in:#FFFFFF; --wa-out:#D9FDD3; --wa-fg:#111B21; --wa-head:#008069; --wa-btn:#027EB5; --wa-time:#667781; --wa-chip:#FFFFFF;
+  --font-display:'Karantina','Impact','Arial Narrow',sans-serif;
+  --font-body:'Heebo','Arial Hebrew',Arial,sans-serif;
+  --r:20px; --r-sm:12px; --pill:999px;
+  --s-1:.9rem; --s0:1.0625rem; --s1:1.2rem; --s2:1.5rem; --s3:2rem; --s4:clamp(3.4rem,9vw,6.4rem);
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#16191B; --paper-2:#1E2326; --card:#22282B; --ink:#ECEAE6; --ink-2:#AEB6BA; --teal:#4FC3BE; --teal-2:#7AD6D2; --teal-soft:#173A39; --coral:#FF8A7A; --coral-soft:#4A2A25;
+    --line:rgba(236,234,230,.14); --shadow:0 10px 30px -14px rgba(0,0,0,.6);
+    --wa-bg:#0B141A; --wa-in:#202C33; --wa-out:#005C4B; --wa-fg:#E9EDEF; --wa-head:#1F2C34; --wa-btn:#53BDEB; --wa-time:#8696A0; --wa-chip:#182229;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#16191B; --paper-2:#1E2326; --card:#22282B; --ink:#ECEAE6; --ink-2:#AEB6BA; --teal:#4FC3BE; --teal-2:#7AD6D2; --teal-soft:#173A39; --coral:#FF8A7A; --coral-soft:#4A2A25;
+  --line:rgba(236,234,230,.14); --shadow:0 10px 30px -14px rgba(0,0,0,.6);
+  --wa-bg:#0B141A; --wa-in:#202C33; --wa-out:#005C4B; --wa-fg:#E9EDEF; --wa-head:#1F2C34; --wa-btn:#53BDEB; --wa-time:#8696A0; --wa-chip:#182229;
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:16px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:var(--s0);line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+img,svg{max-width:100%}
+h1,h2,h3{margin:0;line-height:1.15;text-wrap:balance}
+h1{font-family:var(--font-display);font-weight:700;line-height:.95;letter-spacing:.005em}
+h2,h3{font-weight:800}
+p{margin:0}
+a{color:inherit}
+button{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--coral);outline-offset:3px;border-radius:6px}
+.skip{position:absolute;inset-inline-start:16px;top:-60px;background:var(--teal);color:#fff;padding:.6em 1em;z-index:50;border-radius:var(--pill)}
+.skip:focus{top:12px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.wrap{max-width:1120px;margin-inline:auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+@media (min-width:760px){.wrap{padding-left:max(32px,env(safe-area-inset-left,0px));padding-right:max(32px,env(safe-area-inset-right,0px))}}
+
+/* --- top --- */
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:14px}
+.top nav{display:none;gap:24px;font-weight:500;font-size:var(--s-1)}
+.top nav a{text-decoration:none;color:var(--ink-2);padding:.4em .2em}
+.top nav a:hover{color:var(--teal)}
+@media (min-width:900px){.top nav{display:flex}}
+.name{display:inline-flex;align-items:center;gap:.5em;font-weight:800;font-size:1.05rem;line-height:1;padding:.55em .9em;border-radius:var(--pill);color:var(--teal);background:var(--teal-soft);text-decoration:none;white-space:nowrap}
+.name .dot{width:10px;height:10px;border-radius:50%;background:var(--coral);flex:none}
+.name small{font-weight:500;font-size:.72rem;color:var(--ink-2)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5em;font-weight:700;background:var(--teal);color:#fff;padding:.9em 1.6em;border-radius:var(--pill);border:0;text-decoration:none;cursor:pointer;transition:background .2s,transform .2s,box-shadow .2s;box-shadow:0 8px 20px -10px rgba(14,107,104,.6)}
+.btn:hover{background:var(--teal-2);transform:translateY(-1px)}
+.btn:active{transform:translateY(1px)}
+.btn.sm{padding:.65em 1.15em;font-size:var(--s-1);box-shadow:none}
+.btn.coral{background:var(--coral);color:#1E1412;box-shadow:0 10px 24px -10px rgba(239,106,88,.7)}
+.btn.coral:hover{background:#F58070}
+.btn.ghost{background:transparent;color:var(--teal);border:2px solid var(--teal);box-shadow:none}
+.btn.ghost:hover{background:var(--teal-soft);transform:none}
+
+/* --- hero --- */
+.hero{display:grid;gap:36px;padding-block:28px 56px;position:relative}
+@media (min-width:960px){.hero{grid-template-columns:1.05fr .95fr;align-items:center;gap:56px;padding-block:48px 88px;min-height:min(82vh,800px)}}
+.hero .lede{display:grid;gap:22px;max-width:36rem}
+.hero h1{font-size:var(--s4);color:var(--ink)}
+.hero h1 .hl{color:var(--teal);position:relative;display:inline-block}
+.hero h1 .hl::after{content:"";position:absolute;inset-inline:0;bottom:.08em;height:.16em;background:var(--coral);border-radius:var(--pill);opacity:.9;z-index:-1}
+.hero .sub{font-size:var(--s1);color:var(--ink-2);max-width:31rem;line-height:1.55}
+.pill{display:inline-flex;align-items:center;gap:.5em;font-size:.82rem;font-weight:700;color:var(--teal);background:var(--teal-soft);padding:.45em .95em;border-radius:var(--pill);width:max-content;max-width:100%}
+.pill svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.cta-row{display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px}
+.cta-row .note{font-size:var(--s-1);color:var(--ink-2);display:inline-flex;align-items:center;gap:.4em}
+.cta-row .note svg{width:18px;height:18px;stroke:var(--teal);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.proof{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:var(--s-1);color:var(--ink-2)}
+.proof span{display:inline-flex;align-items:center;gap:.4em}
+.proof span::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--teal)}
+
+/* --- phone --- */
+.phone-wrap{display:grid;justify-items:center;gap:14px;position:relative}
+.blob{position:absolute;inset:auto;width:min(92%,380px);aspect-ratio:1;border-radius:46% 54% 50% 50%/55% 45% 55% 45%;background:var(--teal-soft);top:28px;z-index:0;opacity:.9}
+.blob.c{width:120px;background:var(--coral-soft);top:auto;bottom:40px;inset-inline-start:0;border-radius:50%}
+.phone{position:relative;z-index:1;width:min(100%,330px);background:#101416;border-radius:44px;padding:11px;box-shadow:0 36px 70px -30px rgba(20,30,34,.6),0 0 0 1px rgba(0,0,0,.25)}
+.screen{position:relative;border-radius:34px;overflow:hidden;background:var(--wa-bg);display:flex;flex-direction:column;height:600px;color:var(--wa-fg);font-family:var(--font-body);
+  background-image:radial-gradient(rgba(0,0,0,.045) 1px,transparent 1.2px);background-size:14px 14px}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:96px;height:22px;background:#101416;border-radius:999px;z-index:3}
+.wa-head{display:flex;align-items:center;gap:10px;padding:38px 12px 10px;background:var(--wa-head);color:#fff}
+.wa-head .av{width:36px;height:36px;border-radius:50%;background:var(--coral);display:grid;place-items:center;font-weight:800;font-size:.9rem;color:#1E1412;flex:none}
+.wa-head b{display:block;font-size:.95rem;line-height:1.2}
+.wa-head small{display:block;font-size:.72rem;opacity:.85;line-height:1.2}
+.log{flex:1;min-height:0;overflow-y:auto;padding:12px 10px;display:flex;flex-direction:column;gap:6px;scrollbar-width:none;overscroll-behavior:contain}
+.log::-webkit-scrollbar{display:none}
+.log>*{flex-shrink:0}
+.chip{align-self:center;background:var(--wa-chip);color:var(--wa-time);font-size:.72rem;padding:.3em .8em;border-radius:8px;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.msg{position:relative;max-width:88%;padding:7px 9px 19px;border-radius:12px;font-size:.88rem;line-height:1.42;box-shadow:0 1px .5px rgba(0,0,0,.12);white-space:pre-line;word-break:break-word}
+.msg.m-in{background:var(--wa-in);align-self:flex-start;border-start-start-radius:3px}
+.msg.m-out{background:var(--wa-out);align-self:flex-end;border-start-end-radius:3px;margin-bottom:10px}
+.msg .time{position:absolute;bottom:3px;inset-inline-end:8px;font-size:.66rem;color:var(--wa-time);display:inline-flex;gap:3px;align-items:center}
+.msg .ticks{color:#53BDEB;font-style:normal}
+.msg.voice{display:flex;align-items:center;gap:8px;padding-bottom:19px;min-width:200px;white-space:normal}
+.msg.voice .play{width:30px;height:30px;border-radius:50%;background:var(--wa-time);display:grid;place-items:center;flex:none}
+.msg.voice .play svg{width:14px;height:14px;fill:#fff}
+.msg.voice .wave{flex:1;height:22px;display:flex;align-items:center;gap:2px}
+.msg.voice .wave i{display:block;width:3px;border-radius:2px;background:var(--wa-time);height:var(--h,8px)}
+.msg.voice .len{font-size:.7rem;color:var(--wa-time)}
+.msg .tr{display:block;font-size:.8rem;color:var(--wa-time);margin-top:4px;white-space:pre-line}
+.react{position:absolute;bottom:-13px;inset-inline-start:6px;background:var(--wa-in);border-radius:999px;font-size:.72rem;padding:1px 6px;box-shadow:0 1px 2px rgba(0,0,0,.2);line-height:1.4}
+.typing{display:flex;gap:4px;padding:11px 12px;min-height:0}
+.typing span{width:7px;height:7px;border-radius:50%;background:var(--wa-time);animation:blink 1.2s infinite ease-in-out}
+.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
+.draft{background:color-mix(in srgb,var(--wa-bg) 55%,var(--wa-in));border-inline-start:3px solid var(--coral);border-radius:8px;padding:7px 9px;margin-bottom:6px;white-space:normal}
+.draft .k{font-size:.68rem;font-weight:800;letter-spacing:.04em;color:var(--teal)}
+.draft .row{display:flex;gap:.5em;font-size:.78rem;color:var(--wa-time)}
+.draft .row b{color:var(--wa-fg);font-weight:600;overflow-wrap:anywhere}
+.draft p{margin-top:5px;font-size:.84rem;white-space:pre-line}
+.wa-btns{align-self:flex-start;width:88%;background:var(--wa-in);border-radius:12px;overflow:hidden;box-shadow:0 1px .5px rgba(0,0,0,.12);display:grid}
+.wa-btns button{background:none;border:0;border-top:1px solid rgba(128,128,128,.18);padding:10px;color:var(--wa-btn);font-weight:600;font-size:.9rem;cursor:pointer;display:flex;justify-content:center;gap:.4em}
+.wa-btns button:first-child{border-top:0}
+.wa-btns button:hover:not(:disabled){background:rgba(128,128,128,.08)}
+.wa-btns button:disabled{opacity:.45;cursor:default}
+.wa-btns button.chosen{opacity:1;font-weight:800}
+.wa-btns button:focus-visible{outline-offset:-3px}
+.wa-input{display:flex;align-items:center;gap:8px;padding:8px 10px 14px;background:color-mix(in srgb,var(--wa-head) 12%,var(--wa-bg))}
+.wa-input .field{flex:1;background:var(--wa-in);border-radius:999px;padding:8px 14px;font-size:.85rem;color:var(--wa-time)}
+.wa-input .mic{width:38px;height:38px;border-radius:50%;background:var(--wa-head);display:grid;place-items:center}
+.wa-input .mic svg{width:18px;height:18px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round}
+.msg.pop,.wa-btns.pop,.chip.pop{animation:pop .32s cubic-bezier(.2,.8,.3,1) both}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}
+.replay{background:var(--card);border:1px solid var(--line);color:var(--ink-2);font-size:var(--s-1);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:.4em;padding:.5em .9em;border-radius:var(--pill);position:relative;z-index:1}
+.replay:hover{color:var(--teal);border-color:var(--teal)}
+.replay svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* --- sections --- */
+.sec{padding-block:56px}
+@media (min-width:960px){.sec{padding-block:88px}}
+.sec-head{display:grid;gap:12px;max-width:38rem;margin-bottom:32px}
+.sec-head h2{font-size:var(--s3)}
+.sec-head p{color:var(--ink-2);font-size:var(--s1);line-height:1.5}
+.kicker{display:inline-flex;align-items:center;gap:.5em;font-size:.82rem;font-weight:700;color:var(--coral)}
+.kicker::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--coral)}
+
+.steps{display:grid;gap:16px;counter-reset:step;list-style:none;margin:0;padding:0}
+@media (min-width:760px){.steps{grid-template-columns:repeat(3,1fr);gap:20px}}
+.step{display:grid;gap:10px;padding:24px;border-radius:var(--r);background:var(--card);box-shadow:var(--shadow);align-content:start;position:relative}
+.step .n{width:44px;height:44px;border-radius:50%;background:var(--coral);color:#1E1412;display:grid;place-items:center;font-family:var(--font-display);font-weight:700;font-size:1.9rem;line-height:1;padding-top:.08em}
+.step h3{font-size:var(--s1)}
+.step p{color:var(--ink-2);font-size:var(--s-1);line-height:1.55}
+.step .tag{font-size:.78rem;font-weight:700;color:var(--teal)}
+
+.caps{display:grid;gap:14px}
+@media (min-width:600px){.caps{grid-template-columns:1fr 1fr}}
+@media (min-width:960px){.caps{grid-template-columns:repeat(3,1fr);gap:18px}}
+.cap{display:grid;gap:10px;padding:22px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);align-content:start;transition:transform .2s,box-shadow .2s}
+.cap:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.cap .ic{width:46px;height:46px;border-radius:14px;background:var(--teal-soft);display:grid;place-items:center}
+.cap svg{width:24px;height:24px;stroke:var(--teal);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.cap h3{font-size:var(--s1)}
+.cap p{color:var(--ink-2);font-size:var(--s-1);line-height:1.55}
+.cap .ex{font-size:var(--s-1);color:var(--ink);background:var(--paper);border-radius:var(--r-sm);padding:.5em .8em;font-style:normal;display:block}
+
+.band{background:var(--teal);color:#fff}
+.band .wrap{display:grid;gap:32px}
+@media (min-width:960px){.band .wrap{grid-template-columns:1fr 1fr;gap:64px;align-items:center}}
+.band h2{font-size:clamp(1.9rem,4.2vw,2.8rem)}
+.band h2 em{font-style:normal;color:var(--coral);}
+.band .kicker{color:#fff}.band .kicker::before{background:var(--coral)}
+.band p.big{margin-top:16px;font-size:var(--s1);opacity:.92;max-width:30rem}
+.trust-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.trust-list li{display:flex;gap:12px;align-items:flex-start;line-height:1.5;background:rgba(255,255,255,.08);border-radius:var(--r-sm);padding:12px 14px}
+.trust-list svg{width:22px;height:22px;flex:none;margin-top:2px;stroke:var(--coral);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.trust-list b{font-weight:800}
+.ph{border:2px dashed rgba(255,255,255,.45);border-radius:var(--r);display:grid;place-items:center;text-align:center;font-size:var(--s-1);padding:16px;max-width:100%;color:#fff;
+  background:repeating-linear-gradient(45deg,transparent 0 12px,rgba(255,255,255,.08) 12px 13px)}
+.ph span{background:rgba(0,0,0,.25);padding:.4em .8em;border-radius:var(--pill)}
+
+.plans{display:grid;gap:16px;margin-bottom:28px}
+@media (min-width:760px){.plans{grid-template-columns:1fr 1fr;gap:22px}}
+.plan{border-radius:var(--r);padding:26px;display:grid;gap:14px;align-content:start;background:var(--card);border:1px solid var(--line)}
+.plan.pro{border:2px solid var(--teal);box-shadow:var(--shadow);position:relative}
+.plan.pro .ribbon{position:absolute;top:-14px;inset-inline-start:22px;background:var(--coral);color:#1E1412;font-size:.78rem;font-weight:800;padding:.35em .9em;border-radius:var(--pill)}
+.plan .who{font-size:var(--s-1);color:var(--ink-2)}
+.plan h3{font-size:var(--s2)}
+.price{display:flex;align-items:baseline;gap:.3em;font-family:var(--font-display);font-weight:700;font-size:4rem;line-height:.9;color:var(--teal);font-variant-numeric:tabular-nums}
+.price small{font-family:var(--font-body);font-weight:600;font-size:var(--s-1);color:var(--ink-2)}
+.plan ul{margin:0;padding:0;list-style:none;display:grid;gap:8px;font-size:var(--s-1);color:var(--ink-2)}
+.plan ul li{display:flex;gap:.5em;align-items:flex-start}
+.plan ul li::before{content:"✓";color:var(--teal);font-weight:800;flex:none}
+.cmp{overflow-x:auto;background:var(--card);border-radius:var(--r);border:1px solid var(--line);padding-inline:8px}
+table{border-collapse:collapse;width:100%;min-width:0;font-size:var(--s-1)}
+th,td{padding:13px 10px;border-bottom:1px solid var(--line);text-align:start;vertical-align:top}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:0}
+th{font-weight:600;color:var(--ink)}
+thead th{font-weight:800;font-size:var(--s0);padding-top:18px}
+td.v,th.v{text-align:center;width:5.5rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.v.pro,th.v.pro{background:color-mix(in srgb,var(--teal-soft) 55%,transparent)}
+.yes{color:var(--teal);font-weight:800}
+.no{color:var(--ink-2);opacity:.6}
+.fine{font-size:var(--s-1);color:var(--ink-2);margin-top:18px}
+
+.faq{display:grid;gap:10px;max-width:46rem}
+.faq details{background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);padding-inline:18px}
+.faq summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:16px;padding-block:16px;font-weight:700;font-size:var(--s0);line-height:1.35}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";font-weight:400;font-size:1.6rem;color:var(--coral);flex:none;transition:transform .25s;line-height:1}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq .a{padding-bottom:18px;color:var(--ink-2);line-height:1.6}
+
+.end{display:grid;gap:20px;justify-items:center;text-align:center;padding:48px 20px;border-radius:var(--r);background:var(--paper-2);margin-block:16px 56px}
+.end h2{font-family:var(--font-display);font-weight:700;font-size:clamp(2.6rem,7vw,4.6rem);line-height:.95}
+footer{border-top:1px solid var(--line);padding-block:28px 96px;font-size:var(--s-1);color:var(--ink-2)}
+@media (min-width:760px){footer{padding-bottom:28px}}
+footer .cols{display:flex;flex-wrap:wrap;gap:16px 36px;align-items:center;justify-content:space-between}
+footer nav{display:flex;flex-wrap:wrap;gap:18px}
+footer nav a{text-decoration:none}
+footer nav a:hover{color:var(--teal);text-decoration:underline}
+
+/* mobile sticky CTA (hidden on desktop) */
+.sticky{position:fixed;bottom:0;inset-inline:0;padding:10px max(16px,env(safe-area-inset-left,0px)) max(10px,env(safe-area-inset-bottom,0px));background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line);z-index:40;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.sticky .t{font-size:.85rem;font-weight:600;color:var(--ink-2)}
+@media (min-width:760px){.sticky{display:none}}
+
+/* scroll reveal: at rest everything is visible; JS only hides what is below the fold */
+.rv{transition:opacity .6s ease,transform .6s ease}
+.rv.pre{opacity:0;transform:translateY(14px)}
+.rv.is-in{opacity:1;transform:none}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  .rv,.rv.pre{opacity:1;transform:none;transition:none}
+  .msg.pop,.wa-btns.pop,.chip.pop{animation:none}
+  .typing span{animation:none;opacity:.6}
+  .faq summary::after{transition:none}
+  .btn,.cap{transition:none}
+  .cap:hover{transform:none}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">דילוג לתוכן</a>
+
+<header class="wrap top">
+  <a class="name" href="#" aria-label="שם המוצר (עדיין לא נבחר)"><span class="dot" aria-hidden="true"></span>{{שם}}<small>בוואטסאפ</small></a>
+  <nav aria-label="ניווט ראשי">
+    <a href="#how">איך זה עובד</a>
+    <a href="#caps">מה הוא יודע</a>
+    <a href="#trust">פרטיות</a>
+    <a href="#pricing">מחירים</a>
+    <a href="#faq">שאלות</a>
+  </nav>
+  <a class="btn sm" href="#start">להתחיל בחינם</a>
+</header>
+
+<main id="main">
+
+<section class="wrap hero" aria-labelledby="h1">
+  <div class="lede">
+    <span class="pill">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-4.4-7-10a7 7 0 0 1 14 0c0 5.6-7 10-7 10z"/><circle cx="12" cy="11" r="2.5"/></svg>
+      לקליניקות, יועצים, עו״ד ורו״ח בישראל
+    </span>
+    <h1 id="h1">עוזר אישי במשרד,<br><span class="hl">בוואטסאפ שכבר פתוח.</span></h1>
+    <p class="sub">מחובר למייל, ליומן ולקבצים שלך ב-Microsoft 365 או Google. עונה בעברית, מסדר את הבוקר, מנסח תשובות ללקוחות, ולא שולח כלום לפני שאישרת.</p>
+    <div class="cta-row">
+      <a class="btn coral" id="start" href="#pricing">להתחיל עם 10 הודעות חינם</a>
+      <span class="note"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>בלי כרטיס אשראי</span>
+    </div>
+    <div class="proof" aria-label="מה כלול">
+      <span>הקמה בדקה</span><span>בעברית מלאה</span><span>נתונים באיחוד האירופי</span>
+    </div>
+  </div>
+
+  <div class="phone-wrap">
+    <div class="blob" aria-hidden="true"></div>
+    <div class="blob c" aria-hidden="true"></div>
+    <div class="phone" role="region" aria-label="הדגמה מונפשת של שיחה בוואטסאפ עם העוזר">
+      <div class="screen">
+        <div class="notch" aria-hidden="true"></div>
+        <div class="wa-head">
+          <div class="av" aria-hidden="true">ש</div>
+          <div><b>{{שם}}</b><small id="chat-status">מחובר</small></div>
+        </div>
+        <div class="log" id="chat-log"></div>
+        <div class="wa-input" aria-hidden="true">
+          <div class="field">הודעה</div>
+          <div class="mic"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></div>
+        </div>
+      </div>
+    </div>
+    <button class="replay" id="chat-replay" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
+      להריץ את ההדגמה שוב
+    </button>
+  </div>
+</section>
+
+<section class="wrap sec" id="how" aria-labelledby="h-how">
+  <div class="sec-head rv">
+    <span class="kicker">איך זה עובד</span>
+    <h2 id="h-how">שלושה צעדים, בערך דקה</h2>
+    <p>אין אפליקציה להתקין ואין סיסמה לזכור. בסוף התהליך ההודעה הראשונה כבר מחכה בוואטסאפ.</p>
+  </div>
+  <ol class="steps" aria-label="שלבי ההקמה">
+    <li class="step rv">
+      <span class="n" aria-hidden="true">1</span>
+      <span class="tag">כ-15 שניות</span>
+      <h3>נרשמים עם המייל</h3>
+      <p>מקלידים כתובת מייל ומקבלים קוד בן 6 ספרות. בלי סיסמה, בלי טפסים.</p>
+    </li>
+    <li class="step rv">
+      <span class="n" aria-hidden="true">2</span>
+      <span class="tag">כ-30 שניות</span>
+      <h3>מחברים Microsoft 365 או Google</h3>
+      <p>חיבור ישיר ומאובטח למייל, ליומן ולקבצים. אפשר לדלג ולחבר אחר כך, מתוך השיחה.</p>
+    </li>
+    <li class="step rv">
+      <span class="n" aria-hidden="true">3</span>
+      <span class="tag">לחיצה אחת</span>
+      <h3>פותחים וואטסאפ</h3>
+      <p>לחיצה מקשרת את המספר שלך לחשבון. העוזר מציג את עצמו ושואל מה על הצלחת.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="wrap sec" id="caps" aria-labelledby="h-caps" style="padding-top:0">
+  <div class="sec-head rv">
+    <span class="kicker">מה הוא יודע לעשות</span>
+    <h2 id="h-caps">עוזר אחד לכל מה שמגיע למשרד</h2>
+    <p>כותבים לו כמו לעמית. הוא עובד מול המערכות שכבר יש לך, בעברית, ומחזיר תשובה קצרה.</p>
+  </div>
+  <div class="caps">
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="m3 7 9 6 9-6"/></svg></div>
+      <h3>מייל</h3>
+      <p>חיפוש, סיכום, ניסוח ושליחה. כל מייל יוצא עובר דרך כפתור האישור שלך.</p>
+      <em class="ex">״תסכם לי את המייל של הרו״ח״</em>
+    </article>
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></div>
+      <h3>יומן</h3>
+      <p>מה יש מחר, מתי פנוי, קביעה והזזה של פגישות עם הודעה לצד השני.</p>
+      <em class="ex">״תזיז את הטיפול של כהן לחמישי בעשר״</em>
+    </article>
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg></div>
+      <h3>קבצים</h3>
+      <p>מוצא את הקובץ ב-OneDrive או ב-Drive, קורא Word, Excel ו-PowerPoint ועונה על השאלה.</p>
+      <em class="ex">״מה הסכום בהצעת המחיר של לוי?״</em>
+    </article>
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/></svg></div>
+      <h3>תזכורות</h3>
+      <p>תזכורת חד-פעמית או חוזרת, מגיעה כהודעה בוואטסאפ בזמן שביקשת.</p>
+      <em class="ex">״תזכיר לי בחמישי לשלוח חשבונית״</em>
+    </article>
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div>
+      <h3>סיכום בוקר</h3>
+      <p>בשעה שבחרת: היומן של היום, מיילים שממתינים לתשובה, ומה נשאר פתוח מאתמול.</p>
+      <em class="ex">כל יום ב-07:30, לפני הקפה</em>
+    </article>
+    <article class="cap rv">
+      <div class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg></div>
+      <h3>הודעות קוליות</h3>
+      <p>בין טיפול לטיפול, הקלטה קצרה. הוא מתמלל, מבין את הבקשה ועונה בטקסט.</p>
+      <em class="ex">״תרשום: להחזיר טלפון לגב׳ אברהם״</em>
+    </article>
+  </div>
+</section>
+
+<section class="band sec" id="trust" aria-labelledby="h-trust">
+  <div class="wrap">
+    <div class="rv">
+      <span class="kicker">פרטיות ושליטה</span>
+      <h2 id="h-trust" style="margin-top:12px">הוא רואה <em>רק</em> מה ששולחים לו.</h2>
+      <p class="big">לא את שאר השיחות שלך בוואטסאפ, לא את התיבה כולה. מה שלא ביקשת, לא קורה.</p>
+      <div class="ph" style="margin-top:26px;max-width:400px;aspect-ratio:5/3"><span>מקום לאיור: הדמות שלנו ליד מנעול</span></div>
+    </div>
+    <ul class="trust-list rv">
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>שום פעולה יוצאת בלי אישור.</b> מייל, פגישה או שיתוף קובץ מתבצעים רק אחרי לחיצה על ״שלח״, ובתוך 10 דקות.</span></li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>הנתונים באיחוד האירופי.</b> שרתים בפרנקפורט. נשמרים מטא-דאטה וסיכומים, לא גוף המיילים.</span></li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>היסטוריה של 90 יום</b> ואז מחיקה אוטומטית. בפרו: 365 יום.</span></li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>הרשאות מינימליות.</b> הרשאה נוספת נפתחת רק כשמפעילים יכולת שצריכה אותה.</span></li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>מחיקת חשבון מלאה בלחיצה</b>, כולל ניתוק החיבורים ל-Microsoft ול-Google.</span></li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg><span><b>יומן פעולות.</b> כל פעולה נרשמת: מה נעשה, מתי, ומי אישר.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="wrap sec" id="pricing" aria-labelledby="h-price">
+  <div class="sec-head rv">
+    <span class="kicker">מחירים</span>
+    <h2 id="h-price">שני מסלולים. מתחילים בחינם.</h2>
+    <p>10 ההודעות הראשונות חינם עם חיבור מלא. כשנגמרות, הבוט שולח קישור תשלום וממשיכים מאותו מקום.</p>
+  </div>
+  <div class="plans">
+    <article class="plan rv" aria-labelledby="p-basic">
+      <span class="who">לעסק של אדם אחד</span>
+      <h3 id="p-basic">בסיסי</h3>
+      <div class="price">99 ₪<small>לחודש</small></div>
+      <ul>
+        <li>מייל, יומן וקבצים ב-Microsoft 365 או Google</li>
+        <li>עד 750 הודעות בחודש (כ-25 ביום)</li>
+        <li>סיכום בוקר, תזכורות והודעות קוליות</li>
+        <li>היסטוריה 90 יום</li>
+      </ul>
+      <a class="btn ghost" href="#start">להתחיל בחינם</a>
+    </article>
+    <article class="plan pro rv" aria-labelledby="p-pro">
+      <span class="ribbon">הכי פופולרי במשרדים</span>
+      <span class="who">למשרד שרוצה עוזר שגם עוקב</span>
+      <h3 id="p-pro">פרו</h3>
+      <div class="price">299 ₪<small>לחודש</small></div>
+      <ul>
+        <li>כל מה שבבסיסי</li>
+        <li>3,000 הודעות בחודש (שימוש הוגן)</li>
+        <li>סוכנים מובנים: מזכירה, מתמחה, מנהלת חשבונות</li>
+        <li>משימות ואוטומציות, היסטוריה 365 יום</li>
+      </ul>
+      <a class="btn" href="#start">להתחיל בחינם</a>
+    </article>
+  </div>
+  <div class="cmp rv">
+    <table>
+      <caption class="sr">השוואת מסלולים</caption>
+      <thead><tr><th scope="col">מה כלול</th><th scope="col" class="v">בסיסי</th><th scope="col" class="v pro">פרו</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">חיבור Microsoft 365 / Google (מייל, יומן, OneDrive/Drive)</th><td class="v"><span class="yes">✓<span class="sr"> כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">קריאה, סיכום, חיפוש, ניסוח ושליחה באישור</th><td class="v"><span class="yes">✓<span class="sr"> כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">סיכום בוקר, תזכורות, הודעות קוליות</th><td class="v"><span class="yes">✓<span class="sr"> כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">הודעות בחודש</th><td class="v">עד 750</td><td class="v pro">3,000</td></tr>
+        <tr><th scope="row">קריאת Word / Excel / PowerPoint</th><td class="v"><span class="yes">✓<span class="sr"> כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">סוכנים מובנים (מזכירה / מתמחה / מנהלת חשבונות)</th><td class="v"><span class="no">–<span class="sr"> לא כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">משימות ואוטומציות (מעקב חשבוניות, follow-ups)</th><td class="v"><span class="no">–<span class="sr"> לא כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+        <tr><th scope="row">היסטוריה וזיכרון</th><td class="v">90 יום</td><td class="v pro">365 יום</td></tr>
+        <tr><th scope="row">עדיפות למודל החזק</th><td class="v"><span class="no">–<span class="sr"> לא כלול</span></span></td><td class="v pro"><span class="yes">✓<span class="sr"> כלול</span></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="fine">המחירים לחודש, כולל מע״מ. ביטול בכל רגע, המנוי נשאר פעיל עד סוף התקופה. חשבונית מס-קבלה נשלחת אוטומטית.</p>
+</section>
+
+<section class="wrap sec" id="faq" aria-labelledby="h-faq" style="padding-top:0">
+  <div class="sec-head rv">
+    <span class="kicker">שאלות נפוצות</span>
+    <h2 id="h-faq">מה בדרך כלל שואלים לפני שמתחילים</h2>
+  </div>
+  <div class="faq rv">
+    <details><summary>זה עובד עם ה-Outlook של המשרד?</summary><div class="a">כן. החיבור ל-Microsoft 365 ישיר ומאובטח, בלי ספק ביניים. בחלק מהארגונים נדרש אישור חד-פעמי של מנהל ה-IT; נשלח לך הנחיות קצרות להעביר לו.</div></details>
+    <details><summary>מה קורה כשנגמרות 10 ההודעות?</summary><div class="a">הבוט מודיע בעדינות כשנשארות שלוש, ובסיום שולח קישור תשלום אישי. אחרי התשלום ממשיכים בדיוק מאותו מקום. בניסיון אין צורך בכרטיס אשראי.</div></details>
+    <details><summary>מה נספר כהודעה?</summary><div class="a">כל הודעה ששלחת (טקסט, קול או תמונה) וקיבלת עליה תשובה. לחיצות על כפתורי אישור, סיכומי בוקר, תזכורות והודעות שגיאה לא נספרות.</div></details>
+    <details><summary>איפה הנתונים נשמרים?</summary><div class="a">בשרתים באיחוד האירופי (פרנקפורט). נשמרים רק מטא-דאטה וסיכומים, לא גוף המיילים, והם נמחקים אחרי 90 יום (365 יום בפרו). טוקני החיבור מוצפנים ולא מופיעים בשום לוג.</div></details>
+    <details><summary>אפשר לבטל?</summary><div class="a">כן, בכל רגע ומתוך השיחה. המנוי נשאר פעיל עד סוף התקופה ששולמה, ולא מתחדש.</div></details>
+    <details><summary>ומה עם Gmail?</summary><div class="a">יומן Google, ‏Google Drive ושליחת מיילים זמינים מהיום הראשון. קריאת תיבת ה-Gmail מתווספת בשלב הבא, אחרי אישור האבטחה של Google.</div></details>
+  </div>
+</section>
+
+<div class="wrap">
+  <section class="end rv" aria-labelledby="h-end">
+    <h2 id="h-end">דקה אחת, ומחר בבוקר יש סיכום.</h2>
+    <a class="btn coral" href="#start">להתחיל עם 10 הודעות חינם</a>
+  </section>
+</div>
+
+</main>
+
+<footer class="wrap">
+  <div class="cols">
+    <span class="name"><span class="dot" aria-hidden="true"></span>{{שם}}<small>בוואטסאפ</small></span>
+    <nav aria-label="קישורים משפטיים">
+      <a href="#">תנאי שימוש</a>
+      <a href="#">מדיניות פרטיות</a>
+      <a href="#">צור קשר</a>
+    </nav>
+    <span>נבנה בישראל. הנתונים באיחוד האירופי. © 2026</span>
+  </div>
+</footer>
+
+<div class="sticky" aria-hidden="false">
+  <span class="t">10 הודעות חינם, בלי כרטיס</span>
+  <a class="btn coral sm" href="#start">להתחיל</a>
+</div>
+
+<script>
+(function(){
+  /* --- chat demo --- */
+  var log=document.getElementById('chat-log'),status=document.getElementById('chat-status'),replay=document.getElementById('chat-replay');
+  var reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var run=0;
+  function sleep(ms){return new Promise(function(r){setTimeout(r,reduce?0:ms)})}
+  function el(tag,cls,html){var e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e}
+  function scrollDown(){log.scrollTop=log.scrollHeight}
+  function bubble(kind,html,time,extraCls){
+    var b=el('div','msg pop '+kind+(extraCls?' '+extraCls:''));
+    b.innerHTML=html+'<span class="time">'+time+(kind==='m-out'?' <i class="ticks" aria-hidden="true">✓✓</i>':'')+'</span>';
+    log.appendChild(b);scrollDown();return b;
+  }
+  function typing(on){
+    status.textContent=on?'מקליד…':'מחובר';
+    var t=log.querySelector('.typing');
+    if(on&&!t){t=el('div','msg m-in typing','<span></span><span></span><span></span>');t.setAttribute('aria-label','העוזר מקליד');log.appendChild(t);scrollDown()}
+    if(!on&&t)t.remove();
+  }
+  function react(b){b.appendChild(el('span','react','✅'))}
+  function wave(){var s='';var hs=[6,10,16,12,20,8,14,18,10,6,12,16,9,14,7];for(var i=0;i<hs.length;i++)s+='<i style="--h:'+hs[i]+'px"></i>';return s}
+
+  var A1='מחר, יום שלישי 21.10:\n09:00 גב׳ אברהם, טיפול המשך\n10:30 מר כהן, פגישה ראשונה (45 דק׳)\n13:00 הפסקה\n16:00 ד״ר רונן, שיחת תיאום\n\nממתינים לתשובה: מייל מגב׳ אברהם (שאלה על ההפניה) ותזכורת מהרו״ח על הדוח הרבעוני.';
+  var VOICE='<span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg></span><span class="wave" aria-hidden="true">'+wave()+'</span><span class="len">0:07</span>';
+  var TR='תכתוב לגב׳ אברהם שהטיפול מחר ב-9 מתקיים, ושתביא את ההפניה מהרופא';
+  var DRAFT='<div class="draft"><div class="k">טיוטת מייל</div><div class="row"><span>אל</span><b dir="ltr">r.avraham@gmail.com</b></div><div class="row"><span>נושא</span><b>הטיפול מחר, 21.10 בשעה 09:00</b></div><p>שלום רונית,\nמאשרת שהטיפול מחר בשעה 09:00 מתקיים כמתוכנן. אשמח אם תביאי את ההפניה מהרופא.\nנתראה מחר,\nמיכל</p></div>לשלוח?';
+  var REPLY={'שלח':'נשלח. המייל יצא לגב׳ אברהם, ואעדכן כשתגיע תשובה.','ערוך':'בסדר. מה לשנות בטיוטה?','בטל':'בוטל. הטיוטה נמחקה ולא נשלחה.'};
+
+  async function play(){
+    var id=++run;function ok(){return id===run}
+    log.innerHTML='';typing(false);
+    log.appendChild(el('div','chip pop','היום'));
+    await sleep(400);if(!ok())return;
+    var u1=bubble('m-out','מה יש לי מחר?','13:41');
+    await sleep(700);if(!ok())return;react(u1);
+    await sleep(500);if(!ok())return;typing(true);
+    await sleep(1500);if(!ok())return;typing(false);
+    bubble('m-in',A1,'13:41');
+    await sleep(2200);if(!ok())return;
+    var u2=bubble('m-out',VOICE,'13:42','voice');
+    u2.setAttribute('aria-label','הודעה קולית: '+TR);
+    await sleep(700);if(!ok())return;react(u2);
+    await sleep(500);if(!ok())return;typing(true);
+    await sleep(1200);if(!ok())return;typing(false);
+    bubble('m-in','שמעתי: ״'+TR+'״','13:42');
+    await sleep(900);if(!ok())return;typing(true);
+    await sleep(1500);if(!ok())return;typing(false);
+    bubble('m-in',DRAFT,'13:42');
+    var btns=el('div','wa-btns pop');btns.setAttribute('role','group');btns.setAttribute('aria-label','אישור הטיוטה');
+    ['שלח','ערוך','בטל'].forEach(function(l){var b=el('button',null,l);b.type='button';b.addEventListener('click',function(){choose(l,btns)});btns.appendChild(b)});
+    log.appendChild(btns);scrollDown();
+  }
+  async function choose(label,btns){
+    var id=run;
+    btns.querySelectorAll('button').forEach(function(b){b.disabled=true;if(b.textContent===label)b.classList.add('chosen')});
+    await sleep(500);if(id!==run)return;typing(true);
+    await sleep(900);if(id!==run)return;typing(false);
+    bubble('m-in',REPLY[label],'13:43');
+    if(!reduce){await sleep(4500);if(id===run)play()}
+  }
+  replay.addEventListener('click',function(){play()});
+  play();
+
+  /* --- scroll reveal (subtle) --- */
+  if(!reduce&&'IntersectionObserver' in window){
+    var els=[].slice.call(document.querySelectorAll('.rv'));
+    var io=new IntersectionObserver(function(entries){entries.forEach(function(e){if(e.isIntersecting){e.target.classList.remove('pre');e.target.classList.add('is-in');io.unobserve(e.target)}})},{rootMargin:'0px 0px -8% 0px'});
+    els.forEach(function(e){if(e.getBoundingClientRect().top>window.innerHeight){e.classList.add('pre');io.observe(e)}});
+  }
+})();
+</script>
+</body>
+</html>

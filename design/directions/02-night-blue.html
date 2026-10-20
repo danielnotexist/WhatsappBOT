@@ -196,8 +196,9 @@ button{font:inherit;color:inherit}
 
 /* trust */
 .band{background:var(--bg-2);border-block:1px solid var(--line)}
-.trust{display:grid;gap:36px}
-@media (min-width:960px){.trust{grid-template-columns:1fr 1fr;gap:64px;align-items:center}}
+.trust{display:grid;grid-template-columns:minmax(0,1fr);gap:36px}
+.trust>*{min-width:0}
+@media (min-width:960px){.trust{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:64px;align-items:center}}
 .trust h2{font-size:clamp(2.2rem,5vw,3.6rem)}
 .trust h2 .lime{color:var(--accent-text);text-decoration:underline;text-decoration-color:var(--accent);text-decoration-thickness:.12em;text-underline-offset:.12em}
 .trust-list{list-style:none;margin:24px 0 0;padding:0;display:grid;gap:12px}
