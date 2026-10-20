@@ -10,6 +10,13 @@
 
 begin;
 
+-- Clean slate inside the transaction (rolled back at the end): the counting functions below
+-- (purge_*, expire_*, claim_due_jobs) act on every row, so seed.sql data must not be present.
+delete from public.users;
+delete from public.auth_otps;
+delete from public.wa_link_attempts;
+delete from public.wa_templates;
+
 create function pg_temp.check(p_label text, p_ok boolean)
 returns void
 language plpgsql
@@ -72,9 +79,12 @@ select pg_temp.check('count: usage row is trial period (signup date), 10 counted
 select pg_temp.check('count: exactly one usage row for the trial user',
   (select count(*) from public.usage where user_id = '33333333-3333-4333-8333-333333333333') = 1);
 
-select pg_temp.check('count: pro user → 2999 remaining on first message, calendar-month period',
-  public.count_trial_message('44444444-4444-4444-8444-444444444444') = 2999
-  and (select period_start from public.usage where user_id = '44444444-4444-4444-8444-444444444444')
+-- Two statements on purpose: an uncorrelated subquery in the same SELECT is an InitPlan that
+-- Postgres evaluates before the function call, so the usage row would not exist yet.
+select pg_temp.check('count: pro user → 2999 remaining on first message',
+  public.count_trial_message('44444444-4444-4444-8444-444444444444') = 2999);
+select pg_temp.check('count: pro user → calendar-month period in the user timezone',
+  (select period_start from public.usage where user_id = '44444444-4444-4444-8444-444444444444')
       = date_trunc('month', now() at time zone 'Asia/Jerusalem')::date);
 
 do $$
@@ -100,7 +110,7 @@ select pg_temp.check('claim(2): returns the 2 earliest due jobs, running, attemp
       and array_agg(id order by run_at) = array['66666666-0000-4000-8000-000000000001', '66666666-0000-4000-8000-000000000002']::uuid[]
      from public.claim_due_jobs(2)));
 select pg_temp.check('claim(10): only the remaining due job (future job untouched)',
-  (select count(*) = 1 and min(id) = '66666666-0000-4000-8000-000000000003' from public.claim_due_jobs(10)));
+  (select count(*) = 1 and bool_and(id = '66666666-0000-4000-8000-000000000003') from public.claim_due_jobs(10)));
 select pg_temp.check('claim again: nothing left',
   (select count(*) from public.claim_due_jobs(10)) = 0);
 select pg_temp.check('future job still queued',
@@ -121,9 +131,11 @@ select pg_temp.check('finish_job(error) with attempts>=max → failed',
 update public.jobs set status = 'running', locked_at = now() - interval '20 minutes', attempts = 1 where id = '66666666-0000-4000-8000-000000000001';
 update public.jobs set status = 'running', locked_at = now() - interval '20 minutes', attempts = 3 where id = '66666666-0000-4000-8000-000000000003';
 update public.jobs set status = 'running', locked_at = now() - interval '2 minutes',  attempts = 1 where id = '66666666-0000-4000-8000-000000000002';
-select pg_temp.check('requeue_stale_jobs: 1 requeued, exhausted one failed, fresh one untouched',
-  public.requeue_stale_jobs(interval '15 minutes') = 1
-  and (select status from public.jobs where id = '66666666-0000-4000-8000-000000000001') = 'queued'
+-- Function call and status checks in separate statements (see the InitPlan note above).
+select pg_temp.check('requeue_stale_jobs: exactly 1 requeued',
+  public.requeue_stale_jobs(interval '15 minutes') = 1);
+select pg_temp.check('requeue_stale_jobs: stale one requeued, exhausted one failed, fresh one untouched',
+  (select status from public.jobs where id = '66666666-0000-4000-8000-000000000001') = 'queued'
   and (select status from public.jobs where id = '66666666-0000-4000-8000-000000000003') = 'failed'
   and (select status from public.jobs where id = '66666666-0000-4000-8000-000000000002') = 'running');
 
@@ -148,10 +160,11 @@ $$;
 insert into public.pending_actions (user_id, kind, created_at, expires_at) values
   ('33333333-3333-4333-8333-333333333333', 'send_mail', now() - interval '20 minutes', now() - interval '10 minutes'),
   ('33333333-3333-4333-8333-333333333333', 'send_mail', now() - interval '1 minute',   now() + interval '9 minutes');
+select pg_temp.check('expire_pending_actions: returns 1',
+  public.expire_pending_actions() = 1);
 select pg_temp.check('expire_pending_actions: 1 expired, 1 still pending',
-  public.expire_pending_actions() = 1
-  and (select count(*) filter (where status = 'expired') = 1 and count(*) filter (where status = 'pending') = 1
-         from public.pending_actions where user_id = '33333333-3333-4333-8333-333333333333'));
+  (select count(*) filter (where status = 'expired') = 1 and count(*) filter (where status = 'pending') = 1
+     from public.pending_actions where user_id = '33333333-3333-4333-8333-333333333333'));
 
 -- ---------- purge_old_messages / purge_old_audit_log ----------
 insert into public.messages (user_id, wa_message_id, direction, text, created_at) values
@@ -163,10 +176,11 @@ insert into public.audit_log (user_id, action, target, reason, created_at) value
   ('33333333-3333-4333-8333-333333333333', 'send_mail', 'someone@y', 'why', now() - interval '10 days'),
   ('33333333-3333-4333-8333-333333333333', 'send_mail', 'ancient@z', 'why', now() - interval '800 days');
 
-select pg_temp.check('purge_old_messages(90, trial/basic): deletes 1 old message, anonymizes 2 old audit rows, pro untouched',
+select pg_temp.check('purge_old_messages(90, trial/basic): deletes 1 old message, anonymizes 2 old audit rows',
   (select messages_deleted = 1 and audit_rows_anonymized = 2
-     from public.purge_old_messages(90, array['trial', 'basic']::public.plan_kind[]))
-  and (select count(*) from public.messages where user_id = '33333333-3333-4333-8333-333333333333') = 1
+     from public.purge_old_messages(90, array['trial', 'basic']::public.plan_kind[])));
+select pg_temp.check('purge_old_messages(90, trial/basic): pro untouched, recent rows kept',
+  (select count(*) from public.messages where user_id = '33333333-3333-4333-8333-333333333333') = 1
   and (select count(*) from public.messages where wa_message_id = 'wamid.fn.pro') = 1
   and (select count(*) from public.audit_log where user_id = '33333333-3333-4333-8333-333333333333' and anonymized_at is not null and target is null) = 2
   and (select target from public.audit_log where user_id = '33333333-3333-4333-8333-333333333333' and anonymized_at is null) = 'someone@y');
@@ -174,9 +188,10 @@ select pg_temp.check('purge_old_messages(365, pro): pro message (100d) kept',
   (select messages_deleted = 0 from public.purge_old_messages(365, array['pro']::public.plan_kind[])));
 select pg_temp.check('purge_old_messages(90, null=all): now deletes the pro message',
   (select messages_deleted = 1 from public.purge_old_messages(90)));
+select pg_temp.check('purge_old_audit_log(730): returns 1',
+  public.purge_old_audit_log(730) = 1);
 select pg_temp.check('purge_old_audit_log(730): deletes only the 800-day row',
-  public.purge_old_audit_log(730) = 1
-  and (select count(*) from public.audit_log where user_id = '33333333-3333-4333-8333-333333333333') = 2);
+  (select count(*) from public.audit_log where user_id = '33333333-3333-4333-8333-333333333333') = 2);
 
 -- ---------- purge_expired_tokens ----------
 insert into public.auth_otps (email, code_hash, expires_at) values
@@ -188,9 +203,10 @@ insert into public.link_tokens (user_id, token, expires_at) values
 insert into public.wa_link_attempts (phone_e164, attempts, last_attempt_at) values
   ('+972509999001', 2, now() - interval '40 days'),
   ('+972509999002', 3, now() - interval '1 hour');
-select pg_temp.check('purge_expired_tokens: (1,1,1) and fresh rows kept',
-  (select otps_deleted = 1 and link_tokens_deleted = 1 and link_attempts_deleted = 1 from public.purge_expired_tokens())
-  and (select count(*) from public.auth_otps where email = 'fn-trial@example.com') = 1
+select pg_temp.check('purge_expired_tokens: (1,1,1)',
+  (select otps_deleted = 1 and link_tokens_deleted = 1 and link_attempts_deleted = 1 from public.purge_expired_tokens()));
+select pg_temp.check('purge_expired_tokens: fresh rows kept',
+  (select count(*) from public.auth_otps where email = 'fn-trial@example.com') = 1
   and (select count(*) from public.link_tokens where user_id = '33333333-3333-4333-8333-333333333333') = 1
   and (select count(*) from public.wa_link_attempts where phone_e164 like '+9725099990%') = 1);
 

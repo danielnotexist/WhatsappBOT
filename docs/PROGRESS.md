@@ -52,3 +52,15 @@ curl -sI http://localhost:3000/ | grep -i -E "content-security|x-frame"   # אח
 cd scripts/hebrew-eval && npm install && npm run typecheck && npm run pipeline -- --dry-run
 ```
 ריצה אמיתית (אחרי מפתחות ב-`.env`): `npm run pipeline` — עלות משוערת $10–15, רובה השופט.
+
+### 2026-10-20 — שלב א' 3: מסד הנתונים מאומת על Postgres מקומי
+
+**מה נעשה**
+- `supabase/tests/run-local.sh`: DB טרי → stub של Supabase → מיגרציות 0001–0003 → seed → שתי הבדיקות. עובר: `SUPABASE LOCAL: ALL TESTS PASSED`.
+- תוקנו 3 כשלים ב-`functions.test.sql`: (א) `min(uuid)` לא קיים ב-Postgres; (ב) בדיקות ששילבו קריאה לפונקציה ו-subquery באותו ביטוי — Postgres מחשב את ה-subquery (InitPlan) לפני הפונקציה, פוצלו לשני statements; (ג) הבדיקה הניחה DB ריק אבל `seed.sql` נטען לפניה — נוסף ניקוי בתוך הטרנזקציה (rollback בסוף).
+- `supabase/README.md` (עברית): מבנה, הרצה מקומית, CLI, פריסה, ומה דניאל מגדיר בפורטל (pg_cron, pg_net, Vault).
+
+**איך בודקים**
+```bash
+supabase/tests/run-local.sh
+```
