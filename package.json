@@ -20,6 +20,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.137.0",
     "@base-ui/react": "^1.9.0",
     "@supabase/supabase-js": "^2.118.0",
     "class-variance-authority": "^0.7.1",
