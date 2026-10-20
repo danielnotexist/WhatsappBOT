@@ -55,6 +55,20 @@ begin
 end;
 $$;
 
+-- מריץ DML ומחזיר כמה שורות הושפעו (0 = ה-RLS סינן, בלי שגיאה).
+create function pg_temp.affected(p_sql text)
+returns bigint
+language plpgsql
+as $$
+declare
+  v_n bigint;
+begin
+  execute p_sql;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
 -- -----------------------------------------------------------------------------
 -- Fixtures (כבעלים/service: עוקף RLS)
 -- -----------------------------------------------------------------------------
@@ -228,11 +242,9 @@ select pg_temp.expect_denied('A: delete users denied',
 
 -- users: עדכון פרופיל מותר, email לא, שורה של B לא
 select pg_temp.check('A: update own profile columns works',
-  (with u as (update public.users set name = 'A2', business_name = 'עסק A' where id = '11111111-1111-4111-8111-111111111111' returning 1)
-   select count(*) from u) = 1);
+  pg_temp.affected($$update public.users set name = 'A2', business_name = 'עסק A' where id = '11111111-1111-4111-8111-111111111111'$$) = 1);
 select pg_temp.check('A: update of B row affects 0 rows (RLS filter, not error)',
-  (with u as (update public.users set name = 'HACK' where id = '22222222-2222-4222-8222-222222222222' returning 1)
-   select count(*) from u) = 0);
+  pg_temp.affected($$update public.users set name = 'HACK' where id = '22222222-2222-4222-8222-222222222222'$$) = 0);
 select pg_temp.expect_denied('A: update email column denied',
   $$update public.users set email = 'hack@example.com'$$);
 select pg_temp.expect_denied('A: update deleted_at column denied',
@@ -240,7 +252,7 @@ select pg_temp.expect_denied('A: update deleted_at column denied',
 
 -- reminders: ביטול מותר, כל status אחר לא
 select pg_temp.check('A: cancel own reminder works',
-  (with u as (update public.reminders set status = 'cancelled' returning 1) select count(*) from u) = 1);
+  pg_temp.affected($$update public.reminders set status = 'cancelled'$$) = 1);
 select pg_temp.expect_denied('A: set reminder status=sent violates WITH CHECK',
   $$update public.reminders set status = 'sent'$$);
 select pg_temp.expect_denied('A: update reminder text column denied',
@@ -248,11 +260,11 @@ select pg_temp.expect_denied('A: update reminder text column denied',
 
 -- agents: CRUD על שלי בלבד
 select pg_temp.check('A: insert own agent works',
-  (with i as (insert into public.agents (user_id, name) values ('11111111-1111-4111-8111-111111111111', 'סוכן A') returning 1) select count(*) from i) = 1);
+  pg_temp.affected($$insert into public.agents (user_id, name) values ('11111111-1111-4111-8111-111111111111', 'סוכן A')$$) = 1);
 select pg_temp.expect_denied('A: insert agent for B violates WITH CHECK',
   $$insert into public.agents (user_id, name) values ('22222222-2222-4222-8222-222222222222', 'חדירה')$$);
 select pg_temp.check('A: delete of B agent affects 0 rows',
-  (with d as (delete from public.agents where user_id = '22222222-2222-4222-8222-222222222222' returning 1) select count(*) from d) = 0);
+  pg_temp.affected($$delete from public.agents where user_id = '22222222-2222-4222-8222-222222222222'$$) = 0);
 
 -- =============================================================================
 -- 2. לקוח B (אותו role, sub = B): לא רואה כלום של A

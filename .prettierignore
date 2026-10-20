@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+coverage
+pnpm-lock.yaml
+next-env.d.ts
+# תיקיות של סוכנים/כלים אחרים
+docs/
+scripts/
+design/
+supabase/

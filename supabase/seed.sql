@@ -6,6 +6,8 @@
 -- משתמש B: יוסי כהן — רו"ח, מנוי בסיסי פעיל (HYP), Google מחובר, תשלום אחד.
 -- =============================================================================
 
+begin;
+
 -- ---------- users ----------
 insert into public.users (id, email, name, business_name, business_type, timezone, morning_time, locale, profile, created_at)
 values
@@ -68,7 +70,7 @@ values
    '[{"text": "רונית היא המזכירה של דנה", "learned_at": "2026-10-17T08:00:00Z"}]'::jsonb),
   ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'יוסי רו"ח, עוקב אחרי חשבוניות ודוחות מע"מ.',
    'bbbbbbbb-0000-4000-8000-000000000011',
-   '[{"text": "דוח מע"מ מוגש ב-15 לחודש", "learned_at": "2026-09-20T10:00:00Z"}]'::jsonb);
+   '[{"text": "דוח מע\"מ מוגש ב-15 לחודש", "learned_at": "2026-09-20T10:00:00Z"}]'::jsonb);
 
 -- ---------- pending_actions (A: טיוטת מייל ממתינה לאישור) ----------
 insert into public.pending_actions (id, user_id, kind, payload, status, expires_at, created_at)
@@ -136,3 +138,5 @@ values
 -- ---------- auth_otps (דוגמה לקוד שנוצל) ----------
 insert into public.auth_otps (email, code_hash, expires_at, attempts, used_at, created_at)
 values ('dana@example.com', 'demo-hash-not-a-real-code', now() - interval '3 days' + interval '10 minutes', 0, now() - interval '3 days' + interval '1 minute', now() - interval '3 days');
+
+commit;
