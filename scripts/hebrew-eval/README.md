@@ -30,7 +30,9 @@ npm run judge -- --run-id <id>    # results/<run-id>/scores.json
 npm run report -- --run-id <id>   # results/<run-id>/report.md
 ```
 
-דגלים שימושיים: `--models claude-haiku-5-5,claude-sonnet-5-5` (רק חלק מהמודלים), `--limit 10` (רק 10 הודעות ראשונות), `--concurrency 4`, `--timeout 90000`, `--retries 3`, `--run-id שם`. בלי `--run-id`, judge/report לוקחים את הריצה האחרונה.
+דגלים שימושיים: `--models claude-haiku-5-5,claude-sonnet-5-5` (רק חלק מהמודלים), `--limit 10` (רק 10 הודעות ראשונות), `--ids msg-001,msg-050` (תת-קבוצה — למשל 20 הודעות למודל יקר), `--budget 3` (תקרת הוצאה בדולרים לכל הריצה, eval+judge: הערכה מראש ועצירה קשה; נשמר ב-`results/<run>/spend.json`), `--max-rounds 4` (סבבי כלים), `--redo-truncated` (הרצה מחדש של רשומות שנקטעו), `--concurrency 4`, `--timeout 90000`, `--retries 3`, `--run-id שם`. בלי `--run-id`, judge/report לוקחים את הריצה האחרונה. הרצה חוזרת עם אותו `--run-id` ממזגת מודלים חדשים לאותה ריצה, והשופט שופט רק רשומות חדשות/שהשתנו.
+
+התוצאות של הריצה האמיתית מ-20.10.2026 (Anthropic בלבד): `docs/hebrew-eval-report.md`.
 
 הרצה שנקטעה אפשר להריץ שוב עם אותו `--run-id` — רשומות שכבר הצליחו לא רצות שוב.
 
