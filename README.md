@@ -22,7 +22,8 @@ pnpm dev                     # http://localhost:3000
 האתר עולה גם בלי משתני סביבה — הוולידציה (`lib/env.ts`) רצה עצלה: כל מודול דורש רק מה שהוא צריך (`requireEnv([...])`) ונכשל עם הודעה בעברית שמפרטת את החסר.
 `GET /api/health` מחזיר `checks.env: "ok" | "incomplete"` (שמות בלבד, בלי ערכים).
 
-**פיתוח בלי Supabase/Resend:** `DATA_MODE=memory pnpm dev` — שכבת נתונים בזיכרון וקוד ה-OTP מודפס לקונסול (`[mail] קוד אימות ל-…`). אסור ב-production.
+**פיתוח בלי Supabase/Resend/Meta/Anthropic:** `DATA_MODE=memory pnpm dev` — שכבת נתונים בזיכרון, קוד ה-OTP מודפס לקונסול (`[mail] קוד אימות ל-…`), הודעות הבוט מודפסות (`[wa:text] → …`), מודל mock, תור מקומי. אסור ב-production.
+לדמות webhook של Meta מקומית: לחתום את ה-body ב-HMAC-SHA256 עם `META_APP_SECRET` ולשלוח `POST /api/wa/webhook` עם `x-hub-signature-256: sha256=<hex>`.
 זרימת ההרשמה: `/start` → קוד → `/start/connect` → `/start/link` → `/account`.
 
 ## סקריפטים
@@ -49,6 +50,8 @@ app/
   (auth)/start/         הרשמה: מייל → /start/code (קוד) → /start/connect (M365/Google, דילוג) → /start/link (wa.me + טוקן). UI זמני עד בחירת עיצוב
   account/              האזור האישי: חיבורים (ניתוק), מספרי וואטסאפ, מנוי (ביטול), מחיקת חשבון — Server Actions
   api/auth/otp/send     POST {email} → קוד במייל (Resend) · api/auth/otp/verify POST {email, code} → עוגיית session
+  api/wa/webhook        GET אימות רישום (WA_VERIFY_TOKEN) · POST אימות X-Hub-Signature-256 על ה-body הגולמי → תור (QStash / מקומי) → 200 מיידי
+  api/wa/worker         מריץ משימה אחת מהתור (אימות חתימת QStash או סוד פנימי) → lib/bot
   api/health/route.ts   בדיקת חיות
 components/ui/          shadcn: button, input, card, input-otp, dialog, sonner, direction (נוצרו ב-CLI, RTL-aware)
 lib/
@@ -60,6 +63,11 @@ lib/
   auth/                 otp.ts (6 ספרות, 10 דק', 5 ניסיונות, 60 שנ' בין שליחות, 5 לשעה), session.ts (עוגייה חתומה 30 יום), link-token.ts (XXXX-XXXX, 15 דק'), keys.ts (HKDF מ-TOKEN_ENC_KEY)
   account/service.ts    לוגיקת האזור האישי (ניתוק, ביטול מנוי, מחיקה) — ללא תלות ב-Next, נבדק עם MemoryDb
   rate-limit.ts         חלון הזזה בזיכרון (לפי IP) + clientIp()
+  wa/                   client.ts (Cloud API: טקסט/כפתורים/רשימה/תמונה/ריאקשן/נקרא+typing/תבנית/מדיה), webhook.ts (פרסור), signature.ts, sender.ts (ממשק + מקליט לבדיקות)
+  queue/                qstash.ts (publish + אימות JWT), local.ts (fallback בתהליך), index.ts
+  ai/                   types.ts (ממשק ספק), anthropic.ts (SDK, Haiku 5.5 router / Sonnet 5.5 strong, adaptive+low, caching), mock.ts, system-prompt.ts, tools.ts (draft_email, create_event, set_morning_time, remember_fact), memory.ts (סיכום מתגלגל + עובדות), orchestrator.ts (router → strong + לולאת כלים)
+  bot/                  process-inbound.ts (הצינור: dedupe → זהות → ✅/typing → כפתורים → היכרות → מכסה → עוזר → זיכרון), linking.ts, onboarding.ts, pending.ts (שלח/ערוך/בטל + executors), context.ts
+  copy/bot.ts           כל הטקסטים של הבוט לפי ה-ids ב-docs/copy/bot-copy.md (בדיקה מוודאת שכל id מתועד)
   product.ts            PRODUCT_NAME = "{{שם}}" עד שייבחר שם
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
   hyp/sign.ts           HYP APISign: בניית SIGN / VERIFY, URL דף תשלום, פרסור תשובות, redact ללוגים

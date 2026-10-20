@@ -2,9 +2,16 @@ import { randomUUID } from "node:crypto";
 import type {
   AuditEntry,
   ConnectionRow,
+  ConversationStateRow,
   Db,
+  LinkAttemptResult,
   LinkTokenRow,
+  MessageRow,
+  NewMessage,
   OtpRow,
+  PendingActionKind,
+  PendingActionRow,
+  PendingActionStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -26,6 +33,12 @@ export class MemoryDb implements Db {
   subscriptions = new Map<string, SubscriptionRow>();
   usage: UsageRow[] = [];
   audit: (AuditEntry & { created_at: string })[] = [];
+  messages: MessageRow[] = [];
+  states = new Map<string, ConversationStateRow>();
+  pendingActions: PendingActionRow[] = [];
+  linkAttempts = new Map<string, { attempts: number; last: number; blockedUntil: number | null }>();
+  /** test clock */
+  now: () => Date = () => new Date();
 
   async findUserByEmail(email: string): Promise<UserRow | null> {
     for (const u of this.users.values()) if (u.email === email && !u.deleted_at) return u;
@@ -48,11 +61,19 @@ export class MemoryDb implements Db {
       timezone: "Asia/Jerusalem",
       morning_time: "07:30",
       locale: "he-IL",
+      profile: {},
       created_at: iso(),
       deleted_at: null,
     };
     this.users.set(user.id, user);
     return user;
+  }
+
+  async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
+    const u = this.users.get(id);
+    if (!u) throw new Error("user not found");
+    u.profile = { ...u.profile, ...patch };
+    return u;
   }
 
   async updateUserProfile(id: string, patch: Partial<UserRow>): Promise<UserRow> {
@@ -69,6 +90,9 @@ export class MemoryDb implements Db {
     this.connections = this.connections.filter((c) => c.user_id !== id);
     this.subscriptions.delete(id);
     this.usage = this.usage.filter((u) => u.user_id !== id);
+    this.messages = this.messages.filter((m) => m.user_id !== id);
+    this.states.delete(id);
+    this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -143,6 +167,121 @@ export class MemoryDb implements Db {
     if (!row) return false;
     row.status = "unlinked";
     return true;
+  }
+
+  async findWaIdentityByPhone(phoneE164: string): Promise<WaIdentityRow | null> {
+    return this.waIdentities.find((w) => w.phone_e164 === phoneE164 && w.status !== "unlinked") ?? null;
+  }
+
+  async createWaIdentity(userId: string, phoneE164: string, waName: string | null): Promise<WaIdentityRow> {
+    const existing = this.waIdentities.find((w) => w.phone_e164 === phoneE164);
+    if (existing) {
+      if (existing.status !== "unlinked") throw new Error("duplicate phone");
+      existing.user_id = userId;
+      existing.status = "active";
+      existing.wa_name = waName;
+      existing.linked_at = iso(this.now());
+      return existing;
+    }
+    const row: WaIdentityRow = { id: randomUUID(), user_id: userId, phone_e164: phoneE164, wa_name: waName, linked_at: iso(this.now()), status: "active" };
+    this.waIdentities.push(row);
+    return row;
+  }
+
+  async recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult> {
+    const t = this.now().getTime();
+    const cur = this.linkAttempts.get(phoneE164) ?? { attempts: 0, last: t, blockedUntil: null };
+    if (cur.blockedUntil && cur.blockedUntil > t) return { attempts: cur.attempts, blocked: true };
+    cur.attempts += 1;
+    cur.last = t;
+    if (cur.attempts >= maxAttempts) cur.blockedUntil = t + blockMs;
+    this.linkAttempts.set(phoneE164, cur);
+    return { attempts: cur.attempts, blocked: cur.blockedUntil !== null && cur.blockedUntil > t };
+  }
+
+  async isPhoneBlocked(phoneE164: string): Promise<boolean> {
+    const cur = this.linkAttempts.get(phoneE164);
+    return Boolean(cur?.blockedUntil && cur.blockedUntil > this.now().getTime());
+  }
+
+  async insertMessage(row: NewMessage): Promise<MessageRow | null> {
+    if (row.wa_message_id && this.messages.some((m) => m.wa_message_id === row.wa_message_id)) return null;
+    const full: MessageRow = {
+      id: randomUUID(),
+      user_id: row.user_id,
+      wa_message_id: row.wa_message_id ?? null,
+      direction: row.direction,
+      type: row.type ?? "text",
+      text: row.text ?? null,
+      media_url: row.media_url ?? null,
+      transcript: row.transcript ?? null,
+      model_used: row.model_used ?? null,
+      tokens_in: row.tokens_in ?? null,
+      tokens_out: row.tokens_out ?? null,
+      cost_usd: row.cost_usd ?? null,
+      created_at: iso(this.now()),
+    };
+    this.messages.push(full);
+    return full;
+  }
+
+  async recentMessages(userId: string, limit: number): Promise<MessageRow[]> {
+    return this.messages.filter((m) => m.user_id === userId).slice(-limit);
+  }
+
+  async countMessagesSince(userId: string, since: Date): Promise<number> {
+    return this.messages.filter((m) => m.user_id === userId && m.created_at >= iso(since)).length;
+  }
+
+  async getConversationState(userId: string): Promise<ConversationStateRow | null> {
+    return this.states.get(userId) ?? null;
+  }
+
+  async upsertConversationState(userId: string, patch: Partial<Pick<ConversationStateRow, "summary" | "last_summarized_msg_id" | "facts">>): Promise<ConversationStateRow> {
+    const cur = this.states.get(userId) ?? { user_id: userId, summary: null, last_summarized_msg_id: null, facts: [], updated_at: iso(this.now()) };
+    const next = { ...cur, ...patch, updated_at: iso(this.now()) };
+    this.states.set(userId, next);
+    return next;
+  }
+
+  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow> {
+    const row: PendingActionRow = { id: randomUUID(), user_id: userId, kind, payload, status: "pending", expires_at: iso(expiresAt), approved_msg_id: null, executed_at: null, error: null, created_at: iso(this.now()) };
+    this.pendingActions.push(row);
+    return row;
+  }
+
+  async getPendingAction(id: string): Promise<PendingActionRow | null> {
+    return this.pendingActions.find((p) => p.id === id) ?? null;
+  }
+
+  async updatePendingAction(id: string, patch: Partial<Pick<PendingActionRow, "status" | "payload" | "approved_msg_id" | "executed_at" | "error">>): Promise<PendingActionRow | null> {
+    const row = this.pendingActions.find((p) => p.id === id);
+    if (!row) return null;
+    Object.assign(row, patch);
+    return row;
+  }
+
+  async listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]> {
+    return this.pendingActions.filter((p) => p.user_id === userId && p.status === status);
+  }
+
+  /** Mirrors public.count_trial_message(): trial = one period from signup (10), paid = calendar month (750/3000). */
+  async countTrialMessage(userId: string): Promise<number> {
+    const user = this.users.get(userId);
+    if (!user || user.deleted_at) throw new Error(`count_trial_message: user ${userId} not found`);
+    const sub = this.subscriptions.get(userId);
+    const plan = sub && (sub.status === "active" || sub.status === "past_due" || (sub.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > this.now().getTime())) ? sub.plan : "trial";
+    const limit = plan === "trial" ? 10 : plan === "basic" ? 750 : 3000;
+    const period = plan === "trial" ? user.created_at.slice(0, 10) : iso(this.now()).slice(0, 7) + "-01";
+    let row = this.usage.find((u) => u.user_id === userId && u.period_start === period);
+    if (!row) {
+      row = { user_id: userId, period_start: period, counted_messages: 0, free_remaining: limit, plan_limit: limit };
+      this.usage.push(row);
+    }
+    if (row.free_remaining <= 0) return -1;
+    row.counted_messages += 1;
+    row.free_remaining -= 1;
+    return row.free_remaining;
   }
 
   async listConnections(userId: string): Promise<ConnectionRow[]> {

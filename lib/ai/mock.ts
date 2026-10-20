@@ -1,0 +1,66 @@
+import type { AiProvider, CompletionRequest, CompletionResponse, ToolCall } from "./types";
+
+type Scripted = Partial<CompletionResponse> | ((req: CompletionRequest) => Partial<CompletionResponse>);
+
+const zeroUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+/**
+ * Deterministic provider for tests and `DATA_MODE=memory` dev runs. Two modes:
+ *   - scripted: push responses with `enqueue()`; each `complete()` consumes one.
+ *   - heuristic (default): keyword rules in Hebrew that mimic the router / strong behaviour
+ *     (classification JSON, tool calls for drafts/meetings, short Hebrew replies).
+ */
+export class MockProvider implements AiProvider {
+  readonly name = "mock";
+  readonly calls: CompletionRequest[] = [];
+  private queue: Scripted[] = [];
+
+  enqueue(...responses: Scripted[]): this {
+    this.queue.push(...responses);
+    return this;
+  }
+
+  async complete(req: CompletionRequest): Promise<CompletionResponse> {
+    this.calls.push(req);
+    const base: CompletionResponse = { text: "", toolCalls: [], stopReason: "end_turn", usage: zeroUsage, costUsd: 0, model: `mock-${req.tier}` };
+    const scripted = this.queue.shift();
+    if (scripted) return { ...base, ...(typeof scripted === "function" ? scripted(req) : scripted) };
+    return { ...base, ...heuristic(req) };
+  }
+}
+
+function lastUserText(req: CompletionRequest): string {
+  for (let i = req.messages.length - 1; i >= 0; i--) {
+    const m = req.messages[i]!;
+    if (m.role === "user") return m.content;
+  }
+  return "";
+}
+
+function hasToolResult(req: CompletionRequest, name: string): boolean {
+  return req.messages.some((m) => m.role === "tool" && m.results.some((r) => r.name === name));
+}
+
+function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
+  const text = lastUserText(req);
+  if (req.json) {
+    // router classification
+    const simple = /^(תודה|היי|שלום|בוקר טוב|ערב טוב|מה שלומך|אוקיי|סבבה|בסדר)/.test(text.trim()) || text.trim().length < 4;
+    const intent = /מייל|תנסח|תכתוב|תשלח/.test(text) ? "email" : /פגישה|יומן|תקבע|מחר/.test(text) ? "calendar" : /תזכיר/.test(text) ? "reminder" : /קובץ|מסמך/.test(text) ? "files" : simple ? "smalltalk" : "other";
+    return { text: JSON.stringify({ intent, complexity: simple ? "simple" : "tool", needs_tools: !simple, reply: simple ? "בשמחה. אם צריך משהו — אני כאן." : null }) };
+  }
+  const tools = new Set((req.tools ?? []).map((t) => t.name));
+  if (tools.has("draft_email") && /מייל|תנסח|תכתוב/.test(text) && !hasToolResult(req, "draft_email")) {
+    const to = (text.match(/ל([א-ת]{2,})/)?.[1] ?? "לקוח").replace(/^ל/, "");
+    const call: ToolCall = { id: "call_draft_1", name: "draft_email", input: { to_name: to, to_email: `${to}@example.com`, subject: "בהמשך לשיחתנו", body: `שלום ${to},\n\n${text}\n\nבברכה` } };
+    return { toolCalls: [call], stopReason: "tool_use", text: "" };
+  }
+  if (tools.has("create_event") && /תקבע|קבע לי|פגישה חדשה/.test(text) && !hasToolResult(req, "create_event")) {
+    const call: ToolCall = { id: "call_event_1", name: "create_event", input: { title: "פגישה", date: "2026-10-22", start: "10:00", end: "11:00", location: "", attendees: [] } };
+    return { toolCalls: [call], stopReason: "tool_use", text: "" };
+  }
+  if (hasToolResult(req, "draft_email")) return { text: "הכנתי טיוטה — לשלוח?" };
+  if (hasToolResult(req, "create_event")) return { text: "הפרטים למעלה — לקבוע?" };
+  if (/מה יש לי מחר/.test(text)) return { text: "כדי לראות את היומן צריך לחבר את Microsoft 365 או Google. לכתוב \"לחבר את המייל\" ואשלח קישור." };
+  return { text: "קיבלתי. מה עוד אפשר לעזור?" };
+}

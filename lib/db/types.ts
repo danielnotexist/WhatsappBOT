@@ -21,6 +21,8 @@ export interface UserRow {
   timezone: string;
   morning_time: string;
   locale: string;
+  /** free-form JSON the bot maintains (PLAN §2.2 profile, onboarding state, preferences) */
+  profile: Record<string, unknown>;
   created_at: string;
   deleted_at: string | null;
 }
@@ -84,12 +86,75 @@ export interface UsageRow {
   plan_limit: number;
 }
 
+export type MessageDirection = "in" | "out";
+export type MessageType = "text" | "audio" | "image" | "doc" | "button" | "template" | "other";
+
+export interface MessageRow {
+  id: string;
+  user_id: string;
+  wa_message_id: string | null;
+  direction: MessageDirection;
+  type: MessageType;
+  text: string | null;
+  media_url: string | null;
+  transcript: string | null;
+  model_used: string | null;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  cost_usd: number | null;
+  created_at: string;
+}
+
+export interface NewMessage {
+  user_id: string;
+  wa_message_id?: string | null;
+  direction: MessageDirection;
+  type?: MessageType;
+  text?: string | null;
+  media_url?: string | null;
+  transcript?: string | null;
+  model_used?: string | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  cost_usd?: number | null;
+}
+
+export interface ConversationStateRow {
+  user_id: string;
+  summary: string | null;
+  last_summarized_msg_id: string | null;
+  facts: string[];
+  updated_at: string;
+}
+
+export type PendingActionKind = "send_mail" | "create_event" | "update_event" | "delete_event" | "share_file";
+export type PendingActionStatus = "pending" | "approved" | "edited" | "cancelled" | "executed" | "expired" | "failed";
+
+export interface PendingActionRow {
+  id: string;
+  user_id: string;
+  kind: PendingActionKind;
+  payload: Record<string, unknown>;
+  status: PendingActionStatus;
+  expires_at: string;
+  approved_msg_id: string | null;
+  executed_at: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface LinkAttemptResult {
+  attempts: number;
+  blocked: boolean;
+}
+
 export interface AuditEntry {
   user_id: string | null;
   action: string;
   target?: string | null;
   reason?: string | null;
   result?: string | null;
+  approved_by_msg_id?: string | null;
 }
 
 export interface Db {
@@ -118,9 +183,37 @@ export interface Db {
   latestLinkToken(userId: string): Promise<LinkTokenRow | null>;
   markLinkTokenUsed(id: string): Promise<void>;
 
+  /** Deep-merges into users.profile (top-level keys replaced). */
+  mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow>;
+
   // wa_identities
   listWaIdentities(userId: string): Promise<WaIdentityRow[]>;
   unlinkWaIdentity(userId: string, id: string): Promise<boolean>;
+  findWaIdentityByPhone(phoneE164: string): Promise<WaIdentityRow | null>;
+  createWaIdentity(userId: string, phoneE164: string, waName: string | null): Promise<WaIdentityRow>;
+
+  // wa_link_attempts (unlinked numbers trying tokens; blocked after 3 — PLAN §2.3)
+  recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult>;
+  isPhoneBlocked(phoneE164: string): Promise<boolean>;
+
+  // messages
+  /** Inserts; returns null when wa_message_id already exists (webhook redelivery). */
+  insertMessage(row: NewMessage): Promise<MessageRow | null>;
+  recentMessages(userId: string, limit: number): Promise<MessageRow[]>;
+  countMessagesSince(userId: string, since: Date): Promise<number>;
+
+  // conversation_state
+  getConversationState(userId: string): Promise<ConversationStateRow | null>;
+  upsertConversationState(userId: string, patch: Partial<Pick<ConversationStateRow, "summary" | "last_summarized_msg_id" | "facts">>): Promise<ConversationStateRow>;
+
+  // pending_actions
+  createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow>;
+  getPendingAction(id: string): Promise<PendingActionRow | null>;
+  updatePendingAction(id: string, patch: Partial<Pick<PendingActionRow, "status" | "payload" | "approved_msg_id" | "executed_at" | "error">>): Promise<PendingActionRow | null>;
+  listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]>;
+
+  // usage — atomic counter (SQL: count_trial_message). Returns messages left after counting, or -1 when exhausted.
+  countTrialMessage(userId: string): Promise<number>;
 
   // connections
   listConnections(userId: string): Promise<ConnectionRow[]>;

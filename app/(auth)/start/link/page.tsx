@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { getSession } from "@/lib/auth/current-user";
 import { issueLinkToken, linkMessage, waMeUrl } from "@/lib/auth/link-token";
@@ -27,6 +28,7 @@ export default function LinkPage() {
 }
 
 async function LinkCard() {
+  await connection(); // the token expiry uses the current time — never prerender this card
   const session = await getSession();
   if (!session) redirect("/start");
   const token = await issueLinkToken(getDb(), session.userId);

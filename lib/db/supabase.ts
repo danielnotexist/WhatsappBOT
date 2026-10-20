@@ -4,9 +4,16 @@ import { requireEnv } from "@/lib/env";
 import type {
   AuditEntry,
   ConnectionRow,
+  ConversationStateRow,
   Db,
+  LinkAttemptResult,
   LinkTokenRow,
+  MessageRow,
+  NewMessage,
   OtpRow,
+  PendingActionKind,
+  PendingActionRow,
+  PendingActionStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -29,7 +36,9 @@ export class SupabaseDb implements Db {
   }
 
   private static USER_COLS =
-    "id,email,name,business_name,business_type,timezone,morning_time,locale,created_at,deleted_at";
+    "id,email,name,business_name,business_type,timezone,morning_time,locale,profile,created_at,deleted_at";
+  private static PA_COLS = "id,user_id,kind,payload,status,expires_at,approved_msg_id,executed_at,error,created_at";
+  private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,created_at";
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,created_at,revoked_at";
   private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at";
@@ -79,6 +88,145 @@ export class SupabaseDb implements Db {
       .single();
     if (error) this.fail("updateUserProfile", error);
     return data as unknown as UserRow;
+  }
+
+  async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
+    const current = await this.getUser(id);
+    if (!current) throw new Error("user not found");
+    return this.updateUserProfile(id, { profile: { ...current.profile, ...patch } } as Partial<UserRow>);
+  }
+
+  async findWaIdentityByPhone(phoneE164: string): Promise<WaIdentityRow | null> {
+    const { data, error } = await this.client
+      .from("wa_identities")
+      .select("id,user_id,phone_e164,wa_name,linked_at,status")
+      .eq("phone_e164", phoneE164)
+      .neq("status", "unlinked")
+      .maybeSingle();
+    if (error) this.fail("findWaIdentityByPhone", error);
+    return (data as unknown as WaIdentityRow | null) ?? null;
+  }
+
+  async createWaIdentity(userId: string, phoneE164: string, waName: string | null): Promise<WaIdentityRow> {
+    // phone_e164 is unique: an unlinked row for the same number is re-assigned instead of inserted
+    const { data, error } = await this.client
+      .from("wa_identities")
+      .upsert({ user_id: userId, phone_e164: phoneE164, wa_name: waName, status: "active", linked_at: new Date().toISOString() }, { onConflict: "phone_e164" })
+      .select("id,user_id,phone_e164,wa_name,linked_at,status")
+      .single();
+    if (error) this.fail("createWaIdentity", error);
+    return data as unknown as WaIdentityRow;
+  }
+
+  async recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult> {
+    const now = new Date();
+    const { data: cur, error: readError } = await this.client
+      .from("wa_link_attempts")
+      .select("attempts,blocked_until")
+      .eq("phone_e164", phoneE164)
+      .maybeSingle();
+    if (readError) this.fail("recordLinkAttempt", readError);
+    const row = cur as { attempts: number; blocked_until: string | null } | null;
+    if (row?.blocked_until && Date.parse(row.blocked_until) > now.getTime()) return { attempts: row.attempts, blocked: true };
+    const attempts = (row?.attempts ?? 0) + 1;
+    const blockedUntil = attempts >= maxAttempts ? new Date(now.getTime() + blockMs).toISOString() : null;
+    const { error } = await this.client
+      .from("wa_link_attempts")
+      .upsert({ phone_e164: phoneE164, attempts, last_attempt_at: now.toISOString(), blocked_until: blockedUntil }, { onConflict: "phone_e164" });
+    if (error) this.fail("recordLinkAttempt", error);
+    return { attempts, blocked: blockedUntil !== null };
+  }
+
+  async isPhoneBlocked(phoneE164: string): Promise<boolean> {
+    const { data, error } = await this.client.from("wa_link_attempts").select("blocked_until").eq("phone_e164", phoneE164).maybeSingle();
+    if (error) this.fail("isPhoneBlocked", error);
+    const until = (data as { blocked_until: string | null } | null)?.blocked_until;
+    return Boolean(until && Date.parse(until) > Date.now());
+  }
+
+  async insertMessage(row: NewMessage): Promise<MessageRow | null> {
+    const { data, error } = await this.client.from("messages").insert(row).select(SupabaseDb.MSG_COLS).single();
+    if (error) {
+      if (error.code === "23505") return null; // unique_violation on wa_message_id → redelivery
+      this.fail("insertMessage", error);
+    }
+    return data as unknown as MessageRow;
+  }
+
+  async recentMessages(userId: string, limit: number): Promise<MessageRow[]> {
+    const { data, error } = await this.client
+      .from("messages")
+      .select(SupabaseDb.MSG_COLS)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) this.fail("recentMessages", error);
+    return ((data as unknown as MessageRow[]) ?? []).reverse();
+  }
+
+  async countMessagesSince(userId: string, since: Date): Promise<number> {
+    const { count, error } = await this.client
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .gte("created_at", since.toISOString());
+    if (error) this.fail("countMessagesSince", error);
+    return count ?? 0;
+  }
+
+  async getConversationState(userId: string): Promise<ConversationStateRow | null> {
+    const { data, error } = await this.client.from("conversation_state").select("*").eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getConversationState", error);
+    return (data as unknown as ConversationStateRow | null) ?? null;
+  }
+
+  async upsertConversationState(userId: string, patch: Partial<Pick<ConversationStateRow, "summary" | "last_summarized_msg_id" | "facts">>): Promise<ConversationStateRow> {
+    const { data, error } = await this.client
+      .from("conversation_state")
+      .upsert({ user_id: userId, ...patch }, { onConflict: "user_id" })
+      .select("*")
+      .single();
+    if (error) this.fail("upsertConversationState", error);
+    return data as unknown as ConversationStateRow;
+  }
+
+  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow> {
+    const { data, error } = await this.client
+      .from("pending_actions")
+      .insert({ user_id: userId, kind, payload, expires_at: expiresAt.toISOString() })
+      .select(SupabaseDb.PA_COLS)
+      .single();
+    if (error) this.fail("createPendingAction", error);
+    return data as unknown as PendingActionRow;
+  }
+
+  async getPendingAction(id: string): Promise<PendingActionRow | null> {
+    const { data, error } = await this.client.from("pending_actions").select(SupabaseDb.PA_COLS).eq("id", id).maybeSingle();
+    if (error) this.fail("getPendingAction", error);
+    return (data as unknown as PendingActionRow | null) ?? null;
+  }
+
+  async updatePendingAction(id: string, patch: Partial<Pick<PendingActionRow, "status" | "payload" | "approved_msg_id" | "executed_at" | "error">>): Promise<PendingActionRow | null> {
+    const { data, error } = await this.client.from("pending_actions").update(patch).eq("id", id).select(SupabaseDb.PA_COLS).maybeSingle();
+    if (error) this.fail("updatePendingAction", error);
+    return (data as unknown as PendingActionRow | null) ?? null;
+  }
+
+  async listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]> {
+    const { data, error } = await this.client
+      .from("pending_actions")
+      .select(SupabaseDb.PA_COLS)
+      .eq("user_id", userId)
+      .eq("status", status)
+      .order("created_at", { ascending: true });
+    if (error) this.fail("listPendingActions", error);
+    return (data as unknown as PendingActionRow[]) ?? [];
+  }
+
+  async countTrialMessage(userId: string): Promise<number> {
+    const { data, error } = await this.client.rpc("count_trial_message", { p_user_id: userId });
+    if (error) this.fail("countTrialMessage", error);
+    return Number(data);
   }
 
   async deleteUser(id: string): Promise<void> {
@@ -262,6 +410,7 @@ export class SupabaseDb implements Db {
       target: entry.target ?? null,
       reason: entry.reason ?? null,
       result: entry.result ?? null,
+      approved_by_msg_id: entry.approved_by_msg_id ?? null,
     });
     if (error) this.fail("addAudit", error);
   }
