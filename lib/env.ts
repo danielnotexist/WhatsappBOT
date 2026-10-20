@@ -41,6 +41,10 @@ export const serverSchema = z.object({
 
   // ---- WhatsApp Cloud API (Meta) ----
   WA_PHONE_NUMBER_ID: nonEmpty,
+  /** המספר הציבורי של הבוט בפורמט E.164 בלי "+" (ל-wa.me), למשל 972501234567 */
+  WA_PUBLIC_NUMBER: z.string().regex(/^[1-9][0-9]{7,14}$/, {
+    message: "WA_PUBLIC_NUMBER חייב להיות ספרות בלבד בפורמט בינלאומי בלי +, למשל 972501234567",
+  }),
   WA_ACCESS_TOKEN: nonEmpty,
   WA_VERIFY_TOKEN: nonEmpty,
   META_APP_SECRET: nonEmpty,
@@ -72,6 +76,40 @@ export const serverSchema = z.object({
   // ---- Resend (OTP במייל) ----
   RESEND_API_KEY: nonEmpty,
 });
+
+/**
+ * מצב נתונים: "supabase" (ברירת מחדל) או "memory" — שכבת נתונים בזיכרון + מיילר לקונסול, לפיתוח/בדיקות בלי Supabase ו-Resend.
+ * לא מותר ב-production.
+ */
+export const dataModeSchema = z.enum(["supabase", "memory"]).default("supabase");
+export type DataMode = z.infer<typeof dataModeSchema>;
+
+export function dataMode(source: Record<string, string | undefined> = process.env): DataMode {
+  const mode = dataModeSchema.parse(source.DATA_MODE || undefined);
+  if (mode === "memory" && source.NODE_ENV === "production") {
+    throw new Error("DATA_MODE=memory אסור ב-production — הסירו את המשתנה או הגדירו supabase.");
+  }
+  return mode;
+}
+
+/**
+ * דורש קבוצת משתנים ספציפית (למשל רק Supabase) וזורק EnvError בעברית עם השמות החסרים.
+ * מאפשר לכל מודול לדרוש רק מה שהוא צריך, במקום את כל הסכמה.
+ */
+export function requireEnv<K extends keyof ServerEnv>(
+  keys: readonly K[],
+  source: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): Pick<ServerEnv, K> {
+  const issues: z.core.$ZodIssue[] = [];
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    const result = serverSchema.shape[key].safeParse(source[key]);
+    if (result.success) out[key] = result.data;
+    else issues.push(...result.error.issues.map((issue) => ({ ...issue, path: [key, ...issue.path] })));
+  }
+  if (issues.length) throw new EnvError(issues);
+  return out as Pick<ServerEnv, K>;
+}
 
 export const clientSchema = z.object({
   /** כתובת האתר כפי שהדפדפן רואה אותה (אופציונלי; בשרת משתמשים ב-APP_URL). */

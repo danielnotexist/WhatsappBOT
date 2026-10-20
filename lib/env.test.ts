@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { EnvError, SERVER_ENV_KEYS, checkServerEnv, parseServerEnv } from "./env";
+import { EnvError, SERVER_ENV_KEYS, checkServerEnv, dataMode, parseServerEnv, requireEnv } from "./env";
 
 const validEnv: Record<string, string> = {
   NODE_ENV: "test",
@@ -10,6 +10,7 @@ const validEnv: Record<string, string> = {
   SUPABASE_SERVICE_ROLE_KEY: "service",
   TOKEN_ENC_KEY: randomBytes(32).toString("base64"),
   WA_PHONE_NUMBER_ID: "123",
+  WA_PUBLIC_NUMBER: "972501234567",
   WA_ACCESS_TOKEN: "EAAG...",
   WA_VERIFY_TOKEN: "verify",
   META_APP_SECRET: "secret",
@@ -44,6 +45,7 @@ describe("lib/env", () => {
       "SUPABASE_SERVICE_ROLE_KEY",
       "TOKEN_ENC_KEY",
       "WA_PHONE_NUMBER_ID",
+      "WA_PUBLIC_NUMBER",
       "WA_ACCESS_TOKEN",
       "WA_VERIFY_TOKEN",
       "META_APP_SECRET",
@@ -87,5 +89,26 @@ describe("lib/env", () => {
 
   it("rejects an APP_URL that is not a URL", () => {
     expect(() => parseServerEnv({ ...validEnv, APP_URL: "localhost" })).toThrow(EnvError);
+  });
+
+  it("requireEnv checks only the requested keys and names the missing ones in Hebrew", () => {
+    expect(requireEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"], validEnv).SUPABASE_URL).toBe(
+      "https://abc.supabase.co",
+    );
+    try {
+      requireEnv(["RESEND_API_KEY", "APP_URL"], { APP_URL: "https://x.co.il" });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(EnvError);
+      expect((e as EnvError).missing).toEqual(["RESEND_API_KEY"]);
+      expect((e as EnvError).message).toContain("משתני סביבה חסרים");
+    }
+  });
+
+  it("dataMode defaults to supabase and forbids memory in production", () => {
+    expect(dataMode({})).toBe("supabase");
+    expect(dataMode({ DATA_MODE: "memory", NODE_ENV: "test" })).toBe("memory");
+    expect(() => dataMode({ DATA_MODE: "memory", NODE_ENV: "production" })).toThrow(/production/);
+    expect(() => dataMode({ DATA_MODE: "redis" })).toThrow();
   });
 });

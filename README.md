@@ -19,8 +19,11 @@ cp .env.example .env.local   # ולמלא ערכים (ראו "מה דניאל צ
 pnpm dev                     # http://localhost:3000
 ```
 
-האתר עולה גם בלי משתני סביבה — הוולידציה (`lib/env.ts`) רצה עצלה, רק כשקוד שרת קורא ל-`serverEnv()`.
+האתר עולה גם בלי משתני סביבה — הוולידציה (`lib/env.ts`) רצה עצלה: כל מודול דורש רק מה שהוא צריך (`requireEnv([...])`) ונכשל עם הודעה בעברית שמפרטת את החסר.
 `GET /api/health` מחזיר `checks.env: "ok" | "incomplete"` (שמות בלבד, בלי ערכים).
+
+**פיתוח בלי Supabase/Resend:** `DATA_MODE=memory pnpm dev` — שכבת נתונים בזיכרון וקוד ה-OTP מודפס לקונסול (`[mail] קוד אימות ל-…`). אסור ב-production.
+זרימת ההרשמה: `/start` → קוד → `/start/connect` → `/start/link` → `/account`.
 
 ## סקריפטים
 
@@ -43,13 +46,21 @@ app/
   layout.tsx            <html lang="he" dir="rtl">, פונטים, metadata, theme-color, DirectionProvider, Toaster
   page.tsx              דף נחיתה — placeholder (כותרת + CTA) עד שייבחר כיוון עיצוב
   globals.css           Tailwind 4 + shadcn tokens; --font-sans/--font-heading מגיעים מ-lib/fonts.ts
-  (auth)/start/         מסך הרשמה — placeholder (אבן דרך 1)
+  (auth)/start/         הרשמה: מייל → /start/code (קוד) → /start/connect (M365/Google, דילוג) → /start/link (wa.me + טוקן). UI זמני עד בחירת עיצוב
+  account/              האזור האישי: חיבורים (ניתוק), מספרי וואטסאפ, מנוי (ביטול), מחיקת חשבון — Server Actions
+  api/auth/otp/send     POST {email} → קוד במייל (Resend) · api/auth/otp/verify POST {email, code} → עוגיית session
   api/health/route.ts   בדיקת חיות
 components/ui/          shadcn: button, input, card, input-otp, dialog, sonner, direction (נוצרו ב-CLI, RTL-aware)
 lib/
   env.ts                משתני סביבה — zod, שרת/לקוח, lazy
   crypto.ts             AES-256-GCM לטוקני OAuth (TOKEN_ENC_KEY) + AAD
   fonts.ts              זוג הפונטים הפעיל (להחלפה במקום אחד)
+  db/                   שכבת נתונים: types.ts (ממשק Db), supabase.ts (service-role, שרת בלבד), memory.ts (זיכרון — בדיקות ו-DATA_MODE=memory)
+  mail/                 שליחת קוד OTP: resend.ts (API), console.ts (פיתוח), index.ts (בחירה לפי DATA_MODE)
+  auth/                 otp.ts (6 ספרות, 10 דק', 5 ניסיונות, 60 שנ' בין שליחות, 5 לשעה), session.ts (עוגייה חתומה 30 יום), link-token.ts (XXXX-XXXX, 15 דק'), keys.ts (HKDF מ-TOKEN_ENC_KEY)
+  account/service.ts    לוגיקת האזור האישי (ניתוק, ביטול מנוי, מחיקה) — ללא תלות ב-Next, נבדק עם MemoryDb
+  rate-limit.ts         חלון הזזה בזיכרון (לפי IP) + clientIp()
+  product.ts            PRODUCT_NAME = "{{שם}}" עד שייבחר שם
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
   hyp/sign.ts           HYP APISign: בניית SIGN / VERIFY, URL דף תשלום, פרסור תשובות, redact ללוגים
 proxy.ts                כותרות אבטחה (CSP report-only, HSTS, nosniff, referrer, permissions). ב-Next 16 זה השם של middleware

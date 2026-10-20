@@ -7,7 +7,10 @@ const root = fileURLToPath(new URL("./", import.meta.url));
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: [{ find: /^@\//, replacement: root }],
+    alias: [
+      { find: /^@\//, replacement: root },
+      { find: "server-only", replacement: `${root}vitest.server-only.ts` },
+    ],
   },
   test: {
     // ברירת מחדל: node (lib/*). לבדיקות קומפוננטות מוסיפים בראש הקובץ: // @vitest-environment jsdom

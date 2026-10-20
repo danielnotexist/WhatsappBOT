@@ -45,7 +45,8 @@ describe("lib/crypto (AES-256-GCM)", () => {
   it("detects tampering of ciphertext, tag and iv", () => {
     const sealed = encryptToken("secret-token", { key });
     const [v, iv, ct, tag] = sealed.split(".") as [string, string, string, string];
-    const flip = (s: string) => s.slice(0, -1) + (s.endsWith("A") ? "B" : "A");
+    // Flip the first character: the last one may only carry base64 padding bits, which decode to the same bytes.
+    const flip = (s: string) => (s.startsWith("A") ? "B" : "A") + s.slice(1);
     expect(() => decryptToken([v, iv, flip(ct), tag].join("."), { key })).toThrow(TokenCryptoError);
     expect(() => decryptToken([v, iv, ct, flip(tag)].join("."), { key })).toThrow(TokenCryptoError);
     expect(() => decryptToken([v, flip(iv), ct, tag].join("."), { key })).toThrow(TokenCryptoError);
