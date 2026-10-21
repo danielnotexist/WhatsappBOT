@@ -1,4 +1,6 @@
 import type { Db, PendingActionRow } from "@/lib/db/types";
+import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
+import { REMINDER_TOOLS } from "./reminder-tools";
 import type { ToolDefinition } from "./types";
 
 /** Runtime handed to every tool. `createPending` is how a tool proposes an outbound action (never executes it). */
@@ -88,11 +90,13 @@ export const setMorningTimeTool: Tool = {
     const time = String(input.time ?? "").trim();
     if (time === "off") {
       await ctx.db.mergeUserProfile(ctx.userId, { morning_summary_enabled: false });
+      await rescheduleMorningSummary(ctx.db, ctx.userId, ctx.now);
       return { status: "done", morning_summary: "off" };
     }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { status: "error", error: "פורמט שעה לא תקין (HH:MM)" };
     await ctx.db.updateUserProfile(ctx.userId, { morning_time: time });
     await ctx.db.mergeUserProfile(ctx.userId, { morning_summary_enabled: true });
+    await rescheduleMorningSummary(ctx.db, ctx.userId, ctx.now);
     return { status: "done", morning_time: time };
   },
 };
@@ -118,7 +122,7 @@ export const rememberFactTool: Tool = {
 };
 
 /** Tools available before any Microsoft/Google connection exists. Graph/Google tools register in Milestone 4/6. */
-export const BASE_TOOLS: Tool[] = [draftEmailTool, createEventTool, setMorningTimeTool, rememberFactTool];
+export const BASE_TOOLS: Tool[] = [draftEmailTool, createEventTool, setMorningTimeTool, rememberFactTool, ...REMINDER_TOOLS];
 
 export function toolDefinitions(tools: Tool[]): ToolDefinition[] {
   return tools.map(({ name, description, input_schema }) => ({ name, description, input_schema }));

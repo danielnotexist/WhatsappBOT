@@ -5,6 +5,7 @@ import { payLinkFor } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import type { MessageType } from "@/lib/db/types";
+import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
 import type { BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
@@ -43,6 +44,12 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     await ctx.wa.sendText(to, text);
     await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });
   };
+
+  // 2a. reminder buttons (free-form message buttons and the `reminder` template's quick replies)
+  if ((msg.type === "button" || msg.type === "template_button") && msg.reply?.id.startsWith("rem:")) {
+    await handleReminderButton(ctx, user, to, msg.reply.id);
+    return { handled: true, note: "reminder button" };
+  }
 
   // 2. approval buttons
   if (msg.type === "button" && msg.reply?.id.startsWith("pa:")) {
