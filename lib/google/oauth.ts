@@ -8,7 +8,8 @@ import { requireEnv } from "@/lib/env";
  *   token      https://oauth2.googleapis.com/token
  *   revoke     https://oauth2.googleapis.com/revoke
  * Phase 1 asks only for scopes that do NOT need a CASA security assessment (calendar.events + gmail.send are
- * "sensitive" → app verification; drive.file is non-sensitive). Gmail read is "restricted" → CASA, behind a flag.
+ * "sensitive" → app verification; drive.file is non-sensitive). Gmail read is "restricted": without CASA it is
+ * requested only while under the unverified-app user cap (GOOGLE_GMAIL_READ_ENABLED / _CAP, lib/google/user-cap.ts).
  */
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -24,7 +25,7 @@ export const GOOGLE_SCOPES = {
   driveFile: "https://www.googleapis.com/auth/drive.file",
   /** sensitive — send only; cannot read, list or draft */
   gmailSend: "https://www.googleapis.com/auth/gmail.send",
-  /** restricted — CASA Tier 2 required (PLAN §8 risk 5). Only behind GOOGLE_GMAIL_READ_ENABLED. */
+  /** restricted — CASA Tier 2 for verification (PLAN §8 risk 5); until then only under the user cap (GOOGLE_GMAIL_READ_*). */
   gmailReadonly: "https://www.googleapis.com/auth/gmail.readonly",
   /** restricted — CASA. Only if we later need mark-as-read / labels. */
   gmailModify: "https://www.googleapis.com/auth/gmail.modify",
@@ -46,12 +47,13 @@ export function isGoogleFeature(v: unknown): v is GoogleFeature {
 }
 
 /**
- * Scopes for an authorization request. Base connect → the phase-1 set. A feature → only the new scopes plus
+ * Scopes for an authorization request. Base connect → the phase-1 set (+ `gmail.readonly` when `withGmailRead`:
+ * a connect while under the unverified-app user cap — lib/google/user-cap.ts). A feature → only the new scopes plus
  * openid/email (to identify the account): with `include_granted_scopes=true` Google returns a token that covers
  * everything granted before as well (incremental authorization).
  */
-export function scopesForRequest(feature?: GoogleFeature | null): string[] {
-  if (!feature) return [...GOOGLE_BASE_SCOPES];
+export function scopesForRequest(feature?: GoogleFeature | null, opts: { withGmailRead?: boolean } = {}): string[] {
+  if (!feature) return opts.withGmailRead ? [...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly] : [...GOOGLE_BASE_SCOPES];
   return [GOOGLE_SCOPES.openid, GOOGLE_SCOPES.email, ...GOOGLE_FEATURE_SCOPES[feature]];
 }
 
@@ -233,8 +235,13 @@ export function googleOAuthConfigFromEnv(fetchImpl?: typeof fetch): GoogleOAuthC
   return { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET, redirectUri: new URL(GOOGLE_CALLBACK_PATH, env.APP_URL).toString(), fetchImpl };
 }
 
-/** Feature flag for restricted Gmail scopes — stays `false` until the CASA assessment passes (docs/google-setup.md §6). */
+/**
+ * Feature flag for the restricted Gmail read scope (owner decision 21.10.2026: the first users without CASA, under
+ * Google's 100-user cap for unverified apps — lib/google/user-cap.ts, docs/google-setup.md §6).
+ * Explicit `true`/`false` wins; unset/empty → on when GOOGLE_CLIENT_ID is set (a real Google project), off otherwise.
+ * Anything else → Hebrew EnvError.
+ */
 export function gmailReadEnabled(source: Record<string, string | undefined> = process.env): boolean {
   const parsed = requireEnv(["GOOGLE_GMAIL_READ_ENABLED"], source);
-  return parsed.GOOGLE_GMAIL_READ_ENABLED;
+  return parsed.GOOGLE_GMAIL_READ_ENABLED ?? Boolean(source.GOOGLE_CLIENT_ID?.trim());
 }

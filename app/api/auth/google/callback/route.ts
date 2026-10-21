@@ -4,8 +4,9 @@ import { getDb } from "@/lib/db";
 import { EnvError } from "@/lib/env";
 import { getGoogleConfig, getGoogleFetch } from "@/lib/google";
 import { GoogleClient } from "@/lib/google/client";
-import { GoogleOAuthError, exchangeGoogleCode, isGoogleFeature, missingScopes, parseGoogleIdToken, scopesForRequest } from "@/lib/google/oauth";
+import { GOOGLE_SCOPES, GoogleOAuthError, exchangeGoogleCode, hasScope, isGoogleFeature, missingScopes, parseGoogleIdToken, scopesForRequest } from "@/lib/google/oauth";
 import { sealGoogleTokens, storedGoogleRefreshToken } from "@/lib/google/token-store";
+import { googleConnectShowsUnverified, recordGoogleGrants } from "@/lib/google/user-cap";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { getWaSender } from "@/lib/wa";
 
@@ -17,6 +18,8 @@ interface PendingGoogle {
   verifier?: string;
   returnTo?: string;
   feature?: string | null;
+  /** the scopes the start route requested */
+  scopes?: unknown[];
   via?: string;
   started_at?: string;
 }
@@ -87,13 +90,25 @@ export async function GET(request: Request) {
     const connection = await db.upsertConnection({ user_id: user.id, provider: "google", account_email: email, tenant_id: null, scopes: tokens.scope, consent_type: "user", ...sealGoogleTokens(user.id, { ...tokens, refreshToken }) });
 
     const feature = isGoogleFeature(pending.feature) ? pending.feature : null;
-    const missing = missingScopes(tokens.scope, scopesForRequest(feature)).filter((s) => GOOGLE_CAPABILITY_SCOPES.includes(s));
-    await db.addAudit({ user_id: user.id, action: "google.connect", target: email, result: missing.length ? `partial:${missing.join(" ")}` : feature ? `ok:${feature}` : "ok" });
+    // what was asked (stored by the start route — the cap may have moved since); older states: the static set
+    const stored = Array.isArray(pending.scopes) ? pending.scopes.filter((s): s is string => typeof s === "string") : [];
+    const requested = stored.length ? stored : scopesForRequest(feature);
+    // gmail.readonly riding along a plain connect is optional: unticking it is a choice, not a failed connect
+    const optional: string[] = feature ? [] : [GOOGLE_SCOPES.gmailReadonly];
+    const missing = missingScopes(tokens.scope, requested).filter((s) => GOOGLE_CAPABILITY_SCOPES.includes(s) && !optional.includes(s));
+    const gmailReadDeclined = !feature && requested.includes(GOOGLE_SCOPES.gmailReadonly) && !hasScope(tokens.scope, GOOGLE_SCOPES.gmailReadonly);
+    await db.addAudit({ user_id: user.id, action: "google.connect", target: email, result: missing.length ? `partial:${missing.join(" ")}` : feature ? `ok:${feature}` : gmailReadDeclined ? "ok:gmail_read_declined" : "ok" });
+    // Google's unverified-app user cap counts this account from now on (lib/google/user-cap.ts) — best effort
+    await recordGoogleGrants(db, { userId: user.id, accountEmail: email, granted: tokens.scope }).catch((e) => console.error("[google:callback] user-cap ledger failed:", (e as Error).message));
     if (!user.name && claims.name) await db.updateUserProfile(user.id, { name: claims.name });
     if (!refreshToken) console.warn(`[google:callback] no refresh token for connection ${connection.id} — the user will need to reconnect when the access token expires`);
 
-    await tell(gcopy["g.connect_done"](email, tokens.scope));
-    if (missing.length) await tell(gcopy["g.connect_partial"](missing, new URL(`/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "google"))}`, appUrl).toString()));
+    await tell(gcopy["g.connect_done"](email, tokens.scope, { gmailReadDeclined }));
+    if (missing.length) {
+      const retry = new URL(`/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "google"))}${feature ? `&feature=${feature}` : ""}`, appUrl).toString();
+      const headsUp = await googleConnectShowsUnverified(db, await db.listConnections(user.id));
+      await tell(`${gcopy["g.connect_partial"](missing, retry)}${headsUp ? `\n${gcopy["g.unverified_heads_up"]()}` : ""}`);
+    }
     return back(missing.length ? { ok: true, notice: gcopy["g.web.connected_partial"](email, missing) } : { ok: true, notice: gcopy["g.web.connected"](email) });
   } catch (e) {
     if (e instanceof GoogleOAuthError) {

@@ -4,6 +4,7 @@ import { makeHarness } from "@/lib/bot/test-harness";
 import type { UserRow } from "@/lib/db/types";
 import { createGoogleFixture } from "@/lib/google/__fixtures__/google-fixtures";
 import { GoogleClient } from "@/lib/google/client";
+import { GmailReader } from "@/lib/google/gmail";
 import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
@@ -107,7 +108,7 @@ describe("morning summary — the job", () => {
     expect(withReminder.h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\n\n*תזכורות*\n• 14:00 להתקשר לבנק\n\nשיהיה יום טוב.");
   });
 
-  it("Google-only users get today's Google Calendar meetings (no email section: Gmail is send-only in phase 1)", async () => {
+  it("Google-only users get today's Google Calendar meetings (no email section without a Gmail reader)", async () => {
     const { h, user, deps, job } = await setup({ connected: false });
     const fx = createGoogleFixture();
     const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
@@ -127,6 +128,53 @@ describe("morning summary — the job", () => {
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google }) }, job);
     expect(h.wa.texts.at(-1)).toContain("*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n• 13:00 שיחה עם משפחת אברהם\n\n*מיילים שמחכים לתשובה*");
+  });
+
+  it("Gmail with gmail.readonly: emails awaiting a reply from Gmail (threads.list + threads.get, own replies respected)", async () => {
+    const { h, user, deps, job } = await setup({ connected: false });
+    const fx = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
+    await createReminder(h.db, user, { text: "להתקשר לבנק", when: "היום ב-14:00" }, h.ctx.now());
+    expect(await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: new GmailReader(google), accountEmail: "dana.levi@gmail.com" }) }, job)).toMatchObject({ status: "sent", mode: "template" });
+    expect(h.wa.sent.at(-1)!.template!.params.map((p) => p.text)).toEqual([
+      "יום ד׳ 21.10",
+      "• כל היום — יום הולדת לנועה  • 09:00 פגישת צוות שבועית  • 13:00 שיחה עם משפחת אברהם",
+      // gm2 was answered by gm3 (SENT), the security alert / newsletter tabs and the 1.10 mail are left out
+      "• ספק חדש — חשבונית 4471 — עדכון פרטי בנק  • עו״ד מיכל שפירא — הצעת פשרה בתיק 4471  • רונית בר — פרוטוקול ישיבה",
+      "• 14:00 להתקשר לבנק",
+    ]);
+    const threads = new URL(fx.state.calls.find((c) => c.url.includes("/gmail/v1/users/me/threads?"))!.url);
+    expect(threads.searchParams.get("q")).toContain("in:inbox newer_than:7d -category:promotions");
+    expect(fx.state.calls.filter((c) => /\/threads\/gt\d$/.test(new URL(c.url).pathname))).toHaveLength(4);
+  });
+
+  it("past the user cap (no gmail.readonly → no `gmail`): the summary skips Gmail's emails, the calendar stays", async () => {
+    const { h, deps, job } = await setup({ connected: false });
+    const fx = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
+    await processInbound(h.ctx, h.inbound("תודה"));
+    await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: null, accountEmail: "dana.levi@gmail.com" }) }, job);
+    expect(h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 פגישת צוות שבועית\n• 13:00 שיחה עם משפחת אברהם\n\nשיהיה יום טוב.");
+    expect(fx.state.calls.some((c) => c.url.includes("gmail.googleapis.com"))).toBe(false);
+  });
+
+  it("Microsoft 365 + Gmail: both mailboxes merged newest first (5 at most); a Gmail failure keeps the rest", async () => {
+    const { h, deps, job } = await setup();
+    const fx = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
+    await processInbound(h.ctx, h.inbound("תודה"));
+    await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: new GmailReader(google), accountEmail: "dana.levi@gmail.com" }) }, job);
+    expect(h.wa.texts.at(-1)).toContain(
+      "*מיילים שמחכים לתשובה*\n• ספק חדש — חשבונית 4471 — עדכון פרטי בנק\n• עו״ד מיכל שפירא — הצעת פשרה בתיק 4471\n• רונית בר — פרוטוקול ישיבה\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n• מאי כהן — אישור חשבונית 1023\n\nרוצה שאנסח תשובה למישהו מהם?",
+    );
+
+    const broken = await setup();
+    const fx2 = createGoogleFixture();
+    fx2.state.denied.add("gmail_read"); // e.g. the user removed the permission at myaccount.google.com
+    const g2 = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx2.fetchImpl });
+    await processInbound(broken.h.ctx, broken.h.inbound("תודה"));
+    expect(await runMorningSummaryJob({ ...broken.deps, googleFor: async () => ({ google: g2, gmail: new GmailReader(g2), accountEmail: "dana.levi@gmail.com" }) }, broken.job)).toMatchObject({ status: "sent" });
+    expect(broken.h.wa.texts.at(-1)).toContain("*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n• מאי כהן — אישור חשבונית 1023");
   });
 
   it("an empty connected day still gets the short message", async () => {

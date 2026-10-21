@@ -14,6 +14,7 @@ import { handlePendingButton, presentPendingAction } from "./pending";
 import { handleLoginKeyword } from "./login-link";
 import { transcribeVoiceNote } from "./voice";
 import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
+import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -120,12 +121,12 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   if (connectProvider) {
     const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
     const link = connectLinkFor(ctx, user.id, connectProvider);
-    await say(expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link));
+    await say((expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link)) + (await connectHeadsUpSuffix(ctx.db, connections, connectProvider)));
     return { handled: true, note: "connect link" };
   }
   const reconnect = reconnectProviderFor(text, connections);
   if (reconnect) {
-    await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)));
+    await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)) + (await connectHeadsUpSuffix(ctx.db, connections, reconnect)));
     return { handled: true, note: "connection expired" };
   }
 

@@ -58,8 +58,19 @@ export const serverSchema = z.object({
   // ---- Google ----
   GOOGLE_CLIENT_ID: nonEmpty,
   GOOGLE_CLIENT_SECRET: nonEmpty,
-  /** קריאת Gmail (scope מוגבל) — false עד שעוברים CASA. ראו docs/google-setup.md */
-  GOOGLE_GMAIL_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().default(false)),
+  /**
+   * קריאת Gmail (gmail.readonly, scope מוגבל) בלי CASA — ל-100 המשתמשים הראשונים של אפליקציה לא מאומתת.
+   * ריק = פעיל כש-GOOGLE_CLIENT_ID מוגדר (lib/google/oauth.ts gmailReadEnabled). "false" מכבה. ראו docs/google-setup.md §6.
+   */
+  GOOGLE_GMAIL_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().optional()),
+  /** תקרת המשתמשים (חשבונות Google שונים שאישרו אי-פעם scope לא מאומת). ברירת מחדל 95 — מרווח מתחת ל-100 של Google. */
+  GOOGLE_GMAIL_READ_CAP: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().min(1).max(100).default(95)),
+  /** true אחרי ש-Google אישרה את ה-scopes הרגישים (calendar.events, gmail.send). עד אז גם חיבור רגיל נספר בתקרה. */
+  GOOGLE_SENSITIVE_SCOPES_VERIFIED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().default(false)),
+
+  // ---- תפעול ----
+  /** אופציונלי: כתובת מייל להתראות תפעול (למשל תקרת המשתמשים של Google ב-80 וב-95). ריק = רק לוג + דגל ב-DB. */
+  OPERATOR_EMAIL: z.preprocess((v) => (v === "" ? undefined : v), z.email().optional()),
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,

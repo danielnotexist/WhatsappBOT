@@ -89,6 +89,26 @@ export interface NewConnection {
   expires_at: string;
 }
 
+/**
+ * google_scope_grants (migration 0008): Google accounts that ever granted a scope Google counts toward the
+ * unverified-app user cap (lib/google/user-cap.ts). Kept after revoke and after account deletion (user_id → null),
+ * because Google's cap counts users who granted, for the lifetime of the project.
+ */
+export interface GoogleScopeGrantRow {
+  /** sha256 hex of the lowercased Google account email */
+  account_hash: string;
+  scope: string;
+  user_id: string | null;
+  first_granted_at: string;
+}
+
+/** ops_flags (migration 0008): operator alerts set once (e.g. `google_user_cap:80`). Server only. */
+export interface OpsFlagRow {
+  key: string;
+  value: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface GraphSubscriptionRow {
   id: string;
   connection_id: string;
@@ -328,6 +348,16 @@ export interface Db {
   getConnectionSecret(id: string): Promise<ConnectionSecret | null>;
   updateConnectionTokens(id: string, patch: { enc_access: string; enc_refresh?: string | null; expires_at: string }): Promise<void>;
   setConnectionStatus(id: string, status: ConnectionStatus): Promise<void>;
+
+  // google_scope_grants / ops_flags (migration 0008) — Google's unverified-app user cap (lib/google/user-cap.ts)
+  /** idempotent; true when the (account, scope) pair was not recorded before */
+  recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean>;
+  /** distinct accounts that granted any of `scopes` (ever) */
+  countGoogleScopeAccounts(scopes: string[]): Promise<number>;
+  hasGoogleScopeGrant(accountHash: string, scopes: string[]): Promise<boolean>;
+  /** sets the flag only if absent; true when this call set it */
+  setOpsFlagOnce(key: string, value: Record<string, unknown>): Promise<boolean>;
+  getOpsFlag(key: string): Promise<OpsFlagRow | null>;
 
   // graph_subscriptions
   upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow>;

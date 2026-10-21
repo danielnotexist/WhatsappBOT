@@ -6,7 +6,8 @@ import { setDbForTests } from "@/lib/db";
 import { MemoryDb } from "@/lib/db/memory";
 import { globalSingleton, setGlobalSingleton } from "@/lib/global-singleton";
 import { createGoogleFixture } from "@/lib/google/__fixtures__/google-fixtures";
-import { GOOGLE_SCOPES } from "@/lib/google/oauth";
+import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES } from "@/lib/google/oauth";
+import { googleAccountHash } from "@/lib/google/user-cap";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { setWaSenderForTests } from "@/lib/wa";
 import { RecordingWaSender } from "@/lib/wa/sender";
@@ -127,11 +128,11 @@ describe("Google connect routes (memory mode)", () => {
     expect((await db.listConnections(user.id))[0]!.scopes).not.toContain(GOOGLE_SCOPES.gmailSend);
   });
 
-  it("Gmail read (restricted, CASA) is refused while the flag is off and requested incrementally when on", async () => {
+  it("Gmail read (restricted) is refused while the flag is off and requested incrementally when on", async () => {
     const user = await db.createUser("dana@example.com");
     const off = await startFromChat(user.id, "&feature=gmail_read");
     expect(off.status).toBe(403);
-    expect(await off.text()).toContain("CASA");
+    expect(await off.text()).toBe("קריאת Gmail אינה זמינה כרגע. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.");
 
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
     db.seedConnection(user.id, "google", "dana.levi@gmail.com");
@@ -142,9 +143,64 @@ describe("Google connect routes (memory mode)", () => {
     fixture().grantedScope += ` ${GOOGLE_SCOPES.gmailReadonly}`;
     await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${on.searchParams.get("state")}&code=abc`));
     expect((await db.listConnections(user.id))[0]!.scopes).toContain(GOOGLE_SCOPES.gmailReadonly);
-    expect(db.audit.at(-1)).toMatchObject({ action: "google.connect", result: "ok:gmail_read" });
+    expect(db.audit.filter((a) => a.action === "google.connect").at(-1)).toMatchObject({ result: "ok:gmail_read" });
+    // the grant is in the user-cap ledger (hashed account, never the address)
+    expect(db.googleScopeGrants.map((g) => g.scope)).toContain(GOOGLE_SCOPES.gmailReadonly);
+    expect(db.googleScopeGrants.every((g) => g.account_hash === googleAccountHash("dana.levi@gmail.com") && g.user_id === user.id)).toBe(true);
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "maybe");
     expect((await startFromChat(user.id, "&feature=gmail_read")).status).toBe(503);
+  });
+
+  it("web onboarding under the cap asks for gmail.readonly too (default on with GOOGLE_CLIENT_ID); unticking it is a choice, not a partial failure", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    jar.session = createSessionToken(user.id);
+    const consent = location(await startGet(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`)));
+    expect(consent.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly]);
+    const pending = ((await db.getUser(user.id))!.profile.oauth_pending as { google: { scopes: string[] } }).google;
+    expect(pending.scopes).toContain(GOOGLE_SCOPES.gmailReadonly);
+
+    // granular consent: the user leaves gmail.readonly unticked (the fixture grants the base set only)
+    const ok = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${consent.searchParams.get("state")}&code=abc`)));
+    expect(ok.pathname).toBe("/start/ready");
+    expect(ok.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
+    expect(wa.texts).toHaveLength(1); // connect_done only — no "partial" message with a link
+    expect(wa.texts[0]).toContain("את תיבת ה-Gmail אני לא קוראת, כי ההרשאה לכך לא סומנה. אפשר לבקש ממני בהמשך לקרוא מיילים, ואשלח קישור לאישור.");
+    expect(db.audit.find((a) => a.action === "google.connect")).toMatchObject({ result: "ok:gmail_read_declined" });
+    // calendar.events / gmail.send are not verified yet → Google counts this account already
+    expect(db.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend].sort());
+  });
+
+  it("at the cap: a new account connects without gmail.readonly, an explicit request gets one Hebrew line, an account Google already counted still can", async () => {
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
+    for (let i = 0; i < 95; i++) await db.recordGoogleScopeGrant({ account_hash: googleAccountHash(`user${i}@gmail.com`), scope: GOOGLE_SCOPES.gmailReadonly, user_id: null });
+    const newcomer = await db.createUser("new@example.com");
+    const base = location(await startFromChat(newcomer.id));
+    expect(base.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES]);
+    const refused = await startFromChat(newcomer.id, "&feature=gmail_read");
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toBe("קריאת Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היא תיפתח שוב אחרי בדיקת האבטחה של Google; היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.");
+
+    const veteran = await db.createUser("veteran@example.com");
+    const conn = db.seedConnection(veteran.id, "google", "user7@gmail.com");
+    conn.status = "revoked"; // disconnected once — Google still counts the account, so asking again costs no slot
+    const again = location(await startFromChat(veteran.id, "&feature=gmail_read"));
+    expect(again.searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.gmailReadonly}`);
+  });
+
+  it("incremental consent with gmail.readonly unticked → partial message whose link asks for Gmail read again", async () => {
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    db.seedConnection(user.id, "google", "dana.levi@gmail.com");
+    const on = location(await startFromChat(user.id, "&feature=gmail_read"));
+    // Google returns the previously granted scopes only (include_granted_scopes) — the new box was left empty
+    const cb = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${on.searchParams.get("state")}&code=abc`)));
+    expect(cb.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com), אבל לא ניתנה הרשאה לקרוא מיילים ב-Gmail. אפשר לחבר שוב ולסמן את כל האפשרויות.");
+    expect(wa.texts.at(-1)).toContain("לא אוכל לקרוא מיילים ב-Gmail");
+    expect(wa.texts.at(-1)).toMatch(/\/api\/auth\/google\/start\?t=[^&\s]+&feature=gmail_read/);
+    expect(db.audit.find((a) => a.action === "google.connect")!.result).toBe(`partial:${GOOGLE_SCOPES.gmailReadonly}`);
   });
 
   it("refuses a stale state and reports token-exchange failures", async () => {

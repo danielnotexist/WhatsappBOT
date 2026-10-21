@@ -49,13 +49,17 @@
 **כותרת:** חיבור עלזה לחשבון Google שלך
 
 **גוף:**
-נבקש ממך לאשר לעלזה גישה ליומן Google, ל-Google Drive ולשליחת מייל מ-Gmail. החיבור ישיר ומאובטח (OAuth) — הסיסמה נשארת אצל Google.
+נבקש ממך לאשר לעלזה גישה ליומן Google, ל-Google Drive, לשליחת מייל מ-Gmail ולקריאת תיבת ה-Gmail. החיבור ישיר ומאובטח (OAuth) — הסיסמה נשארת אצל Google.
 
 **מה עלזה תעשה, רק לפי בקשתך:**
 - תציג, תקבע, תזיז ותבטל פגישות ביומן (באישורך כשיש משתתפים)
 - תמצא ותקרא קבצים שתשתף איתה ב-Drive, ותצרף קובץ למייל באישורך
 - תשלח מיילים בשמך **רק אחרי לחיצה על "שלח"**
-- **בשלב זה לא קוראת את תיבת ה-Gmail** (היכולת תתווסף אחרי אישור האבטחה של Google, ותבקש הרשאה נפרדת)
+- תחפש ותקרא מיילים בתיבת ה-Gmail כשמבקשים ממנה בשיחה ("מה כתבה מיכל?"), ותציג בסיכום הבוקר מיילים שמחכים לתשובה. **קריאה בלבד** — לא מוחקת, לא מסמנת כנקרא, לא מעבירה הלאה.
+
+**קריאת Gmail — אופציונלית, ובשלב הזה מוגבלת:** אפשר להוריד את הסימון שלה במסך של Google ולהמשיך עם כל השאר. בשלב הזה היא פתוחה רק למשתמשים הראשונים (Google מגבילה אפליקציה שעוד לא עברה את בדיקת האבטחה שלה ל-100 משתמשים); כשהמקומות מתמלאים, המסך לא יבקש אותה בכלל.
+
+**לפני מסך ההרשאות Google תציג מסך "אפליקציה לא מאומתת"** — זה צפוי בשלב הזה: עלזה עוד לא עברה את בדיקת האימות של Google. ממשיכים ב"מתקדם" ואז "מעבר אל עלזה". (בשיחה: `g.unverified_heads_up`.)
 
 **ההרשאות שיופיעו במסך של Google:**
 | הרשאה | בשביל מה |
@@ -64,6 +68,7 @@
 | `https://www.googleapis.com/auth/calendar.events` | הצגה, קביעה, הזזה וביטול של אירועים ביומן (לא הגדרות היומן ולא שיתוף יומנים) |
 | `https://www.googleapis.com/auth/drive.file` | גישה רק לקבצים שתפתח/תשתף דרך עלזה |
 | `https://www.googleapis.com/auth/gmail.send` | שליחת מייל בשמך אחרי אישור |
+| `https://www.googleapis.com/auth/gmail.readonly` | קריאה וחיפוש של מיילים בתיבה (בלי שינוי) — לפי בקשה בשיחה ולסיכום הבוקר. אופציונלית; רק כל עוד יש מקום בשלב הראשון. אם לא אושרה בחיבור — הבוט שולח בהמשך קישור שמבקש רק אותה |
 
 **גילוי לפי מדיניות Google (Limited Use)** — חובה להציג במילים האלה (תרגום + המקור באנגלית):
 השימוש של עלזה במידע שמתקבל מ-Google APIs, והעברתו לכל אפליקציה אחרת, יעמדו ב-[Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), כולל דרישות ה-Limited Use.
@@ -79,16 +84,20 @@
 
 ## 4. דרישות נלוות לאימות האפליקציה
 - **Microsoft:** Publisher Verification (Partner Center, MPN ID) כדי שהמסך לא יציג "unverified"; שם האפליקציה = שם המוצר הסופי; לוגו; קישורי Terms/Privacy ברישום; multi-tenant; ב-admin-consent URL להשתמש ב-`/adminconsent` עם `state`.
-- **Google:** OAuth consent screen External; `calendar.events` ו-`gmail.send` הם scopes **רגישים** → אימות (וידאו הדגמה של כל scope, מדיניות פרטיות באותו דומיין של האפליקציה, דף בית עם תיאור); `drive.file` לא רגיש. קריאת Gmail (`gmail.readonly`) = **restricted** → CASA Tier 2 (שלב 6).
-- טקסט "unverified app" בתקופת הבדיקה — להסביר ללקוחות הראשונים.
+- **Google:** OAuth consent screen External; `calendar.events` ו-`gmail.send` הם scopes **רגישים** → אימות (וידאו הדגמה של כל scope, מדיניות פרטיות באותו דומיין של האפליקציה, דף בית עם תיאור); `drive.file` לא רגיש. קריאת Gmail (`gmail.readonly`) = **restricted**: מ-21.10.2026 מבוקשת **בלי** CASA רק ל-100 המשתמשים הראשונים (תקרת Google לאפליקציה לא מאומתת; אצלנו 95), ואחר כך CASA Tier 2 או ספק מתווך — `docs/google-setup.md` §6.
+- האפליקציה ב-**In production, לא מאומתת** (לא Testing — שם ההרשאה פגה כל 7 ימים). מסך "unverified app" מוצג לכל מתחבר עד שה-scopes הרגישים מאושרים, ולמבקשי `gmail.readonly` עד CASA — הבוט מקדים לו שורת הסבר.
+- `gmail.readonly` כפוף ל-Limited Use במלואו: אין קריאה אנושית של תוכן מיילים (חוץ מהסכמה מפורשת, אבטחה או חוק), אין שימוש לפרסום, אין אימון מודלים, אין העברה לצד שלישי מלבד ספק המודל לצורך מתן השירות.
 
 ## 5. מה לא אומת
 1. רשימת ה-scopes הסופית של Microsoft (ייתכן ש-`Files.Read.All` מספיק, או ש-`Files.ReadWrite` נדרש לשיתוף קישור; `MailboxSettings.Read` לאזור זמן).
 2. האם Microsoft דורשת את ההסכמה המפורשת לפי §3(c) **בתוך** תנאי השימוש בלבד או גם במסך — כאן שמנו בשניהם.
 3. נוסח ה-Limited Use בעברית — Google דורשת את המשפט באנגלית כלשונו; התרגום רק לנוחות.
 4. האם מותר "דילוג" לפני החיבור מבחינת Google (כן, זה רק האתר שלנו).
+5. **שמירה אחרי מחיקת חשבון:** כדי לא לחרוג מתקרת המשתמשים של Google, נשמר גיבוב חד-כיווני (sha256) של כתובת חשבון ה-Google שאישר קריאת Gmail/יומן/שליחה — גם אחרי ניתוק ומחיקת החשבון (`google_scope_grants`, בלי הכתובת ובלי קישור למשתמש אחרי המחיקה). לבדוק עם עו"ד: ניסוח במדיניות הפרטיות (מטרה: עמידה במגבלות ספק; בסיס: אינטרס לגיטימי) והאם נדרשת תקופת שמירה מוגדרת.
+6. עיבוד תוכן מיילים מ-Gmail על ידי ספק המודל (Anthropic) לצורך מתן התשובה — לוודא שמדיניות הפרטיות וה-DPA מכסים את זה (כבר נדרש ל-Microsoft 365).
 
 ## מקורות
 - Microsoft APIs Terms of Use (Oct 2025) §3(b)(5) (מינימום הרשאות), §3(c), §5(a), §5(d)–(e) — https://learn.microsoft.com/en-us/legal/microsoft-apis/terms-of-use
 - Microsoft Entra — Publisher verification; admin consent — learn.microsoft.com (PLAN נספח)
 - Google API Services User Data Policy — https://developers.google.com/terms/api-services-user-data-policy ; OAuth verification / CASA — developers.google.com (PLAN נספח)
+- Unverified apps / user cap — https://support.google.com/cloud/answer/7454865 , https://support.google.com/cloud/answer/13463817 , https://support.google.com/cloud/answer/15549945 (נבדק 21.10.2026)

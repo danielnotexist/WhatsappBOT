@@ -142,7 +142,8 @@ describe("Google tools in the assistant", () => {
     const names = (scopes: string[]) => googleTools({ google: async () => { throw new Error("unused"); }, timeZone: TZ, scopes, accountEmail: null }).map((t) => t.name);
     expect(names(["openid", "email", GOOGLE_SCOPES.calendarEvents])).toEqual(["gcal_list_events", "gcal_free_slots", "gcal_create_event", "gcal_update_event", "gcal_delete_event", "gmail_read_status"]);
     expect(names(["openid", GOOGLE_SCOPES.gmailSend])).toEqual(["gmail_draft_email", "gmail_read_status"]);
-    expect(names(["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly])).toEqual(["gmail_draft_email"]);
+    // gmail.readonly granted → the Gmail read tools (Microsoft's search_emails / get_email with the gmail_ prefix) instead of the status tool
+    expect(names(["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly])).toEqual(["gmail_draft_email", "gmail_search_emails", "gmail_get_email", "gmail_get_thread", "gmail_awaiting_reply"]);
     expect(names([])).toHaveLength(10);
   });
 });

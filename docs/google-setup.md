@@ -1,20 +1,20 @@
 # הקמת חיבור Google (אבן דרך 6) — מדריך לדניאל
 
-> עודכן 21.10.2026. הפרמטרים והמגבלות נבדקו מול developers.google.com ו-support.google.com באותו יום.
-> הקוד: `lib/google/**`, `app/api/auth/google/**`. משתני סביבה: `.env.example` (קטע Google).
+> עודכן 21.10.2026 (ערב: קריאת Gmail ל-100 המשתמשים הראשונים בלי CASA). הפרמטרים והמגבלות נבדקו מול developers.google.com ו-support.google.com באותו יום — המקורות בסוף כל סעיף.
+> הקוד: `lib/google/**` (תקרת המשתמשים: `lib/google/user-cap.ts`; קריאת Gmail: `lib/google/gmail.ts`, `lib/google/gmail-tools.ts`), `app/api/auth/google/**`. משתני סביבה: `.env.example` (קטע Google + "תפעול").
 
-## 0. מה מקבלים בשלב 1 (בלי CASA)
+## 0. מה מקבלים עכשיו
 
 | יכולת | scope | סיווג אצל Google | מה זה דורש |
 |---|---|---|---|
 | זיהוי החשבון | `openid`, `email`, `profile` | לא רגיש | כלום |
-| יומן: הצגה, חלונות פנויים, קביעה, הזזה, ביטול | `https://www.googleapis.com/auth/calendar.events` | **רגיש** | אימות אפליקציה (סעיף 5) |
+| יומן: הצגה, חלונות פנויים, קביעה, הזזה, ביטול | `https://www.googleapis.com/auth/calendar.events` | **רגיש** | אימות אפליקציה (סעיף 5). עד אז — נספר בתקרת 100 |
 | Drive: רק קבצים שנוצרו/נפתחו דרכנו | `https://www.googleapis.com/auth/drive.file` | לא רגיש | כלום |
-| שליחת מייל מ-Gmail (אחרי כפתור אישור) | `https://www.googleapis.com/auth/gmail.send` | **רגיש** | אימות אפליקציה (סעיף 5) |
-| קריאת Gmail | `https://www.googleapis.com/auth/gmail.readonly` | **מוגבל (restricted)** | CASA (סעיף 6) — כבוי ב-`GOOGLE_GMAIL_READ_ENABLED=false` |
+| שליחת מייל מ-Gmail (אחרי כפתור אישור) | `https://www.googleapis.com/auth/gmail.send` | **רגיש** | אימות אפליקציה (סעיף 5). עד אז — נספר בתקרת 100 |
+| קריאת Gmail: חיפוש, מייל מלא, שרשור, "מחכים לתשובה", סיכום הבוקר | `https://www.googleapis.com/auth/gmail.readonly` | **מוגבל (restricted)** | בלי CASA: רק ל-100 המשתמשים הראשונים (אצלנו עד 95 — סעיף 6). אחר כך CASA או ספק מתווך |
 
 - בחרנו `calendar.events` ולא `calendar` המלא (צר יותר: אירועים בלבד, בלי שיתוף/מחיקת יומנים). "חלונות פנויים" מחושבים מרשימת האירועים, לכן לא צריך `calendar.readonly` / `calendar.freebusy`.
-- **לתקן במסמך הגילוי** `docs/legal/oauth-consent-screen-he.md` §3: שם כתוב `calendar` — הקוד מבקש `calendar.events`. הרשימה במסך שלנו חייבת להיות זהה למה שמבוקש בפועל.
+- מסמך הגילוי `docs/legal/oauth-consent-screen-he.md` §3 מציג בדיוק את מה שמבוקש בפועל, כולל `gmail.readonly` (עודכן 21.10).
 
 ## 1. פרויקט ב-Google Cloud
 
@@ -26,46 +26,93 @@
 
 ב-Console: **Google Auth Platform** (לשעבר "OAuth consent screen"):
 1. **Branding** — שם האפליקציה (**עלזה** — `BRAND.name` ב-`lib/brand.ts`; שינוי אחרי אימות מחייב אימות מחדש), מייל תמיכה, לוגו (120×120), **Application home page**, **Privacy policy**, **Terms of service**, ו-**Authorized domains** (הדומיין של האתר). דף הבית ומדיניות הפרטיות חייבים להיות **באותו דומיין**, ציבוריים, ומדיניות הפרטיות חייבת לכלול את משפט ה-Limited Use (נוסח ב-`docs/legal/oauth-consent-screen-he.md` §3).
-2. **Audience** — User type: **External**. Publishing status מתחיל ב-**Testing**.
-3. **Data access** → Add or remove scopes → לסמן את שישת ה-scopes מהטבלה (בלי `gmail.readonly`).
+2. **Audience** — User type: **External**. Publishing status מתחיל ב-**Testing** — ועוברים ל-**In production** לפני שמזמינים לקוחות (סעיף 3).
+3. **Data access** → Add or remove scopes → לסמן את שישת ה-scopes הבסיסיים מהטבלה. את `gmail.readonly` **לא** מסמנים בשלב הזה — ראו סעיף 6.4.
 4. **Clients** → Create client → Application type: **Web application**:
    - Authorized redirect URIs: `https://<הדומיין>/api/auth/google/callback` וגם `http://localhost:3000/api/auth/google/callback` לפיתוח. חייב להתאים בדיוק (כולל https וסלאש).
    - Authorized JavaScript origins: הדומיין (נדרש רק ל-Picker בשלב 2).
    - את **Client ID** ו-**Client secret** מעתיקים ל-Vercel: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (Production + Preview). את ה-secret כדאי לשמור מיד במנהל סיסמאות — במסכים החדשים הוא לא תמיד מוצג שוב.
 
-## 3. מצב Testing — מה המגבלות
+## 3. Testing או Production — חייבים Production (לא מאומת)
 
-- עד **100 משתמשי בדיקה** (Audience → Test users). רק הם יכולים להתחבר.
-- כל משתמש רואה מסך אזהרה "Google hasn't verified this app" (להסביר ללקוחות הראשונים — "Advanced → Go to …").
-- **ההרשאה פגה אחרי 7 ימים** מרגע האישור (גם ה-refresh token). אצלנו זה נראה כך: אחרי שבוע Google מחזירה `invalid_grant`, החיבור מסומן `expired`, ובפעם הבאה שהמשתמש מבקש משהו מהיומן/Drive הבוט שולח קישור חידוש (`err.connection_expired`) — לחיצה אחת ומאשרים שוב.
-- החריגה היחידה: אפליקציה שמבקשת רק `openid/email/profile` — לא רלוונטי לנו.
+| | **Testing** | **In production, לא מאומת** (מה שאנחנו צריכים) |
+|---|---|---|
+| מי יכול להתחבר | רק עד 100 "test users" שמוסיפים ידנית ב-Audience → Test users | כל מי שיש לו חשבון Google |
+| תוקף ההרשאה | **פגה 7 ימים אחרי האישור** — כולל ה-refresh token (חוץ מאפליקציה שמבקשת רק name/email/profile) | **אין** תפוגת 7 ימים. ה-refresh token נשאר עד ניתוק, 6 חודשים בלי שימוש, או החלפת סיסמה (עם scopes של Gmail) |
+| מסך "Google לא אימתה את האפליקציה" | כן | כן — כל עוד מבקשים scope רגיש/מוגבל שלא אושר |
+| תקרה | 100 test users | **100 משתמשים חדשים לכל חיי הפרויקט**, בלי איפוס, לכל scope רגיש/מוגבל שלא אושר |
+
+**למה לא Testing:** במצב Testing כל לקוח היה מקבל אצלנו כל שבוע `invalid_grant` → החיבור מסומן `expired` → הבוט שולח קישור חידוש (`err.connection_expired`). זה עובד, אבל זו חוויה גרועה ללקוח משלם — וסיכום הבוקר נעצר עד שהוא לוחץ.
+
+**איך עוברים ל-Production (בדיוק):**
+1. Google Auth Platform → **Audience** → Publishing status: Testing → **Publish app** → בחלון "Push to production?" → **Confirm**. לא צריך אימות כדי ללחוץ; Google רק מזהירה שהאפליקציה תוצג כלא מאומתת.
+2. לוודא ש-**Branding** מלא (שם, לוגו, דף בית ומדיניות פרטיות באותו דומיין) — זה מה שהמשתמש רואה במסך האישור.
+3. משתמשים שהתחברו בזמן Testing: ההרשאה שלהם עדיין תפוג ב-7 ימים מהאישור המקורי. אחרי שהיא פגה הבוט שולח להם קישור חידוש — אישור אחד מחדש ומשם זה תקף. (אפשר גם לבקש מהם לכתוב "לחבר את גוגל" מיד אחרי המעבר.)
+4. מסך "לא מאומת" — Google מציגה "Google hasn't verified this app" / "Google לא אימתה את האפליקציה הזו". ממשיכים ב-**Advanced / מתקדם** ואז **Go to Alze (unsafe) / מעבר אל עלזה (לא בטוח)**. הבוט מקדים לכל קישור חיבור ל-Google שורה אחת: "גוגל תציג מסך 'אפליקציה לא מאומתת' — זה צפוי בשלב הזה, אפשר ללחוץ 'מתקדם' ואז 'המשך'." (`g.unverified_heads_up`, רק מול פרויקט אמיתי — לא ב-`DATA_MODE=memory` / הדגמה).
+   - ⚠️ במסך האתר `/connect/google` (רכיב `components/auth/connect-transition.tsx`, מחוץ לתחום של הסבב הזה) השורה עוד לא מוצגת — משימה לבעלי ה-UI: להציג את `gcopy["g.unverified_heads_up"]()` מתחת ל"מעבירים אותך ל-Google…".
+
+מקורות: developers.google.com/identity/protocols/oauth2 (Refresh token expiration — "Testing … is issued a refresh token expiring in 7 days"); support.google.com/cloud/answer/15549945 (Manage App Audience — "Authorizations by a test user will expire seven days from the time of consent"; production = "available to any user with a Google Account").
 
 ## 4. בדיקה מקומית בלי פרויקט אמיתי
 
-`DATA_MODE=memory pnpm dev` — זרימת ה-OAuth, היומן, Drive ו-Gmail רצים מול fixtures (`lib/google/__fixtures__/google-fixtures.ts`), בלי קריאה ל-Google. עם פרויקט אמיתי: להוסיף את עצמך כמשתמש בדיקה, להגדיר את שני המשתנים ו-`APP_URL`, ולפתוח `/api/auth/google/start` כשמחוברים לאתר (או קישור `?t=` מהשיחה: "לחבר את גוגל").
+`DATA_MODE=memory pnpm dev` — זרימת ה-OAuth, היומן, Drive, שליחת Gmail **וקריאת Gmail** רצים מול fixtures (`lib/google/__fixtures__/google-fixtures.ts` — תיבת דואר בדויה עם 8 מיילים, כולל ניסיון הזרקת הוראות). קריאת Gmail כבויה כברירת מחדל בלי `GOOGLE_CLIENT_ID`; כדי לנסות: `GOOGLE_GMAIL_READ_ENABLED=true`. עם פרויקט אמיתי: להגדיר את שני המשתנים ו-`APP_URL`, ולפתוח `/api/auth/google/start` כשמחוברים לאתר (או קישור `?t=` מהשיחה: "לחבר את גוגל").
 
-## 5. מעבר ל-Production ואימות ה-scopes הרגישים (calendar.events, gmail.send)
+## 5. אימות ה-scopes הרגישים (calendar.events, gmail.send) — להגיש לפני ~80 משתמשים
 
-לפני שפותחים ללקוחות מעבר ל-100 משתמשי בדיקה. בדרך כלל 3–5 ימי עבודה (+2–3 ימים לאימות מיתוג), ולפעמים סבב שאלות במייל מצוות Trust & Safety.
+**למה דחוף:** עד שהאימות הזה מאושר, **כל** חיבור Google (גם בלי קריאת Gmail) נספר בתקרת ה-100. במשתמש ה-100 Google חוסמת חיבורים חדשים לגמרי. אחרי האישור — חיבור רגיל כבר לא נספר, ורק מי שמאשר `gmail.readonly` צורך מקום. בקוד: `GOOGLE_SENSITIVE_SCOPES_VERIFIED=true` ב-Vercel ביום שהאישור מגיע.
+
+בדרך כלל 3–5 ימי עבודה (+2–3 ימים לאימות מיתוג), ולפעמים סבב שאלות במייל מצוות Trust & Safety.
 1. **אימות דומיין** ב-Google Search Console (https://search.google.com/search-console) עם חשבון שהוא Owner/Editor בפרויקט.
 2. **Branding → Verify branding** — בדיקה אוטומטית (דקות). את התוצאה מפרסמים תוך 7 ימים, אחרת צריך לאמת שוב.
-3. **Audience → Publish app** (מעבר ל-In production).
-4. **Verification Center** → מצהירים על כל ה-scopes, ולכל scope רגיש:
+3. האפליקציה כבר **In production** (סעיף 3) — אימות לא מתבצע לאפליקציה במצב Testing.
+4. **Verification Center** → מצהירים על ה-scopes, ולכל scope רגיש:
    - **הצדקה** (באנגלית), כולל למה scope צר יותר לא מספיק. טיוטה:
      - `calendar.events`: "Users ask the WhatsApp assistant to list today's meetings, find free time, and create, move or cancel events. Every write is shown as a draft and executed only after the user taps Approve. We do not need calendar sharing or calendar management, so we use calendar.events instead of calendar."
-     - `gmail.send`: "Users dictate an email in WhatsApp; the assistant drafts it and sends it from the user's Gmail only after the user taps Send. We never read the mailbox (no read scope requested)."
+     - `gmail.send`: "Users dictate an email in WhatsApp; the assistant drafts it and sends it from the user's Gmail only after the user taps Send."
    - **סרטון הדגמה** ביוטיוב (Unlisted): זרימת ההסכמה **באנגלית** (שפת הדפדפן אנגלית), מסך ההסכמה עם שם האפליקציה, **שורת הכתובת עם ה-client_id** בזמן ההפניה ל-Google, ואז שימוש בכל scope: בקשה בוואטסאפ → טיוטה → לחיצה על אישור → האירוע ביומן / המייל ב-Sent. אפשר כתוביות באנגלית לשיחה בעברית.
    - עד 3 קישורים לתיעוד (דף בית, מדיניות פרטיות, דף "איך זה עובד").
 5. מסמך הגילוי שלנו (לפני ההפניה) צריך להופיע באתר כמו שהוא מוצג בסרטון.
 
-## 6. קריאת Gmail — מסלול CASA (שלב מאוחר יותר)
+## 6. קריאת Gmail בלי CASA — 100 המשתמשים הראשונים
 
-- `gmail.readonly` (וגם `gmail.modify`, `gmail.compose`, `gmail.metadata`) הם **restricted**. מעבר לאימות של סעיף 5 צריך:
-  1. להוכיח שהשימוש הוא מסוג מותר לפי מדיניות Gmail API / Limited Use (עוזרת אישית שמסכמת את התיבה למשתמש עצמו — מותר; בלי פרסום, בלי אימון מודלים, בלי קריאה אנושית אלא בהסכמה/אבטחה/חוק).
-  2. **הערכת אבטחה CASA** (App Defense Alliance) אצל מעבדה מורשית של Google — בדרך כלל Tier 2 לאפליקציה כמו שלנו. עלות משוערת לפי PLAN: ~$550–720 לשנה; לוח זמנים: שבועות.
-  3. **חידוש כל 12 חודשים** מתאריך מכתב ההערכה (LOA). Google שולחת תזכורת — לשמור אנשי קשר מעודכנים בפרויקט.
-- בקוד הכול מוכן: `?feature=gmail_read` על `/api/auth/google/start` מבקש רק את ה-scope החדש עם `include_granted_scopes=true` (הסכמה מצטברת — לא צריך לאשר מחדש את היומן/Drive). כל עוד `GOOGLE_GMAIL_READ_ENABLED=false` הנתיב מחזיר 403 בעברית, והבוט עונה למבקשים לקרוא Gmail שהיכולת עוד לא זמינה.
-- **סדר הפעלה:** CASA עבר → להוסיף את `gmail.readonly` ב-Data access → אימות restricted scope ב-Verification Center → `GOOGLE_GMAIL_READ_ENABLED=true` ב-Vercel → לכתוב את כלי הקריאה (search/get) ב-`lib/google/` בדומה ל-`lib/ms/tools.ts`.
+**החלטת דניאל, 21.10.2026:** פותחים קריאת Gmail עכשיו ל-100 המשתמשים הראשונים, בלי הערכת אבטחה. כשיש תנועה — CASA או ספק מתווך (Composio), ומשלמים על מה שצריך.
+
+### 6.1 מה Google אומרת (נבדק 21.10.2026)
+- אפליקציה שמבקשת scope רגיש/מוגבל שלא אושר מציגה מסך "לא מאומת" ומוגבלת ל-**"100 new users in total, after the app presents the unverified app screen"** (support.google.com/cloud/answer/7454865, טבלת המכסות).
+- **"The user cap applies over the entire lifetime of the project, and it cannot be reset or changed."** (support.google.com/cloud/answer/13463817, answer/15549945). כשהתקרה נגמרת — "Google sign-in to be disabled" למשתמשים חדשים.
+- התקרה **לא חלה** על scopes שאושרו (answer/15549945).
+- **מי נספר:** Google סופרת משתמשים *שאישרו* — לא משתמשים פעילים. אין בתיעוד אמירה מפורשת על משתמש שביטל הרשאה, אבל הניסוח ("new users in total", "lifetime", "cannot be reset") אומר שביטול לא מחזיר מקום. אנחנו מניחים את המקרה השמרני: **מי שניתק או מחק חשבון ממשיך להיספר.**
+- את הספירה של Google רואים ב-Console: Google Auth Platform → Audience → **OAuth user cap**.
+
+### 6.2 מה הקוד עושה
+- **פנקס הרשאות** (`google_scope_grants`, מיגרציה 0008): שורה לכל חשבון Google × scope שנספר (גיבוב sha256 של כתובת המייל — לא הכתובת עצמה). לא נמחק בניתוק ולא במחיקת חשבון (`user_id` → null). מילוי ראשוני מחיבורי Google קיימים (כולל מנותקים).
+- **מה נספר:** `gmail.readonly` תמיד; `calendar.events` / `gmail.send` כל עוד `GOOGLE_SENSITIVE_SCOPES_VERIFIED=false` (וגם אחרי — שורות שנרשמו לפני האימות נשארות בספירה, כי הן כבר צרכו מקום).
+- **התקרה שלנו:** `GOOGLE_GMAIL_READ_CAP` (ברירת מחדל **95** — מרווח של 5 למשתמשים שנמצאים באותו רגע במסך של Google). חשבון שכבר נספר אף פעם לא "עולה" מקום נוסף, ולכן תמיד יכול לאשר שוב.
+- **מתי מבקשים `gmail.readonly`:**
+  1. בחיבור רגיל (האתר בהרשמה, "לחבר את גוגל", חיבור מחדש) — מצטרף לשישת ה-scopes הבסיסיים כל עוד יש מקום. אם המשתמש מוריד את הסימון במסך של Google — זו בחירה, לא תקלה: החיבור מצליח, והבוט אומר שאפשר לבקש בהמשך.
+  2. **הסכמה מצטברת** כשמשתמש Google בלי ההרשאה שואל על התיבה ("מה חדש במייל?") — הכלי `gmail_read_status` מחזיר קישור `?feature=gmail_read` שמבקש **רק** את `gmail.readonly` עם `include_granted_scopes=true` (היומן ו-Drive לא מאושרים מחדש). אם המשתמש לא מסמן — הודעת "חלקי" עם קישור לנסות שוב.
+- **כשהתקרה מלאה:** לא מבקשים `gmail.readonly` מחשבונות חדשים. החיבור עצמו ממשיך (יומן, Drive, שליחה). מי שמבקש לקרוא מיילים מקבל שורה אחת (`g.err.gmail_read_cap_reached`), וסיכום הבוקר שלו בלי "מיילים שמחכים לתשובה" מ-Gmail.
+- **התראות למפעיל ב-80 וב-95** (פעם אחת לכל סף, דגל `google_user_cap:<סף>` בטבלת `ops_flags`): שורת לוג `[google:user-cap]`, רשומת audit `ops.google_user_cap`, ומייל ל-`OPERATOR_EMAIL` דרך Resend אם הוגדר.
+- **כלי הקריאה** (רק לחיבור עם `gmail.readonly`): `gmail_search_emails` (תחביר החיפוש של Gmail), `gmail_get_email` (גוף ההודעה כטקסט — text/plain או HTML מומר, עד 6,000 תווים), `gmail_get_thread`, `gmail_awaiting_reply`. כל תוכן מהתיבה עטוף כ-`<data>` ומסומן כמידע בלבד (`lib/ai/untrusted.ts`).
+
+### 6.3 מה מגדירים ב-Vercel
+| משתנה | ערך | הערה |
+|---|---|---|
+| `GOOGLE_GMAIL_READ_ENABLED` | ריק (או `true`) | ריק = פעיל כש-`GOOGLE_CLIENT_ID` מוגדר. `false` מכבה הכול מיד |
+| `GOOGLE_GMAIL_READ_CAP` | `95` | 1–100 |
+| `GOOGLE_SENSITIVE_SCOPES_VERIFIED` | `false` | `true` רק ביום שסעיף 5 מאושר |
+| `OPERATOR_EMAIL` | כתובת של דניאל | אופציונלי; בלי — לוג + דגל בלבד |
+
+**סדר פריסה:** מיגרציה 0008 ב-Supabase **לפני** הקוד (בלי הטבלה, בדיקת התקרה נכשלת והחיבור ממשיך בלי `gmail.readonly` — אף משתמש לא נחסם).
+
+### 6.4 `gmail.readonly` ב-Data access — לא לסמן (עדיין)
+- scope שמבוקש בזמן ריצה ולא מופיע ב-Data access מציג את מסך "לא מאומת" (answer/7454865) — זה בדיוק המצב שאנחנו מקבלים בכל מקרה, אז הקריאה עובדת.
+- מה שמוצהר ב-Data access הוא מה שמוגש לאימות. אם `gmail.readonly` מוצהר, הגשת האימות של סעיף 5 תכלול scope מוגבל — כלומר CASA.
+- **לא אומת:** לא מצאנו תיעוד שמאשר ש-Google תאשר את הרגישים כשהאפליקציה מבקשת בפועל גם `gmail.readonly` לא מוצהר. אם הבודקים יעירו על זה — האפשרויות: `GOOGLE_GMAIL_READ_ENABLED=false` לזמן הבדיקה (מי שכבר אישר ממשיך לקרוא; חדשים לא יתבקשו), או להתקדם ל-CASA.
+
+### 6.5 אחרי 95 (לא עכשיו)
+- **CASA** (App Defense Alliance) אצל מעבדה מורשית — בדרך כלל Tier 2. עלות משוערת לפי PLAN: ~$550–720 לשנה; שבועות; חידוש כל 12 חודשים מתאריך ה-LOA. אחרי CASA: להצהיר `gmail.readonly` ב-Data access → אימות restricted scope ב-Verification Center → אחרי האישור התקרה כבר לא חלה, ויידרש שינוי קטן בקוד (מתג שמדלג על בדיקת התקרה — `GOOGLE_GMAIL_READ_CAP` מוגבל ל-100 בכוונה).
+- **ספק מתווך (Composio)** — הוא מחזיק את אפליקציית ה-OAuth המאומתת; אצלנו זה יהיה מימוש נוסף של אותם ארבעה כלים (`gmail_*`) מול ה-API שלו. דורש הערכת פרטיות (צד שלישי שרואה את התיבה) ועדכון מסמך הגילוי.
 
 ## 7. לקוחות עם Google Workspace
 
@@ -78,4 +125,4 @@
 
 ## 9. ניתוק ומחיקה
 
-ניתוק מהאזור האישי ומחיקת חשבון קוראים ל-`https://oauth2.googleapis.com/revoke` עם ה-refresh token לפני מחיקת הטוקנים אצלנו (נרשם ב-audit_log). המשתמש יכול גם לנתק בעצמו ב-https://myaccount.google.com/permissions — ואז בפעם הבאה הבוט יקבל `invalid_grant` ויציע חיבור מחדש.
+ניתוק מהאזור האישי ומחיקת חשבון קוראים ל-`https://oauth2.googleapis.com/revoke` עם ה-refresh token לפני מחיקת הטוקנים אצלנו (נרשם ב-audit_log). המשתמש יכול גם לנתק בעצמו ב-https://myaccount.google.com/permissions — ואז בפעם הבאה הבוט יקבל `invalid_grant` ויציע חיבור מחדש. **שימו לב:** הגיבוב של חשבון ה-Google בפנקס התקרה (`google_scope_grants`) נשאר גם אחרי מחיקה, כי Google ממשיכה לספור אותו (סעיף 6.1) — לציין במדיניות הפרטיות (מסמך הגילוי §5).

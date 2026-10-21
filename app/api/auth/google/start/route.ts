@@ -7,7 +7,8 @@ import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { EnvError } from "@/lib/env";
 import { getGoogleConfig } from "@/lib/google";
-import { buildGoogleAuthorizeUrl, gmailReadEnabled, isGoogleFeature, pkcePair, scopesForRequest } from "@/lib/google/oauth";
+import { buildGoogleAuthorizeUrl, isGoogleFeature, pkcePair, scopesForRequest } from "@/lib/google/oauth";
+import { gmailReadAccess, googleAccountOf, googleCapConfig, type GmailReadAccess } from "@/lib/google/user-cap";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
@@ -16,8 +17,10 @@ const text = (body: string, status: number) => new Response(body, { status, head
  * GET /api/auth/google/start[?t=<one-time chat token>][&returnTo=onboarding|account][&feature=gmail_read]
  * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat (same as Microsoft).
  * Stores state + PKCE verifier (+ returnTo / feature) on the user profile — works from any device — then
- * redirects to Google's consent screen. `feature` = incremental consent for a restricted scope; refused while
- * GOOGLE_GMAIL_READ_ENABLED=false (CASA not done).
+ * redirects to Google's consent screen. `feature=gmail_read` = incremental consent for gmail.readonly only
+ * (include_granted_scopes); refused when GOOGLE_GMAIL_READ_ENABLED=false or when the unverified-app user cap is
+ * full for this (new) Google account. A plain connect adds gmail.readonly while under the cap
+ * (lib/google/user-cap.ts); the requested scopes are stored with the state so the callback knows what was asked.
  * DEMO_MODE=1 → no Google at all: lib/auth/demo-connect.ts writes a fixture connection and we land right away.
  */
 export async function GET(request: Request) {
@@ -39,15 +42,22 @@ export async function GET(request: Request) {
 
   const featureParam = url.searchParams.get("feature");
   const feature = isGoogleFeature(featureParam) ? featureParam : null;
+  const connections = await db.listConnections(user.id);
+  const existing = connections.find((c) => c.provider === "google" && c.status !== "revoked");
   let cfg;
+  let scopes: string[];
   try {
-    if (feature && !gmailReadEnabled()) return text(gcopy["g.web.feature_disabled"](), 403);
+    const access = await gmailAccessFor(db, googleAccountOf(connections), Boolean(feature));
+    if (feature && access.reason === "disabled") return text(gcopy["g.web.feature_disabled"](), 403);
+    if (feature && !access.allowed) return text(gcopy["g.web.gmail_read_cap_reached"](), 403);
     // DEMO_MODE: no Google — a fixture connection through the data layer, then the same landing as the callback
     if (isDemo()) {
       const { notice } = await demoConnect(db, user, "google");
       return Response.redirect(oauthReturnUrl(appUrl, parseReturnTo(url.searchParams.get("returnTo")), "google", { ok: true, notice }), 303);
     }
     cfg = getGoogleConfig();
+    // base connect (onboarding / reconnect): gmail.readonly rides along while this account may still get it
+    scopes = scopesForRequest(feature, { withGmailRead: access.allowed });
   } catch (e) {
     if (e instanceof EnvError) return text(e.message, 503);
     throw e;
@@ -55,10 +65,24 @@ export async function GET(request: Request) {
 
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
-  const existing = (await db.listConnections(user.id)).find((c) => c.provider === "google" && c.status !== "revoked");
   const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
   await db.mergeUserProfile(user.id, {
-    oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
+    oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
   });
-  return Response.redirect(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes: scopesForRequest(feature), loginHint: existing?.account_email ?? null }), 303);
+  return Response.redirect(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: existing?.account_email ?? null }), 303);
+}
+
+/**
+ * The user-cap decision (lib/google/user-cap.ts). Config errors surface (EnvError → 503 in Hebrew). A ledger
+ * failure must not block a plain connect: it then simply goes without gmail.readonly; an explicit Gmail-read
+ * request reports "not available right now".
+ */
+async function gmailAccessFor(db: ReturnType<typeof getDb>, accountEmail: string | null, explicit: boolean): Promise<GmailReadAccess> {
+  const capCfg = googleCapConfig();
+  try {
+    return await gmailReadAccess(db, accountEmail, capCfg);
+  } catch (e) {
+    console.error(`[google:start] user-cap check failed (${explicit ? "gmail_read request" : "base connect"}):`, (e as Error).message);
+    return { allowed: false, reason: "disabled", count: null, cap: capCfg.cap };
+  }
 }

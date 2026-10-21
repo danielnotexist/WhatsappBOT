@@ -1,5 +1,6 @@
 import { copy, buttons, lists } from "@/lib/copy/bot";
 import type { Db, UserRow } from "@/lib/db/types";
+import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
 import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
 import type { InboundMessage } from "@/lib/wa/types";
 import { connectLinkFor, type BotContext } from "./context";
@@ -124,7 +125,10 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
     case "connect": {
       if (reply === "onb:connect:microsoft" || reply === "onb:connect:google") {
         const provider = reply.endsWith("microsoft") ? "Microsoft 365" : "Google";
-        await ctx.wa.sendText(to, copy["onb.connect_link"](provider, connectLinkFor(ctx, user.id, reply.endsWith("microsoft") ? "microsoft" : "google")));
+        const id = reply.endsWith("microsoft") ? "microsoft" : "google";
+        // Google: one line before the "unverified app" screen (gmail.readonly rides along while under the user cap)
+        const headsUp = await connectHeadsUpSuffix(ctx.db, await ctx.db.listConnections(user.id), id);
+        await ctx.wa.sendText(to, copy["onb.connect_link"](provider, connectLinkFor(ctx, user.id, id)) + headsUp);
         await finish(ctx, user.id, to);
         return true;
       }
