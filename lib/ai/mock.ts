@@ -41,6 +41,18 @@ function hasToolResult(req: CompletionRequest, name: string): boolean {
   return req.messages.some((m) => m.role === "tool" && m.results.some((r) => r.name === name));
 }
 
+/** the `reply` a tool suggested (reminder tools return the exact Hebrew answer) */
+function toolReply(req: CompletionRequest, names: string[]): string | null {
+  for (const m of req.messages) {
+    if (m.role !== "tool") continue;
+    for (const r of m.results) {
+      const reply = (r.output as { reply?: unknown } | null)?.reply;
+      if (names.includes(r.name) && typeof reply === "string") return reply;
+    }
+  }
+  return null;
+}
+
 function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   const text = lastUserText(req);
   if (req.json) {
@@ -50,6 +62,15 @@ function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
     return { text: JSON.stringify({ intent, complexity: simple ? "simple" : "tool", needs_tools: !simple, reply: simple ? "בשמחה. אם צריך משהו — אני כאן." : null }) };
   }
   const tools = new Set((req.tools ?? []).map((t) => t.name));
+  // reminders (Milestone 5): pass the whole message as `when`; the parser finds the time and the text
+  const reminderReply = toolReply(req, ["create_reminder", "list_reminders", "cancel_reminder"]);
+  if (reminderReply) return { text: reminderReply };
+  if (tools.has("create_reminder") && /תזכיר|תזכורת ל/.test(text)) {
+    return { toolCalls: [{ id: "call_reminder_1", name: "create_reminder", input: { text: "", when: text } }], stopReason: "tool_use", text: "" };
+  }
+  if (tools.has("list_reminders") && /(אילו|איזה|מה ה)\s*תזכורות|תזכורות פתוחות/.test(text)) {
+    return { toolCalls: [{ id: "call_reminders_1", name: "list_reminders", input: {} }], stopReason: "tool_use", text: "" };
+  }
   if (tools.has("draft_email") && /מייל|תנסח|תכתוב/.test(text) && !hasToolResult(req, "draft_email")) {
     const to = (text.match(/ל([א-ת]{2,})/)?.[1] ?? "לקוח").replace(/^ל/, "");
     const call: ToolCall = { id: "call_draft_1", name: "draft_email", input: { to_name: to, to_email: `${to}@example.com`, subject: "בהמשך לשיחתנו", body: `שלום ${to},\n\n${text}\n\nבברכה` } };

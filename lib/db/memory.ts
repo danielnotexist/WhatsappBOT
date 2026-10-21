@@ -16,10 +16,13 @@ import type {
   LinkTokenRow,
   MessageRow,
   NewMessage,
+  NewReminder,
   OtpRow,
   PendingActionKind,
   PendingActionRow,
   PendingActionStatus,
+  ReminderRow,
+  ReminderStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -50,6 +53,7 @@ export class MemoryDb implements Db {
   graphSubscriptions: GraphSubscriptionRow[] = [];
   payments: PaymentRow[] = [];
   jobs: JobRow[] = [];
+  reminders: ReminderRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
 
@@ -114,6 +118,8 @@ export class MemoryDb implements Db {
     this.messages = this.messages.filter((m) => m.user_id !== id);
     this.states.delete(id);
     this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
+    this.reminders = this.reminders.filter((r) => r.user_id !== id);
+    this.jobs = this.jobs.filter((j) => j.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -252,6 +258,11 @@ export class MemoryDb implements Db {
 
   async countMessagesSince(userId: string, since: Date): Promise<number> {
     return this.messages.filter((m) => m.user_id === userId && m.created_at >= iso(since)).length;
+  }
+
+  async setMessageTranscript(id: string, transcript: string): Promise<void> {
+    const row = this.messages.find((m) => m.id === id);
+    if (row) row.transcript = transcript;
   }
 
   async getConversationState(userId: string): Promise<ConversationStateRow | null> {
@@ -448,6 +459,52 @@ export class MemoryDb implements Db {
     let n = 0;
     for (const j of this.jobs) if (j.user_id === userId && j.kind === kind && j.status === "queued") { j.status = "cancelled"; n++; }
     return n;
+  }
+
+  async cancelJob(id: string): Promise<void> {
+    const job = this.jobs.find((j) => j.id === id);
+    if (job && job.status === "queued") job.status = "cancelled";
+  }
+
+  /** Mirrors public.claim_due_jobs(): oldest due first, queued → running, attempts + 1. */
+  async claimDueJobs(limit: number): Promise<JobRow[]> {
+    const now = this.now().getTime();
+    const due = this.jobs
+      .filter((j) => j.status === "queued" && Date.parse(j.run_at) <= now)
+      .sort((a, b) => Date.parse(a.run_at) - Date.parse(b.run_at))
+      .slice(0, Math.max(limit, 1));
+    for (const j of due) {
+      j.status = "running";
+      j.attempts += 1;
+    }
+    return due.map((j) => ({ ...j }));
+  }
+
+  async createReminder(row: NewReminder): Promise<ReminderRow> {
+    const full: ReminderRow = { id: randomUUID(), user_id: row.user_id, text: row.text, due_at: iso(row.due_at), job_id: null, status: "scheduled", recurrence: row.recurrence ?? null, last_fired_at: null, created_at: iso(this.now()) };
+    this.reminders.push(full);
+    return { ...full };
+  }
+
+  async getReminder(id: string): Promise<ReminderRow | null> {
+    const r = this.reminders.find((x) => x.id === id);
+    return r ? { ...r } : null;
+  }
+
+  async updateReminder(id: string, patch: Partial<Pick<ReminderRow, "text" | "status" | "due_at" | "job_id" | "recurrence" | "last_fired_at">>): Promise<ReminderRow | null> {
+    const r = this.reminders.find((x) => x.id === id);
+    if (!r) return null;
+    Object.assign(r, patch);
+    return { ...r };
+  }
+
+  async listReminders(userId: string, opts: { statuses: ReminderStatus[]; dueFrom?: Date; dueBefore?: Date; limit?: number }): Promise<ReminderRow[]> {
+    return this.reminders
+      .filter((r) => r.user_id === userId && opts.statuses.includes(r.status))
+      .filter((r) => (!opts.dueFrom || Date.parse(r.due_at) >= opts.dueFrom.getTime()) && (!opts.dueBefore || Date.parse(r.due_at) < opts.dueBefore.getTime()))
+      .sort((a, b) => Date.parse(a.due_at) - Date.parse(b.due_at))
+      .slice(0, opts.limit ?? 100)
+      .map((r) => ({ ...r }));
   }
 
   async getCurrentUsage(userId: string): Promise<UsageRow | null> {

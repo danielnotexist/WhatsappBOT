@@ -1,5 +1,6 @@
 import { copy, buttons, lists } from "@/lib/copy/bot";
 import type { Db, UserRow } from "@/lib/db/types";
+import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
 import type { InboundMessage } from "@/lib/wa/types";
 import { connectLinkFor, type BotContext } from "./context";
 
@@ -105,6 +106,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       if (time) {
         await ctx.db.updateUserProfile(user.id, { morning_time: time });
         await ctx.db.mergeUserProfile(user.id, { morning_summary_enabled: true });
+        await rescheduleMorningSummary(ctx.db, user.id, ctx.now());
         await ctx.wa.sendText(to, copy["onb.morning_time_ack"](time));
       } else {
         await ctx.db.mergeUserProfile(user.id, { morning_summary_enabled: false });

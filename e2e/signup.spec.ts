@@ -115,10 +115,34 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await expect(page.getByText("מעבירים אותך ל-Microsoft…")).toBeVisible();
     release();
 
-    await expect(page).toHaveURL(/\/start\/ready\?connected=microsoft$/, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/start\/ready\?connected=microsoft(&|$)/, { timeout: 30_000 });
     expect(authorizeUrl!.searchParams.get("code_challenge_method")).toBe("S256");
     await expect(page.getByRole("status").filter({ hasText: "Outlook מחובר" })).toBeVisible();
     await expect(page.getByRole("link", { name: "חיבור לוואטסאפ" })).toHaveAttribute("href", /^https:\/\/wa\.me\//);
+    await ctx.close();
+  });
+
+  test("Google path: connect → hand-off screen → Google (fixture) → back on /start/ready with Gmail connected", async ({ browser }) => {
+    const ctx = await newContext(browser);
+    await apiSignup(ctx);
+    // Chromium treats accounts.google.com specially (request interception does not reach it), so stand in one hop
+    // earlier: let our start route answer, read the authorize URL it redirects to, and approve at once.
+    await ctx.route("**/api/auth/google/start**", async (route) => {
+      expect(new URL(route.request().url()).searchParams.get("returnTo")).toBe("onboarding");
+      const res = await route.fetch({ maxRedirects: 0 });
+      const authorize = new URL(res.headers()["location"]!);
+      expect(authorize.hostname).toBe("accounts.google.com");
+      const back = new URL(authorize.searchParams.get("redirect_uri")!);
+      back.searchParams.set("code", "e2e-code");
+      back.searchParams.set("state", authorize.searchParams.get("state")!);
+      back.searchParams.set("scope", authorize.searchParams.get("scope") ?? "");
+      await route.fulfill({ status: 302, headers: { location: back.toString() } });
+    });
+    const page = await ctx.newPage();
+    await page.goto("/start/connect");
+    await page.getByRole("link", { name: "חיבור Gmail" }).click();
+    await expect(page).toHaveURL(/\/start\/ready\?connected=google(&|$)/, { timeout: 30_000 });
+    await expect(page.getByRole("status").filter({ hasText: "Gmail מחובר" })).toBeVisible();
     await ctx.close();
   });
 

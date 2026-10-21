@@ -256,8 +256,71 @@ CAPTURE_SCREENS=1 pnpm e2e e2e/screens.spec.ts        # כותב את הצילו
 
 **דרוש מדניאל:** לעבור על הצילומים ולאשר את הכיוון לפני ליטוש דף הנחיתה, הכניסה והאזור האישי (שלב 5 בתוכנית הסבב).
 
+### 2026-10-21 — אבן דרך 5: תזכורות, סיכום בוקר, הודעות קוליות (שולב מענף נפרד)
+
+> פירוט מלא: `docs/progress/m5.md`. נבנה במקביל לסבבי "עלזה" ומוזג אחריהם: `lib/wa/templates.ts` קורא את השם מ-`lib/brand.ts`, ובדיקות ההקלטה עודכנו לקול הנקבה ("מקשיבה…", "ממשיכה לפי זה").
+
+**מה נעשה**
+- **פענוח זמן בעברית** (`lib/reminders/parse.ts`, דטרמיניסטי — לא המודל): "מחר ב-9", "עוד שעתיים", "ביום ראשון הבא ב-8:30", "כל יום בשמונה", "ברבע לתשע", "ב-5 אחה״צ", "הערב", "ב-22.10", "בימים א׳–ה׳ ב-7:30", "כל חודש ב-1", ISO. Asia/Jerusalem עם מעברי שעון נכונים (`lib/time/zoned.ts`, Intl בלבד): שעה שלא קיימת → השעה שאחריה, שעה כפולה → המופע הראשון. המוסכמות מתועדות בראש הקובץ; "היום" בלי שעה / בלי זמן → שואלים.
+- **תזכורות** (`lib/reminders/service.ts`): יצירה חד-פעמית/חוזרת, רשימה, ביטול (כמה התאמות → שואלים), דחייה לשעה / למחר בבוקר, "טופל". בתוך חלון 24 שעות — "⏰ תזכורת: …" עם כפתורים; מחוצה לו — תבנית `reminder`. אידמפוטנטי (`last_fired_at`), חוזרת מתזמנת את המופע הבא לפי שעון הקיר; `proactive_disabled` → מבוטלת.
+- **כלים למודל** (`lib/ai/reminder-tools.ts`): `create_reminder`, `list_reminders`, `cancel_reminder` — זמינים גם בלי חיבור.
+- **סיכום בוקר** (`lib/jobs/morning-summary.ts`): א׳–ה׳ בשעה שנבחרה; פגישות היום, מיילים שמחכים לתשובה (היוריסטיקה על 7 ימים אחרונים), תזכורות של היום. מחוץ לחלון — תבנית `morning_summary`. Opt-in בלבד, מכבד השהיה, אחד ליום (dedupe), בלי חיבור ובלי תזכורות — לא שולחים.
+- **תזמון**: `schedule_morning_summaries()` ב-SQL (pg_cron כל 10 דק׳), אחרי כל ריצה, ובבחירת שעה ב-onboarding / בכלי `set_morning_time`. `/api/jobs/run` מטפל ב-`reminder` ו-`morning_summary`; חדש: `/api/jobs/tick` (`claim_due_jobs` → התור; מסלול חלופי בלי pg_net ולולאת הפיתוח ב-memory).
+- **הודעות קוליות** (`lib/stt/*`, `lib/bot/voice.ts`): "מקשיבה…" → הורדה מוואטסאפ (עד 20MB) → Soniox async (`stt-async-v5`, `he`+`en`, מחיקת הקובץ והתמלול אצל Soniox) → גיבוי gpt-4o-transcribe → mock. התמלול נשמר ב-`messages.transcript` וממשיך כטקסט (גם בתשובות ה-onboarding); הקלטה ארוכה או ביטחון נמוך → `proc.transcript_echo`; כישלון → `err.transcription_failed`, לא נספר בניסיון.
+- **תבניות** (`lib/wa/templates.ts`): מטענים ל-`reminder`/`morning_summary`, הגדרות 7 התבניות ורישום (dry-run כברירת מחדל); בדיקה משווה מול ה-JSON ב-`docs/copy/wa-templates.md`.
+- **DB**: מיגרציה `0005_m5_reminders_morning.sql` (0004 פנוי בכוונה) + `supabase/tests/m5_reminders.test.sql`. טקסטים: `lib/copy/bot-m5.ts` + `docs/copy/bot-copy-m5.md`.
+- **בדיקות**: 340 אחרי המיזוג (154 חדשות: פענוח זמן ומעברי שעון 2026–2027, תזכורות, סיכום בוקר עם fixtures של Graph, STT עם fetch מדומה, הקלטות בצינור, routes).
+
+**ממצא**: Meta דוחה פרמטר תבנית עם ירידת שורה, טאב או יותר מ-4 רווחים (132018) — הקוד משטח לשורה אחת; `docs/copy/wa-templates.md` תוקן.
+
+**איך בודקים**
+```bash
+pnpm test -- lib/reminders lib/jobs lib/stt lib/bot/voice.test.ts app/api/jobs
+DB_NAME=whatsappbot_m5_test supabase/tests/run-local.sh
+DATA_MODE=memory pnpm dev   # "תזכיר לי בעוד דקה לבדוק", ואז: curl -X POST http://localhost:3000/api/jobs/tick
+```
+
+**דרוש מדניאל:** רישום התבניות ב-Meta (`APP_DOMAIN` → הדומיין; בלי תבנית מאושרת תזכורת/סיכום מחוץ לחלון נכשלים), `SONIOX_API_KEY` (אופציונלי: `OPENAI_API_KEY` לגיבוי, `STT_PROVIDER`), הרצת מיגרציה 0005 ב-Supabase, בדיקה בטלפון (סיכום ב-07:30, תזכורת מחוץ לחלון, הקלטה בעברית).
+
+### 2026-10-21 — אבן דרך 6, שלב 1: Google — יומן, drive.file, שליחת Gmail (שולב מענף נפרד)
+
+> פירוט מלא: `docs/progress/m6.md`; מדריך הקמה: `docs/google-setup.md`. נבנה במקביל לאבן דרך 5 ולסבבי "עלזה" ומוזג אחריהם.
+
+**מה נעשה**
+- **OAuth 2.0 web flow** (`lib/google/oauth.ts`): code + PKCE S256, `access_type=offline`, `prompt=consent`, `include_granted_scopes=true`. Scopes: `openid email profile`, `calendar.events` (לא `calendar` המלא), `drive.file`, `gmail.send`. הסכמה מצטברת ל-`gmail.readonly` חסומה מאחורי `GOOGLE_GMAIL_READ_ENABLED=false` (דורש CASA).
+- **נתיבים**: `/api/auth/google/start` (`?t=` קישור חד-פעמי מהשיחה או session; `returnTo=onboarding|account`) ו-`/api/auth/google/callback` (state חד-פעמי עם TTL של 30 דק׳, granular consent → הודעת "חלקי" עם קישור להשלמה, `access_denied`, `admin_policy_enforced`, `invalid_grant`). הפניה רק לנתיבים קבועים (`lib/auth/oauth-return.ts`) — אין open redirect.
+- **טוקנים**: AES-256-GCM עם AAD `${userId}:google`, רענון 5 דק׳ לפני תפוגה, שמירת ה-refresh token הקיים; `invalid_grant` (כולל תפוגת 7 ימים במצב Testing) → `expired` + audit → הבוט שולח קישור חידוש.
+- **לקוח fetch בלי SDK** (`lib/google/client.ts`): Calendar, Drive (כולל export והמרה), Gmail send (RFC 2822; מעל 4MB → upload), userinfo; סיווג שגיאות (401, scope חסר, rate limit/5xx, 404/410). **MIME** (`lib/google/mime.ts`): כותרות בעברית ב-RFC 2047, קבצים מצורפים עם `filename*`, הגנה מ-header injection.
+- **כלים למודל** (`lib/google/tools.ts`, לפי ה-scopes שאושרו בפועל): `gcal_list_events`, `gcal_free_slots`, `gcal_create_event`/`gcal_update_event`/`gcal_delete_event` (pending), `gdrive_list_files`, `gdrive_get_file_text`, `gdrive_save_doc`, `gmail_draft_email` (pending, צירוף מ-Drive), `gmail_read_status`.
+- **ניתוב ביצוע** (`lib/google/dispatch.ts`): `payload.provider` אם תויג, אחרת Microsoft פעיל, אחרת Google — כך `draft_email`/`create_event` הבסיסיים עובדים גם למשתמש Google בלבד. **Revoke** אצל Google בניתוק ובמחיקת חשבון (best-effort, audit).
+- **באג שתוקן**: זיהוי "לחבר את המייל" נכשל כי `\b` ב-JS עובד רק על ASCII — עבר ל-`lib/bot/connect-intent.ts` (גם "לחבר את גוגל", "ג'ימייל", "דרייב").
+- **טקסטים**: `lib/copy/bot-google.ts` + `docs/copy/bot-copy-google.md` (במיזוג: כותרת עם השם עלזה, "אני לא קוראת" בלשון נקבה).
+- **מצב memory**: כל ה-hosts של Google מוגשים מ-`lib/google/__fixtures__/google-fixtures.ts`.
+
+**במיזוג (אבני דרך 5 + 6 + "עלזה")**
+- `lib/bot/process-inbound.ts`: הקלטה → תמלול לפני ה-onboarding (5), כפתורי תזכורת (5), ובלוק 6 עם `connectRequestProvider`/`reconnectProviderFor` (6). `handle-inbound.ts`: `stt` + כלי Graph ו-Google + executors מנותבים; כלי התזכורות ב-`BASE_TOOLS` תמיד. `context.ts`: `stt` + קישור OAuth ל-Google.
+- **סיכום הבוקר כולל את יומן Google**: `googleFor` ב-`lib/jobs` (`googleForUser` → `listEvents` ליום המקומי); למשתמש עם שני החיבורים — היומנים ממוזגים לפי שעה (אירועי כל-היום קודם). מיילים שמחכים לתשובה — רק מ-Microsoft 365 (קריאת Gmail אחרי CASA).
+- `docs/legal/oauth-consent-screen-he.md` §3–4: `calendar.events` במקום `calendar`.
+- **בדיקות**: 386 (44 חדשות מאבן דרך 6 + 2 לסיכום בוקר עם Google), הכול מול fixtures / fetch מדומה.
+
+**איך בודקים**
+```bash
+pnpm test -- lib/google app/api/auth/google lib/bot/connect-intent lib/copy/bot-google lib/jobs
+DATA_MODE=memory pnpm dev   # "לחבר את גוגל" בשיחה → /api/auth/google/start?t=… → callback מדומה
+```
+
+**דרוש מדניאל:** פרויקט GCP + Calendar/Drive/Gmail APIs, מסך הסכמה External, OAuth client מסוג Web עם redirect `https://<דומיין>/api/auth/google/callback` (`docs/google-setup.md` §1–2); ב-Vercel `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_GMAIL_READ_ENABLED=false`; משתמשי בדיקה (עד 100, הרשאה פגה אחרי 7 ימים); לפני השקה — אימות דומיין, branding, סרטון הדגמה והצדקות ל-`calendar.events` ו-`gmail.send` (§5). קריאת Gmail רק אחרי CASA (§6).
+
+### 2026-10-21 — מיזוג: סבב "עלזה" 1–4 + אבני דרך 5 ו-6 (ענף האינטגרציה)
+
+- מוזג `worktree-agent-a3cd72339d3427793` (115480b: תזכורות, סיכום בוקר, הודעות קוליות, Google OAuth) לתוך הענף.
+- **returnTo אחיד:** ה-callback של Microsoft עבר ל-`lib/auth/oauth-return.ts` (אותו כלל כמו Google): `returnTo=onboarding` → `/start/ready?connected=<provider>` או `/start/connect?error=…` (ו-`admin=1` כשהארגון דורש מנהל IT), אחרת `/account`.
+- `/connect/google` → `/api/auth/google/start?returnTo=onboarding`; `/start/ready` מציג "Outlook מחובר" / "Gmail מחובר".
+- `lib/bot/process-inbound.ts`: נשמרו גם handler ה"כניסה" (אחרי תמלול ההקלטה — אפשר גם להגיד "כניסה" בקול) וגם הקלטות, כפתורי תזכורת וזיהוי חיבור Microsoft/Google.
+- **בדיקות אחרי המיזוג:** 416 יחידה/קומפוננטה, build, E2E 8/8 (נוסף נתיב Google עם ה-fixture), eval typecheck + dry-run, Supabase מקומי (`DB_NAME=whatsappbot_main_test`).
+
 ## מה נשאר (אבני דרך 5–7)
-- אבן דרך 5: תבניות Meta (רישום 7 התבניות), סיכום בוקר ותזכורות (jobs + `/api/jobs/run`), תמלול Soniox להקלטות, טיפול ב-change notifications (מייל חדש → מידע לסיכום).
-- אבן דרך 6: Google (Calendar + drive.file + gmail.send; CASA לקריאת Gmail).
-- אבן דרך 7: UI אמיתי לפי כיוון העיצוב שייבחר (כפתורי החיבור באתר מושבתים עד אז), Lighthouse, audit, השקה.
-- בדיקת עברית משלימה (Haiku adaptive, Opus redo) — ראו `docs/hebrew-eval-report.md`.
+- אבן דרך 5 (שארית): רישום 7 התבניות ב-Meta (ידני), טיפול ב-change notifications (מייל חדש → מידע לסיכום).
+- אבן דרך 6 (שארית): Google Picker בצד הלקוח (`docs/google-setup.md` §8), כפתורי החיבור באתר, אימות האפליקציה ב-Google, CASA לקריאת Gmail (ואז מיילים שמחכים לתשובה גם מ-Gmail בסיכום הבוקר).
+- סבב "עלזה" שלבים 5–7 (אחרי אישור הצילומים): דף נחיתה קולנועי, ליטוש כניסה ואזור אישי, הדוכיפת התלת-ממדית (OpenRouter), Lighthouse ≥ 90, audit.
+- אבן דרך 7: השקה.

@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import { getBillingContext } from "@/lib/billing";
 import { runChargeJob } from "@/lib/billing/service";
 import { getDb } from "@/lib/db";
+import { getJobDeps } from "@/lib/jobs";
+import { runScheduledJob } from "@/lib/jobs/run";
 import { renewExpiringSubscriptions } from "@/lib/ms/renewal";
 import type { JobKind } from "@/lib/db/types";
 import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
@@ -26,7 +28,7 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * POST: runs one scheduled job (charge now; morning_summary / reminder in Milestone 5) and reports back with finish_job().
+ * POST: runs one scheduled job (charge, renew_subscription, reminder, morning_summary) and reports back with finish_job().
  * Same trust model as /api/wa/worker: QStash signature when configured, otherwise the internal secret.
  */
 export async function POST(request: Request) {
@@ -59,6 +61,10 @@ export async function POST(request: Request) {
         break;
       case "renew_subscription":
         result = await renewExpiringSubscriptions(db, process.env.APP_URL || new URL(request.url).origin);
+        break;
+      case "reminder":
+      case "morning_summary":
+        result = await runScheduledJob(getJobDeps(), { id: job.job_id, kind: job.kind, user_id: job.user_id, payload: job.payload ?? {} });
         break;
       default:
         result = { skipped: `kind ${job.kind} not handled yet` };

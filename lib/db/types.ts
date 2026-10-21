@@ -145,6 +145,39 @@ export interface JobRow {
   dedupe_key: string | null;
 }
 
+/** Recurring reminder rule (reminders.recurrence, migration 0005). Times are wall-clock in the user's time zone. */
+export interface RecurrenceRule {
+  freq: "daily" | "weekly" | "monthly";
+  hour: number;
+  minute: number;
+  /** weekly: 0 = Sunday … 6 = Saturday */
+  weekdays?: number[];
+  /** monthly: 1–31 (clamped to the month's last day) */
+  monthDay?: number;
+}
+
+/** scheduled → fired: sent (one-off) / done (user pressed "טופל"); recurring reminders stay scheduled with the next due_at. */
+export type ReminderStatus = "scheduled" | "sent" | "done" | "cancelled";
+
+export interface ReminderRow {
+  id: string;
+  user_id: string;
+  text: string;
+  due_at: string;
+  job_id: string | null;
+  status: ReminderStatus;
+  recurrence: RecurrenceRule | null;
+  last_fired_at: string | null;
+  created_at: string;
+}
+
+export interface NewReminder {
+  user_id: string;
+  text: string;
+  due_at: Date;
+  recurrence?: RecurrenceRule | null;
+}
+
 export interface UsageRow {
   user_id: string;
   period_start: string;
@@ -270,6 +303,8 @@ export interface Db {
   insertMessage(row: NewMessage): Promise<MessageRow | null>;
   recentMessages(userId: string, limit: number): Promise<MessageRow[]>;
   countMessagesSince(userId: string, since: Date): Promise<number>;
+  /** voice notes: stores the STT transcript on the inbound audio message */
+  setMessageTranscript(id: string, transcript: string): Promise<void>;
 
   // conversation_state
   getConversationState(userId: string): Promise<ConversationStateRow | null>;
@@ -319,6 +354,17 @@ export interface Db {
   createJob(job: { kind: JobKind; user_id: string | null; run_at: Date; payload?: Record<string, unknown>; dedupe_key?: string | null; max_attempts?: number }): Promise<JobRow | null>;
   finishJob(id: string, error?: string | null, retryAt?: Date | null): Promise<JobRow | null>;
   cancelJobs(userId: string, kind: JobKind): Promise<number>;
+  /** one queued job → cancelled (e.g. the old job of a snoozed reminder) */
+  cancelJob(id: string): Promise<void>;
+  /** SQL claim_due_jobs(): queued + run_at <= now → running, attempts + 1. Used by the dev tick route (pg_cron uses dispatch_due_jobs). */
+  claimDueJobs(limit: number): Promise<JobRow[]>;
+
+  // reminders (Milestone 5)
+  createReminder(row: NewReminder): Promise<ReminderRow>;
+  getReminder(id: string): Promise<ReminderRow | null>;
+  updateReminder(id: string, patch: Partial<Pick<ReminderRow, "text" | "status" | "due_at" | "job_id" | "recurrence" | "last_fired_at">>): Promise<ReminderRow | null>;
+  /** ordered by due_at; `dueFrom` (inclusive) / `dueBefore` (exclusive) bound due_at */
+  listReminders(userId: string, opts: { statuses: ReminderStatus[]; dueFrom?: Date; dueBefore?: Date; limit?: number }): Promise<ReminderRow[]>;
 
   // audit
   addAudit(entry: AuditEntry): Promise<void>;

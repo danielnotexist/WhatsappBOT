@@ -61,7 +61,7 @@
 | הרשאה | בשביל מה |
 |---|---|
 | `openid`, `email`, `profile` | זיהוי החשבון |
-| `https://www.googleapis.com/auth/calendar` | הצגה וניהול פגישות |
+| `https://www.googleapis.com/auth/calendar.events` | הצגה, קביעה, הזזה וביטול של אירועים ביומן (לא הגדרות היומן ולא שיתוף יומנים) |
 | `https://www.googleapis.com/auth/drive.file` | גישה רק לקבצים שתפתח/תשתף דרך עלזה |
 | `https://www.googleapis.com/auth/gmail.send` | שליחת מייל בשמך אחרי אישור |
 
@@ -79,7 +79,7 @@
 
 ## 4. דרישות נלוות לאימות האפליקציה
 - **Microsoft:** Publisher Verification (Partner Center, MPN ID) כדי שהמסך לא יציג "unverified"; שם האפליקציה = שם המוצר הסופי; לוגו; קישורי Terms/Privacy ברישום; multi-tenant; ב-admin-consent URL להשתמש ב-`/adminconsent` עם `state`.
-- **Google:** OAuth consent screen External; `calendar` ו-`gmail.send` הם scopes **רגישים** → אימות (וידאו הדגמה של כל scope, מדיניות פרטיות באותו דומיין של האפליקציה, דף בית עם תיאור); `drive.file` לא רגיש. קריאת Gmail (`gmail.readonly`) = **restricted** → CASA Tier 2 (שלב 6).
+- **Google:** OAuth consent screen External; `calendar.events` ו-`gmail.send` הם scopes **רגישים** → אימות (וידאו הדגמה של כל scope, מדיניות פרטיות באותו דומיין של האפליקציה, דף בית עם תיאור); `drive.file` לא רגיש. קריאת Gmail (`gmail.readonly`) = **restricted** → CASA Tier 2 (שלב 6).
 - טקסט "unverified app" בתקופת הבדיקה — להסביר ללקוחות הראשונים.
 
 ## 5. מה לא אומת

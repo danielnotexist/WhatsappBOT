@@ -1,6 +1,7 @@
 import type { AiProvider } from "@/lib/ai/types";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import type { Tool } from "@/lib/ai/tools";
+import type { SttProvider } from "@/lib/stt/types";
 import type { WaSender } from "@/lib/wa/sender";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 
@@ -14,6 +15,8 @@ export interface BotContext {
   appUrl: string;
   /** provider tools (Graph / Google) for the strong model, by user and connections */
   extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
+  /** speech-to-text for voice notes (lazy: a missing key only fails voice notes); absent → audio is declined */
+  stt?: () => SttProvider;
 }
 
 export const LINK = {
@@ -21,10 +24,9 @@ export const LINK = {
   blockMs: 24 * 3_600_000,
 } as const;
 
-/** One-time 30-minute OAuth start link for the chat (Microsoft now; Google in Milestone 6 lands on /start/connect). */
+/** One-time 30-minute OAuth start link for the chat: /api/auth/{microsoft|google}/start?t=<signed token>. */
 export function connectLinkFor(ctx: BotContext, userId: string, provider: "microsoft" | "google"): string {
-  if (provider === "google") return new URL("/start/connect", ctx.appUrl).toString();
-  return new URL(`/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(userId, provider, { now: ctx.now() }))}`, ctx.appUrl).toString();
+  return new URL(`/api/auth/${provider}/start?t=${encodeURIComponent(createConnectLinkToken(userId, provider, { now: ctx.now() }))}`, ctx.appUrl).toString();
 }
 
 export function siteLink(ctx: BotContext, path: string): string {
