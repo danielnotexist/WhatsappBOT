@@ -3,7 +3,7 @@
 import { motion, useReducedMotion } from "motion/react";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
-import { MascotPlaceholder } from "./mascot-placeholder";
+import { MascotAvatar } from "./mascot";
 
 /**
  * A WhatsApp incoming voice call from עלזה (the /start intro). Purely illustrative: exposed to screen readers as
@@ -37,9 +37,8 @@ export function IncomingCall({ className, status = "מצלצלת…" }: { classN
             transition={reduce ? { duration: 0 } : { duration: 1.6, repeat: Infinity, delay: i * 0.8, ease: "easeOut" }}
           />
         ))}
-        <span className="relative grid size-24 place-items-center overflow-hidden rounded-full bg-paper shadow-[0_20px_40px_-20px_rgb(0_0_0/0.8)] @min-[17rem]:size-36">
-          <MascotPlaceholder pose="call" className="size-[5.5rem] translate-y-1.5 @min-[17rem]:size-32 @min-[17rem]:translate-y-2" />
-        </span>
+        {/* the caller's profile photo — the same image as עלזה's real WhatsApp profile */}
+        <MascotAvatar sizes="144px" className="size-24 shadow-[0_20px_40px_-20px_rgb(0_0_0/0.8)] @min-[17rem]:size-36" />
       </div>
 
       <p className="mt-5 font-heading text-[1.625rem] leading-none font-bold @min-[17rem]:mt-8 @min-[17rem]:text-[2rem]">{BRAND.name}</p>

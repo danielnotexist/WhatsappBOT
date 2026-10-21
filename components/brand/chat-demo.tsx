@@ -5,7 +5,7 @@ import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { Bubble } from "./bubble";
 import { DraftCard, type Draft } from "./draft-card";
-import { MascotPlaceholder } from "./mascot-placeholder";
+import { MascotAvatar } from "./mascot";
 import { TypingDots } from "./typing-dots";
 import { VoiceNote } from "./voice-note";
 import { WaButtons } from "./wa-buttons";
@@ -221,9 +221,7 @@ export function ChatDemo({
   return (
     <div className={cn("relative flex h-full min-h-0 flex-col", className)}>
       <div className="flex items-center gap-2.5 bg-[var(--wa-head)] px-3 pt-10 pb-2.5">
-        <span className="grid size-9 flex-none place-items-center overflow-hidden rounded-full bg-paper">
-          <MascotPlaceholder className="size-9 translate-y-0.5" />
-        </span>
+        <MascotAvatar sizes="36px" className="size-9 flex-none" />
         <span className="min-w-0">
           <b className="block text-[0.9375rem] leading-tight">{title}</b>
           <small className="block text-[0.75rem] leading-tight text-[var(--wa-time)]">{isTyping ? "מקלידה…" : "מחוברת"}</small>
