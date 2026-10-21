@@ -5,11 +5,13 @@ import { payLinkFor } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import type { MessageType } from "@/lib/db/types";
+import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
 import type { BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
 import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
+import { transcribeVoiceNote } from "./voice";
 import { connectLinkFor } from "./context";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
@@ -44,6 +46,19 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });
   };
 
+  // 1b. voice notes (Milestone 5): "מקשיב…" → download → STT → transcript on the message → continue as text
+  if (msg.type === "audio" && ctx.stt) {
+    const voice = await transcribeVoiceNote(ctx, user.id, msg, stored.id);
+    if (!voice.ok) return { handled: true, note: voice.note };
+    msg = { ...msg, type: "text", text: voice.transcript };
+  }
+
+  // 2a. reminder buttons (free-form message buttons and the `reminder` template's quick replies)
+  if ((msg.type === "button" || msg.type === "template_button") && msg.reply?.id.startsWith("rem:")) {
+    await handleReminderButton(ctx, user, to, msg.reply.id);
+    return { handled: true, note: "reminder button" };
+  }
+
   // 2. approval buttons
   if (msg.type === "button" && msg.reply?.id.startsWith("pa:")) {
     await handlePendingButton(ctx, user.id, to, msg.reply.id, msg.waMessageId);
@@ -53,7 +68,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   // 3. onboarding questions
   if (onboardingOf(user) && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };
 
-  // 4. media we cannot process yet (voice transcription arrives in Milestone 5)
+  // 4. media we cannot process (voice notes were transcribed in 1b)
   if (msg.type !== "text" && !(isButton && msg.text)) {
     await say(copy["err.unsupported_media"](MEDIA_HE[msg.type] ?? MEDIA_HE.other!));
     return { handled: true, note: `unsupported ${msg.type}` };

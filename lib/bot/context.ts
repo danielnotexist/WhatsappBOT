@@ -1,6 +1,7 @@
 import type { AiProvider } from "@/lib/ai/types";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import type { Tool } from "@/lib/ai/tools";
+import type { SttProvider } from "@/lib/stt/types";
 import type { WaSender } from "@/lib/wa/sender";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 
@@ -14,6 +15,8 @@ export interface BotContext {
   appUrl: string;
   /** provider tools (Graph / Google) for the strong model, by user and connections */
   extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
+  /** speech-to-text for voice notes (lazy: a missing key only fails voice notes); absent → audio is declined */
+  stt?: () => SttProvider;
 }
 
 export const LINK = {

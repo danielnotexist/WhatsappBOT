@@ -18,10 +18,13 @@ import type {
   LinkTokenRow,
   MessageRow,
   NewMessage,
+  NewReminder,
   OtpRow,
   PendingActionKind,
   PendingActionRow,
   PendingActionStatus,
+  ReminderRow,
+  ReminderStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -53,6 +56,7 @@ export class SupabaseDb implements Db {
   private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef";
   private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at";
   private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
+  private static REM_COLS = "id,user_id,text,due_at,job_id,status,recurrence,last_fired_at,created_at";
 
   private fail(op: string, error: { message: string } | null): never {
     throw new Error(`Supabase ${op}: ${error?.message ?? "unknown error"}`);
@@ -195,6 +199,11 @@ export class SupabaseDb implements Db {
       .gte("created_at", since.toISOString());
     if (error) this.fail("countMessagesSince", error);
     return count ?? 0;
+  }
+
+  async setMessageTranscript(id: string, transcript: string): Promise<void> {
+    const { error } = await this.client.from("messages").update({ transcript }).eq("id", id);
+    if (error) this.fail("setMessageTranscript", error);
   }
 
   async getConversationState(userId: string): Promise<ConversationStateRow | null> {
@@ -542,6 +551,48 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.client.from("jobs").update({ status: "cancelled" }).eq("user_id", userId).eq("kind", kind).eq("status", "queued").select("id");
     if (error) this.fail("cancelJobs", error);
     return data?.length ?? 0;
+  }
+
+  async cancelJob(id: string): Promise<void> {
+    const { error } = await this.client.from("jobs").update({ status: "cancelled" }).eq("id", id).eq("status", "queued");
+    if (error) this.fail("cancelJob", error);
+  }
+
+  async claimDueJobs(limit: number): Promise<JobRow[]> {
+    const { data, error } = await this.client.rpc("claim_due_jobs", { p_limit: limit });
+    if (error) this.fail("claimDueJobs", error);
+    return ((data as JobRow[] | null) ?? []).map((j) => ({ id: j.id, user_id: j.user_id, kind: j.kind, run_at: j.run_at, payload: j.payload, status: j.status, attempts: j.attempts, max_attempts: j.max_attempts, last_error: j.last_error, dedupe_key: j.dedupe_key }));
+  }
+
+  async createReminder(row: NewReminder): Promise<ReminderRow> {
+    const { data, error } = await this.client
+      .from("reminders")
+      .insert({ user_id: row.user_id, text: row.text, due_at: row.due_at.toISOString(), recurrence: row.recurrence ?? null })
+      .select(SupabaseDb.REM_COLS)
+      .single();
+    if (error) this.fail("createReminder", error);
+    return data as unknown as ReminderRow;
+  }
+
+  async getReminder(id: string): Promise<ReminderRow | null> {
+    const { data, error } = await this.client.from("reminders").select(SupabaseDb.REM_COLS).eq("id", id).maybeSingle();
+    if (error) this.fail("getReminder", error);
+    return (data as unknown as ReminderRow | null) ?? null;
+  }
+
+  async updateReminder(id: string, patch: Partial<Pick<ReminderRow, "text" | "status" | "due_at" | "job_id" | "recurrence" | "last_fired_at">>): Promise<ReminderRow | null> {
+    const { data, error } = await this.client.from("reminders").update(patch).eq("id", id).select(SupabaseDb.REM_COLS).maybeSingle();
+    if (error) this.fail("updateReminder", error);
+    return (data as unknown as ReminderRow | null) ?? null;
+  }
+
+  async listReminders(userId: string, opts: { statuses: ReminderStatus[]; dueFrom?: Date; dueBefore?: Date; limit?: number }): Promise<ReminderRow[]> {
+    let q = this.client.from("reminders").select(SupabaseDb.REM_COLS).eq("user_id", userId).in("status", opts.statuses);
+    if (opts.dueFrom) q = q.gte("due_at", opts.dueFrom.toISOString());
+    if (opts.dueBefore) q = q.lt("due_at", opts.dueBefore.toISOString());
+    const { data, error } = await q.order("due_at", { ascending: true }).limit(opts.limit ?? 100);
+    if (error) this.fail("listReminders", error);
+    return (data as unknown as ReminderRow[]) ?? [];
   }
 
   async getCurrentUsage(userId: string): Promise<UsageRow | null> {

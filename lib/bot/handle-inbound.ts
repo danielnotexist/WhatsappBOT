@@ -1,6 +1,7 @@
 import "server-only";
 import { getAiProvider } from "@/lib/ai";
 import { getDb } from "@/lib/db";
+import { getSttProvider } from "@/lib/stt";
 import { getWaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
 import { activeMicrosoftConnection, graphForConnection, graphForUser } from "@/lib/ms";
@@ -30,6 +31,7 @@ export async function handleInbound(message: InboundMessage): Promise<{ handled:
     ai: getAiProvider(),
     now: () => new Date(),
     appUrl: process.env.APP_URL || "http://localhost:3000",
+    stt: getSttProvider,
     async extraTools(user, connections) {
       const conn = activeMicrosoftConnection(connections);
       if (!conn) return [];
