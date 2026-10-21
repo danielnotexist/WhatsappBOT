@@ -1,9 +1,11 @@
+import { handleAgentMessage, updateStickyAfterTurn } from "@/lib/agents/commands";
 import { maybeSummarize } from "@/lib/ai/memory";
 import { runAssistant } from "@/lib/ai/orchestrator";
 import { AiProviderError } from "@/lib/ai/types";
 import { payLinkFor } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
+import { acopy } from "@/lib/copy/bot-agents";
 import type { MessageType } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -80,7 +82,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   const text = (msg.text ?? "").trim();
   if (!text) return { handled: true, note: "empty" };
 
-  // 5. billing gates (PLAN §3/§4): suspended account, trial / monthly quota
+  // 5a. billing gate (PLAN §3/§4): suspended account
   const sub = await ctx.db.getSubscription(user.id);
   const payLink = payLinkFor(ctx.appUrl, user.id);
   if (sub?.status === "past_due") {
@@ -91,6 +93,14 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     }
     return { handled: true, note: "past_due" };
   }
+
+  // 5b. agents (docs/design/agents.md §5.1) — deterministic, no model, not counted: `ag:` buttons, the create / edit
+  //     flows, management commands, and addresses that cannot reach the model. A message to an available agent goes on.
+  const routing = await handleAgentMessage(ctx, user, msg, text, sub);
+  if (routing.handled) return { handled: true, note: routing.note };
+  const ask = routing.text;
+
+  // 5c. trial / monthly quota
   const remaining = await ctx.db.countTrialMessage(user.id);
   if (remaining < 0) {
     const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
@@ -116,28 +126,43 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   // 6. explicit connect requests ("לחבר את המייל", "חבר שוב") — no model needed
   const freshUser = (await ctx.db.getUser(user.id)) ?? user;
   const connections = await ctx.db.listConnections(user.id);
-  const connectProvider = connectRequestProvider(text, connections);
+  const connectProvider = connectRequestProvider(ask, connections);
   if (connectProvider) {
     const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
     const link = connectLinkFor(ctx, user.id, connectProvider);
     await say(expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link));
     return { handled: true, note: "connect link" };
   }
-  const reconnect = reconnectProviderFor(text, connections);
+  const reconnect = reconnectProviderFor(ask, connections);
   if (reconnect) {
     await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)));
     return { handled: true, note: "connection expired" };
   }
 
-  // 7. assistant (Graph / Google tools when a connection is active; reminder tools always)
+  // 7. assistant or agent (Graph / Google tools when a connection is active; reminder tools always). An agent's reply
+  //    opens with its name (§5.5) and the agent stays sticky for 10 minutes (§5.3).
   let reply: string;
   try {
-    const out = await runAssistant({ db: ctx.db, ai: ctx.ai, user: freshUser, connections, text, now: ctx.now(), tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections) : [] });
-    reply = out.text;
+    const out = await runAssistant({
+      db: ctx.db,
+      ai: ctx.ai,
+      user: freshUser,
+      connections,
+      text: ask,
+      now: ctx.now(),
+      tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections) : [],
+      agent: routing.agent,
+      agentVia: routing.via,
+      agentChoices: routing.choices,
+      activeAgentKey: routing.activeKey,
+    });
+    const header = out.agent ? `${acopy["agent.reply_header"](out.agent.name)}\n` : "";
+    reply = out.text.trim() ? `${header}${out.text}` : out.text;
     // A pending action is rendered by us (draft + buttons); the model's one-liner would be redundant.
     if (reply.trim() && out.pendingActions.length === 0) await ctx.wa.sendText(to, reply);
     for (const action of out.pendingActions) await presentPendingAction(ctx, to, action);
-    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length ? "button" : "text", text: reply || `[${out.pendingActions.map((a) => a.kind).join(",")}]`, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd });
+    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length ? "button" : "text", text: reply || `[${out.pendingActions.map((a) => a.kind).join(",")}]`, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
+    await updateStickyAfterTurn(ctx, user, out.agent?.key ?? null, Boolean(routing.activeKey) || routing.clearSticky);
   } catch (e) {
     const retryable = e instanceof AiProviderError ? e.retryable : false;
     console.error("[bot] assistant failed:", (e as Error).message);

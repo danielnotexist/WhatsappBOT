@@ -87,16 +87,17 @@ link_tokens       id, user_id, token (unique), expires_at, used_at
 wa_identities     id, user_id, phone_e164 (unique), wa_name, linked_at, status
 connections       id, user_id, provider (microsoft|google), account_email, tenant_id, scopes[], enc_access, enc_refresh, expires_at, status, consent_type (user|admin), created_at, revoked_at
 graph_subscriptions id, connection_id, subscription_id, resource, expires_at, client_state
-messages          id, user_id, wa_message_id (unique), direction (in|out), type (text|audio|image|doc|button|template), text, media_url, transcript, model_used, tokens_in, tokens_out, cost_usd, created_at
+messages          id, user_id, wa_message_id (unique), direction (in|out), type (text|audio|image|doc|button|template), text, media_url, transcript, model_used, tokens_in, tokens_out, cost_usd, agent_key, created_at
 conversation_state user_id (pk), summary, last_summarized_msg_id, facts jsonb, updated_at
-pending_actions   id, user_id, kind (send_mail|create_event|update_event|delete_event|share_file), payload jsonb, status (pending|approved|edited|cancelled|executed|expired), expires_at, approved_msg_id, executed_at
+pending_actions   id, user_id, kind (send_mail|create_event|update_event|delete_event|share_file|forward_mail), payload jsonb, status (pending|approved|edited|cancelled|executed|expired), expires_at, approved_msg_id, executed_at, agent_key, agent_name
 jobs              id, user_id, kind (morning_summary|reminder|renew_subscription|charge|retry), run_at, payload jsonb, status, attempts, last_error
 reminders         id, user_id, text, due_at, job_id, status
 usage             user_id, period_start, counted_messages, free_remaining, plan_limit, updated_at
 subscriptions     id, user_id, plan (trial|basic|pro), status (trial|active|past_due|cancelled), hyp_token_enc, hyp_tokef, hyp_hkid, next_charge_at, cancelled_at
 payments          id, user_id, hyp_trans_id (unique), amount_ils, ccode, acode, invoice_url, raw jsonb, created_at
-audit_log         id, user_id, action, target, reason, approved_by_msg_id, result, created_at
-agents (שלב 2)    id, user_id, name, role (secretary|intern|bookkeeper|custom), instructions, tools[], permissions jsonb, enabled
+audit_log         id, user_id, action, target, reason, approved_by_msg_id, pending_action_id, result, agent_key, agent_name, created_at
+agents (0006)     id, user_id, name, role (secretary|intern|bookkeeper|custom), template, instructions, tools[] (יכולות), permissions jsonb (recipients, max_outbound_per_day), enabled
+                  מובנים מוגדרים בקוד; שורה עם role מובנה = התאמה של משתמש פרו. מכסת מותאמים: ניסיון 0 / בסיסי 1 / פרו 3 (טריגר enforce_agent_rules). docs/design/agents.md
 wa_templates      name, category, language, status, body
 ```
 RLS: `user_id = auth.uid()` על הכול; הבוט פועל עם service-role בשרת בלבד. `messages`/`audit_log` מוחקים/מאנונמים אחרי 90 יום (pg_cron).
@@ -114,7 +115,8 @@ RLS: `user_id = auth.uid()` על הכול; הבוט פועל עם service-role �
 | סיכום בוקר, תזכורות, הודעות קוליות | ✓ | ✓ |
 | הודעות/חודש | עד 750 (~25 ביום) | fair use 3,000 |
 | קריאת Word/Excel/PowerPoint | ✓ | ✓ |
-| סוכנים מובנים (מזכירה / מתמחה / מנהלת חשבונות) | – | ✓ |
+| סוכנים מובנים (מזכירה / מתמחה / מנהלת חשבונות) — בניסיון אפשר לנסות כמו שהם | – | ✓ (כולל התאמה והשבתה) |
+| סוכנים משלך (שם, הנחיות, יכולות; אפשר מתבנית) | 1 | עד 3 |
 | משימות ואוטומציות (מעקב חשבוניות, follow-ups) | – | ✓ |
 | היסטוריה וזיכרון | 90 יום | 365 יום |
 | עדיפות למודל החזק | – | ✓ |

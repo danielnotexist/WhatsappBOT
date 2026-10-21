@@ -202,6 +202,8 @@ export interface MessageRow {
   tokens_in: number | null;
   tokens_out: number | null;
   cost_usd: number | null;
+  /** which agent answered (migration 0006); null = the main assistant */
+  agent_key: string | null;
   created_at: string;
 }
 
@@ -217,6 +219,7 @@ export interface NewMessage {
   tokens_in?: number | null;
   tokens_out?: number | null;
   cost_usd?: number | null;
+  agent_key?: AgentKey | null;
 }
 
 export interface ConversationStateRow {
@@ -227,7 +230,7 @@ export interface ConversationStateRow {
   updated_at: string;
 }
 
-export type PendingActionKind = "send_mail" | "create_event" | "update_event" | "delete_event" | "share_file";
+export type PendingActionKind = "send_mail" | "create_event" | "update_event" | "delete_event" | "share_file" | "forward_mail";
 export type PendingActionStatus = "pending" | "approved" | "edited" | "cancelled" | "executed" | "expired" | "failed";
 
 export interface PendingActionRow {
@@ -240,7 +243,17 @@ export interface PendingActionRow {
   approved_msg_id: string | null;
   executed_at: string | null;
   error: string | null;
+  /** the agent that prepared the draft (migration 0006); null = the main assistant */
+  agent_key: string | null;
+  /** the agent's name when the draft was made (the WhatsApp header) */
+  agent_name: string | null;
   created_at: string;
+}
+
+/** Who prepared a pending action — stored on the row, used for the header, the daily cap and the audit. */
+export interface PendingActionMeta {
+  agentKey: AgentKey;
+  agentName: string;
 }
 
 export interface LinkAttemptResult {
@@ -255,7 +268,57 @@ export interface AuditEntry {
   reason?: string | null;
   result?: string | null;
   approved_by_msg_id?: string | null;
+  pending_action_id?: string | null;
+  /** migration 0006: which agent acted (from the pending action, or the managed agent for agent.* entries) */
+  agent_key?: string | null;
+  agent_name?: string | null;
 }
+
+// ---- agents (migration 0006, docs/design/agents.md §2) ----
+
+export type BuiltinRole = "secretary" | "intern" | "bookkeeper";
+export type AgentRole = BuiltinRole | "custom";
+/** Stable attribution key: `builtin:secretary` or `custom:<agents.id>`. */
+export type AgentKey = `builtin:${BuiltinRole}` | `custom:${string}`;
+
+/** Narrowing only — approval by button is structural and is never a permission (I1). */
+export interface AgentPermissions {
+  /** up to 5 addresses; empty / absent = no restriction (still with approval) */
+  recipients?: string[];
+  /** 1–30; absent = the default (10) */
+  max_outbound_per_day?: number;
+}
+
+export interface AgentRow {
+  id: string;
+  user_id: string;
+  name: string;
+  role: AgentRole;
+  /** custom agents only: the built-in template it started from */
+  template: BuiltinRole | null;
+  /** custom: the user's instructions; built-in override: additional instructions */
+  instructions: string | null;
+  /** capability ids (lib/agents/capabilities.ts), not tool names */
+  tools: string[];
+  permissions: AgentPermissions;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewAgent {
+  user_id: string;
+  name: string;
+  role: AgentRole;
+  template?: BuiltinRole | null;
+  instructions?: string | null;
+  tools?: string[];
+  permissions?: AgentPermissions;
+  enabled?: boolean;
+}
+
+/** The only fields that change after insert (user_id / role / template are immutable — SQL enforce_agent_rules). */
+export type AgentPatch = Partial<Pick<AgentRow, "name" | "instructions" | "tools" | "permissions" | "enabled">>;
 
 export interface Db {
   // users
@@ -311,7 +374,7 @@ export interface Db {
   upsertConversationState(userId: string, patch: Partial<Pick<ConversationStateRow, "summary" | "last_summarized_msg_id" | "facts">>): Promise<ConversationStateRow>;
 
   // pending_actions
-  createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow>;
+  createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date, meta?: PendingActionMeta): Promise<PendingActionRow>;
   getPendingAction(id: string): Promise<PendingActionRow | null>;
   updatePendingAction(id: string, patch: Partial<Pick<PendingActionRow, "status" | "payload" | "approved_msg_id" | "executed_at" | "error">>): Promise<PendingActionRow | null>;
   listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]>;
@@ -365,6 +428,17 @@ export interface Db {
   updateReminder(id: string, patch: Partial<Pick<ReminderRow, "text" | "status" | "due_at" | "job_id" | "recurrence" | "last_fired_at">>): Promise<ReminderRow | null>;
   /** ordered by due_at; `dueFrom` (inclusive) / `dueBefore` (exclusive) bound due_at */
   listReminders(userId: string, opts: { statuses: ReminderStatus[]; dueFrom?: Date; dueBefore?: Date; limit?: number }): Promise<ReminderRow[]>;
+
+  // agents (migration 0006). Every method filters by the owner, also when an id is given.
+  // Writes throw AgentLimitError / AgentPlanError / AgentNameTakenError / AgentRuleError (lib/db/errors.ts).
+  /** ordered by created_at (oldest first — the quota keeps the oldest agents active after a downgrade) */
+  listAgents(userId: string): Promise<AgentRow[]>;
+  getAgent(userId: string, id: string): Promise<AgentRow | null>;
+  createAgent(row: NewAgent): Promise<AgentRow>;
+  updateAgent(userId: string, id: string, patch: AgentPatch): Promise<AgentRow | null>;
+  deleteAgent(userId: string, id: string): Promise<boolean>;
+  /** drafts the agent prepared since `since` that still count toward its daily cap (not cancelled / expired / failed) */
+  countAgentActionsSince(userId: string, agentKey: AgentKey, since: Date): Promise<number>;
 
   // audit
   addAudit(entry: AuditEntry): Promise<void>;

@@ -66,7 +66,7 @@ async function PayCard({ params, searchParams }: { params: PageProps<"/pay/[toke
               <div className="font-medium">
                 {PLANS[plan].nameHe} — {PLANS[plan].priceIls} ₪ לחודש
               </div>
-              <div className="text-sm text-muted-foreground">{plan === "basic" ? "עד 750 הודעות בחודש, סיכום בוקר, תזכורות, הקלטות" : "עד 3,000 הודעות, סוכנים מובנים, אוטומציות, היסטוריה של שנה"}</div>
+              <div className="text-sm text-muted-foreground">{plan === "basic" ? "עד 750 הודעות בחודש, סיכום בוקר, תזכורות, הקלטות, סוכן אחד משלך" : "עד 3,000 הודעות, שלושת הסוכנים המובנים ועד 3 סוכנים משלך, אוטומציות, היסטוריה של שנה"}</div>
             </div>
             <Button type="submit" variant={plan === "pro" ? "default" : "outline"}>
               לתשלום

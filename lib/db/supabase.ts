@@ -1,8 +1,14 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { requireEnv } from "@/lib/env";
+import { agentErrorFromPostgres } from "./errors";
 import type {
+  AgentKey,
+  AgentPatch,
+  AgentRow,
   AuditEntry,
+  NewAgent,
+  PendingActionMeta,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -48,8 +54,9 @@ export class SupabaseDb implements Db {
 
   private static USER_COLS =
     "id,email,name,business_name,business_type,timezone,morning_time,locale,profile,created_at,deleted_at";
-  private static PA_COLS = "id,user_id,kind,payload,status,expires_at,approved_msg_id,executed_at,error,created_at";
-  private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,created_at";
+  private static PA_COLS = "id,user_id,kind,payload,status,expires_at,approved_msg_id,executed_at,error,agent_key,agent_name,created_at";
+  private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,agent_key,created_at";
+  private static AGENT_COLS = "id,user_id,name,role,template,instructions,tools,permissions,enabled,created_at,updated_at";
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,expires_at,created_at,revoked_at";
   private static GSUB_COLS = "id,connection_id,subscription_id,resource,expires_at,client_state";
@@ -222,10 +229,10 @@ export class SupabaseDb implements Db {
     return data as unknown as ConversationStateRow;
   }
 
-  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow> {
+  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date, meta?: PendingActionMeta): Promise<PendingActionRow> {
     const { data, error } = await this.client
       .from("pending_actions")
-      .insert({ user_id: userId, kind, payload, expires_at: expiresAt.toISOString() })
+      .insert({ user_id: userId, kind, payload, expires_at: expiresAt.toISOString(), ...(meta ? { agent_key: meta.agentKey, agent_name: meta.agentName } : {}) })
       .select(SupabaseDb.PA_COLS)
       .single();
     if (error) this.fail("createPendingAction", error);
@@ -615,7 +622,85 @@ export class SupabaseDb implements Db {
       reason: entry.reason ?? null,
       result: entry.result ?? null,
       approved_by_msg_id: entry.approved_by_msg_id ?? null,
+      pending_action_id: entry.pending_action_id ?? null,
+      agent_key: entry.agent_key ?? null,
+      agent_name: entry.agent_name ?? null,
     });
     if (error) this.fail("addAudit", error);
+  }
+
+  // ---- agents (0006). Every query is scoped by user_id, also when the id is known. ----
+
+  /** Agent writes: the trigger / constraint errors become AgentLimitError, AgentPlanError, AgentNameTakenError … */
+  private failAgent(op: string, error: { code?: string; message: string; details?: string } | null): never {
+    const mapped = agentErrorFromPostgres(error);
+    if (mapped) throw mapped;
+    this.fail(op, error);
+  }
+
+  async listAgents(userId: string): Promise<AgentRow[]> {
+    const { data, error } = await this.client
+      .from("agents")
+      .select(SupabaseDb.AGENT_COLS)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (error) this.fail("listAgents", error);
+    return (data as unknown as AgentRow[]) ?? [];
+  }
+
+  async getAgent(userId: string, id: string): Promise<AgentRow | null> {
+    const { data, error } = await this.client.from("agents").select(SupabaseDb.AGENT_COLS).eq("user_id", userId).eq("id", id).maybeSingle();
+    if (error) this.fail("getAgent", error);
+    return (data as unknown as AgentRow | null) ?? null;
+  }
+
+  async createAgent(row: NewAgent): Promise<AgentRow> {
+    const { data, error } = await this.client
+      .from("agents")
+      .insert({
+        user_id: row.user_id,
+        name: row.name,
+        role: row.role,
+        template: row.template ?? null,
+        instructions: row.instructions ?? null,
+        tools: row.tools ?? [],
+        permissions: row.permissions ?? {},
+        enabled: row.enabled ?? true,
+      })
+      .select(SupabaseDb.AGENT_COLS)
+      .single();
+    if (error) this.failAgent("createAgent", error);
+    return data as unknown as AgentRow;
+  }
+
+  async updateAgent(userId: string, id: string, patch: AgentPatch): Promise<AgentRow | null> {
+    const allowed: AgentPatch = {};
+    if (patch.name !== undefined) allowed.name = patch.name;
+    if (patch.instructions !== undefined) allowed.instructions = patch.instructions;
+    if (patch.tools !== undefined) allowed.tools = patch.tools;
+    if (patch.permissions !== undefined) allowed.permissions = patch.permissions;
+    if (patch.enabled !== undefined) allowed.enabled = patch.enabled;
+    const { data, error } = await this.client.from("agents").update(allowed).eq("user_id", userId).eq("id", id).select(SupabaseDb.AGENT_COLS).maybeSingle();
+    if (error) this.failAgent("updateAgent", error);
+    return (data as unknown as AgentRow | null) ?? null;
+  }
+
+  async deleteAgent(userId: string, id: string): Promise<boolean> {
+    const { data, error } = await this.client.from("agents").delete().eq("user_id", userId).eq("id", id).select("id");
+    if (error) this.fail("deleteAgent", error);
+    return (data?.length ?? 0) > 0;
+  }
+
+  async countAgentActionsSince(userId: string, agentKey: AgentKey, since: Date): Promise<number> {
+    const { count, error } = await this.client
+      .from("pending_actions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("agent_key", agentKey)
+      .gte("created_at", since.toISOString())
+      .not("status", "in", "(cancelled,expired,failed)");
+    if (error) this.fail("countAgentActionsSince", error);
+    return count ?? 0;
   }
 }

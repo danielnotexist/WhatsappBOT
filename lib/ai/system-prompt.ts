@@ -51,6 +51,13 @@ export interface UserContextInput {
 
 const DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 
+/**
+ * Bot state kept in users.profile that is not about the user and must not reach the model: the onboarding step, and
+ * the agent flows — a half-written agent's instructions (`agent_draft`) and the sticky agent (`active_agent`). Agent
+ * instructions reach the model only inside that agent's own turn (docs/design/agents.md I5).
+ */
+const INTERNAL_PROFILE_KEYS = new Set(["onboarding", "agent_draft", "active_agent"]);
+
 export function formatNowHe(now: Date, timezone: string): string {
   const fmt = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false });
   const parts = Object.fromEntries(fmt.formatToParts(now).map((p) => [p.type, p.value]));
@@ -70,7 +77,7 @@ export function buildSystemPrompt(u: UserContextInput): string {
       : "- חיבורים: אין עדיין חיבור למייל/יומן/קבצים",
   );
   for (const [k, v] of Object.entries(u.profile)) {
-    if (k === "onboarding" || v === null || v === undefined || v === "") continue;
+    if (INTERNAL_PROFILE_KEYS.has(k) || v === null || v === undefined || v === "") continue;
     lines.push(`- ${k}: ${Array.isArray(v) ? v.map(String).join("; ") : typeof v === "object" ? JSON.stringify(v) : String(v)}`);
   }
   const memory = [u.summary ? `## סיכום השיחה עד כה\n${u.summary}` : "", u.facts.length ? `## עובדות שנלמדו\n${u.facts.map((f) => `- ${f}`).join("\n")}` : ""].filter(Boolean).join("\n\n");

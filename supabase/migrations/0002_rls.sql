@@ -10,7 +10,8 @@
 --      עמודות רגישות (טוקנים מוצפנים, raw של HYP). לקוח חייב לבחור עמודות מפורשות
 --      (select=col1,col2) ולא select=* על connections / subscriptions / payments.
 --   4. Policies: "רק השורות שלי" — user_id = auth.uid() (בטבלת users: id = auth.uid()).
---      כתיבה מהלקוח מותרת רק ב: users (עמודות פרופיל), reminders (ביטול), agents (CRUD).
+--      כתיבה מהלקוח מותרת רק ב: users (עמודות פרופיל), reminders (ביטול).
+--      (agents היה CRUD כאן; מ-0006 — SELECT בלבד, כתיבה דרך השרת אחרי הוולידציה של שכבת השירות.)
 --   5. טבלאות שמנוהלות בשרת בלבד (service_role): auth_otps, link_tokens, wa_link_attempts,
 --      graph_subscriptions, wa_templates — ללא GRANT ל-authenticated בכלל;
 --      messages, audit_log, payments, subscriptions, usage, jobs — SELECT בלבד על השורות שלי.

@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { agentRowViolation } from "@/lib/agents/constraints";
+import { customAgentLimit, effectivePlan, type EffectivePlan } from "@/lib/billing/plans";
+import { AgentLimitError, AgentNameTakenError, AgentPlanError, AgentRuleError } from "./errors";
 import type {
+  AgentKey,
+  AgentPatch,
+  AgentRow,
   AuditEntry,
+  NewAgent,
+  PendingActionMeta,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -54,6 +62,7 @@ export class MemoryDb implements Db {
   payments: PaymentRow[] = [];
   jobs: JobRow[] = [];
   reminders: ReminderRow[] = [];
+  agents: AgentRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -145,6 +154,7 @@ export class MemoryDb implements Db {
     this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
     this.reminders = this.reminders.filter((r) => r.user_id !== id);
     this.jobs = this.jobs.filter((j) => j.user_id !== id);
+    this.agents = this.agents.filter((a) => a.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -271,6 +281,7 @@ export class MemoryDb implements Db {
       tokens_in: row.tokens_in ?? null,
       tokens_out: row.tokens_out ?? null,
       cost_usd: row.cost_usd ?? null,
+      agent_key: row.agent_key ?? null,
       created_at: iso(this.now()),
     };
     this.messages.push(full);
@@ -301,8 +312,9 @@ export class MemoryDb implements Db {
     return next;
   }
 
-  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date): Promise<PendingActionRow> {
-    const row: PendingActionRow = { id: randomUUID(), user_id: userId, kind, payload, status: "pending", expires_at: iso(expiresAt), approved_msg_id: null, executed_at: null, error: null, created_at: iso(this.now()) };
+  async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date, meta?: PendingActionMeta): Promise<PendingActionRow> {
+    if (meta && !/^(builtin:(secretary|intern|bookkeeper)|custom:[0-9a-f-]{36})$/.test(meta.agentKey)) throw new Error("pending_actions_agent_key_format");
+    const row: PendingActionRow = { id: randomUUID(), user_id: userId, kind, payload, status: "pending", expires_at: iso(expiresAt), approved_msg_id: null, executed_at: null, error: null, agent_key: meta?.agentKey ?? null, agent_name: meta?.agentName ?? null, created_at: iso(this.now()) };
     this.pendingActions.push(row);
     return row;
   }
@@ -322,12 +334,16 @@ export class MemoryDb implements Db {
     return this.pendingActions.filter((p) => p.user_id === userId && p.status === status);
   }
 
+  /** Mirrors public.user_plan(). */
+  private planOf(userId: string): EffectivePlan {
+    return effectivePlan(this.subscriptions.get(userId) ?? null, this.now());
+  }
+
   /** Mirrors public.count_trial_message(): trial = one period from signup (10), paid = calendar month (750/3000). */
   async countTrialMessage(userId: string): Promise<number> {
     const user = this.users.get(userId);
     if (!user || user.deleted_at) throw new Error(`count_trial_message: user ${userId} not found`);
-    const sub = this.subscriptions.get(userId);
-    const plan = sub && (sub.status === "active" || sub.status === "past_due" || (sub.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > this.now().getTime())) ? sub.plan : "trial";
+    const plan = this.planOf(userId);
     const limit = plan === "trial" ? 10 : plan === "basic" ? 750 : 3000;
     const period = plan === "trial" ? user.created_at.slice(0, 10) : iso(this.now()).slice(0, 7) + "-01";
     let row = this.usage.find((u) => u.user_id === userId && u.period_start === period);
@@ -539,6 +555,77 @@ export class MemoryDb implements Db {
 
   async addAudit(entry: AuditEntry): Promise<void> {
     this.audit.push({ ...entry, created_at: iso() });
+  }
+
+  // ---- agents: mirrors the 0006 constraints and the enforce_agent_rules trigger ----
+
+  async listAgents(userId: string): Promise<AgentRow[]> {
+    return this.agents
+      .filter((a) => a.user_id === userId)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)) // stable: insertion order on equal timestamps
+      .map((a) => structuredClone(a));
+  }
+
+  async getAgent(userId: string, id: string): Promise<AgentRow | null> {
+    const a = this.agents.find((x) => x.id === id && x.user_id === userId);
+    return a ? structuredClone(a) : null;
+  }
+
+  async createAgent(row: NewAgent): Promise<AgentRow> {
+    const user = this.users.get(row.user_id);
+    if (!user) throw new Error("agent_user_not_found");
+    const full: AgentRow = {
+      id: randomUUID(),
+      user_id: row.user_id,
+      name: row.name,
+      role: row.role,
+      template: row.template ?? null,
+      instructions: row.instructions ?? null,
+      tools: [...(row.tools ?? [])],
+      permissions: structuredClone(row.permissions ?? {}),
+      enabled: row.enabled ?? true,
+      created_at: iso(this.now()),
+      updated_at: iso(this.now()),
+    };
+    // trigger first (as in Postgres: BEFORE INSERT), then the constraints and unique indexes
+    const plan = this.planOf(row.user_id);
+    if (row.role === "custom") {
+      const limit = customAgentLimit(plan);
+      if (this.agents.filter((a) => a.user_id === row.user_id && a.role === "custom").length >= limit) throw new AgentLimitError(`plan=${plan} limit=${limit}`);
+    } else if (plan !== "pro") {
+      throw new AgentPlanError(`plan=${plan}`);
+    }
+    const violation = agentRowViolation(full);
+    if (violation) throw new AgentRuleError("agent_invalid", violation);
+    if (this.agents.some((a) => a.user_id === row.user_id && a.name === row.name)) throw new AgentNameTakenError();
+    if (row.role !== "custom" && this.agents.some((a) => a.user_id === row.user_id && a.role === row.role)) throw new AgentRuleError("agent_override_exists");
+    this.agents.push(full);
+    return structuredClone(full);
+  }
+
+  async updateAgent(userId: string, id: string, patch: AgentPatch): Promise<AgentRow | null> {
+    const a = this.agents.find((x) => x.id === id && x.user_id === userId);
+    if (!a) return null;
+    const forbidden = patch as Record<string, unknown>;
+    if ("user_id" in forbidden || "role" in forbidden || "template" in forbidden) throw new AgentRuleError("agent_immutable_field");
+    const next: AgentRow = { ...structuredClone(a), ...structuredClone(patch), updated_at: iso(this.now()) };
+    const violation = agentRowViolation(next);
+    if (violation) throw new AgentRuleError("agent_invalid", violation);
+    if (patch.name !== undefined && this.agents.some((x) => x.user_id === userId && x.id !== id && x.name === patch.name)) throw new AgentNameTakenError();
+    Object.assign(a, next);
+    return structuredClone(a);
+  }
+
+  async deleteAgent(userId: string, id: string): Promise<boolean> {
+    const before = this.agents.length;
+    this.agents = this.agents.filter((a) => !(a.id === id && a.user_id === userId));
+    return this.agents.length < before;
+  }
+
+  async countAgentActionsSince(userId: string, agentKey: AgentKey, since: Date): Promise<number> {
+    return this.pendingActions.filter(
+      (p) => p.user_id === userId && p.agent_key === agentKey && Date.parse(p.created_at) >= since.getTime() && !["cancelled", "expired", "failed"].includes(p.status),
+    ).length;
   }
 
   // ---- test helpers ----

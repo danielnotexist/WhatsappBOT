@@ -1,0 +1,361 @@
+import type { Route } from "next";
+import Link from "next/link";
+import type { InputHTMLAttributes, ReactNode } from "react";
+import { Cta } from "@/components/brand/cta";
+import { CAPABILITIES, CAPABILITY_IDS, type Capability } from "@/lib/agents/capabilities";
+import { AGENT_NAME_MAX, AGENT_NAME_MIN, MAX_INSTRUCTIONS, MAX_OUTBOUND_MAX, MAX_OUTBOUND_MIN, DEFAULT_MAX_OUTBOUND } from "@/lib/agents/constraints";
+import type { ResolvedAgent } from "@/lib/agents/policy";
+import { BUILTIN_AGENTS, BUILTIN_ORDER } from "@/lib/agents/templates";
+import type { BuiltinRole } from "@/lib/db/types";
+import { cn } from "@/lib/utils";
+import { createAgentAction, deleteAgentAction, toggleAgentAction, updateAgentAction } from "../actions";
+import type { AgentRowView, AgentsView } from "../view";
+import { InstructionsField } from "./instructions-field";
+import { Chevron, Section, Tile } from "./parts";
+
+/**
+ * "הסוכנים שלי" (docs/design/agents.md §10): the agents as quiet rows on the stage, each opening (a <details>, no JS)
+ * into its own form; a new agent starts from a template link that renders a filled form on the server
+ * (/account?new=<template>#agents). The approval rule is stated once, plainly, and cannot be switched off.
+ */
+export function AgentsSection({
+  view,
+  agents,
+  payHref,
+  newTemplate,
+  banner,
+  className,
+}: {
+  view: AgentsView;
+  agents: readonly ResolvedAgent[];
+  payHref: string;
+  newTemplate: BuiltinRole | "blank" | null;
+  /** the result of an agent action (shown here, where the redirect lands) */
+  banner?: ReactNode;
+  className?: string;
+}) {
+  const byKey = new Map(agents.map((a) => [a.key as string, a]));
+  return (
+    <Section id="agents" title="הסוכנים שלי" description="תפקידים עם שם, שאפשר לפנות אליהם בוואטסאפ בתחילת ההודעה: ״@שם״ ואז הבקשה." className={className}>
+      {banner}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <p className="max-w-[34rem] text-[0.9375rem] leading-relaxed text-cream">{view.quotaLine}</p>
+        {view.upgrade ? (
+          <Cta tone="honey" size="sm" href={payHref}>
+            {view.upgrade.label}
+          </Cta>
+        ) : null}
+      </div>
+
+      <ul className="mt-5 divide-y divide-line border-y border-line">
+        {view.rows.map((row) => (
+          <AgentItem key={row.key} row={row} agent={byKey.get(row.key)!} />
+        ))}
+      </ul>
+
+      {view.canCreate ? newTemplate !== null ? <NewAgentForm template={newTemplate === "blank" ? null : newTemplate} /> : <TemplatePicker /> : null}
+
+      <p className="mt-6 flex max-w-[36rem] items-start gap-3 text-[0.9375rem] leading-relaxed text-cream-muted">
+        <svg viewBox="0 0 24 24" aria-hidden="true" className="mt-0.5 size-5 flex-none fill-none stroke-sage stroke-2">
+          <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
+          <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" strokeLinecap="round" />
+        </svg>
+        <span>כל מייל, פגישה או העברה שסוכן מכין מגיעים אליך לאישור בכפתור בוואטסאפ. אי אפשר לכבות את זה.</span>
+      </p>
+    </Section>
+  );
+}
+
+/* ---------- rows ---------- */
+
+const STATUS_STYLE: Record<AgentRowView["status"], { text: string; dot: string }> = {
+  active: { text: "text-sage", dot: "bg-sage" },
+  disabled: { text: "text-cream-muted", dot: "border-[1.5px] border-cream-muted" },
+  locked: { text: "text-honey", dot: "bg-honey" },
+  not_in_plan: { text: "text-cream-muted", dot: "border-[1.5px] border-cream-muted" },
+};
+
+function AgentMark({ row }: { row: AgentRowView }) {
+  const dim = row.status === "locked" || row.status === "not_in_plan";
+  if (row.kind === "custom") {
+    return (
+      <Tile muted>
+        <span className={cn("text-[1.375rem] leading-none font-bold", dim ? "text-cream-muted" : "text-honey")}>{[...row.name][0]}</span>
+      </Tile>
+    );
+  }
+  return (
+    <Tile muted={dim}>
+      <svg viewBox="0 0 24 24" className={cn("size-6 fill-none stroke-2", dim ? "stroke-cream-muted" : "stroke-ink")} strokeLinecap="round" strokeLinejoin="round">
+        {GLYPHS[row.role as BuiltinRole]}
+      </svg>
+    </Tile>
+  );
+}
+
+const GLYPHS: Record<BuiltinRole, ReactNode> = {
+  secretary: (
+    <>
+      <rect x="3.5" y="5" width="17" height="15" rx="3" />
+      <path d="M3.5 10h17M8 3v4M16 3v4" />
+    </>
+  ),
+  intern: (
+    <>
+      <path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5" />
+      <path d="M13 3l5 5v2.5" />
+      <circle cx="16" cy="16" r="3" />
+      <path d="m20.5 20.5-2.4-2.4" />
+    </>
+  ),
+  bookkeeper: (
+    <>
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </>
+  ),
+};
+
+function AgentSummary({ row }: { row: AgentRowView }) {
+  const s = STATUS_STYLE[row.status];
+  return (
+    <div className="min-w-0 flex-1">
+      <p className="text-[1.0625rem] leading-snug font-semibold">{row.name}</p>
+      <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.9375rem]">
+        <span className={cn("flex items-center gap-2", s.text)}>
+          <span aria-hidden="true" className={cn("size-2 flex-none rounded-full", s.dot)} />
+          {row.statusLabel}
+        </span>
+        <span className="text-cream-muted">{row.origin}</span>
+      </p>
+      {row.capsLine ? <p className="mt-1 text-[0.875rem] leading-relaxed text-cream-muted">{row.capsLine}</p> : null}
+      {row.hint ? <p className="mt-1 text-[0.875rem] text-cream">{row.hint}</p> : null}
+    </div>
+  );
+}
+
+function AgentItem({ row, agent }: { row: AgentRowView; agent: ResolvedAgent }) {
+  if (!row.editable) {
+    return (
+      <li className="flex items-center gap-4 py-5">
+        <AgentMark row={row} />
+        <AgentSummary row={row} />
+      </li>
+    );
+  }
+  return (
+    <li>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-4 rounded-2xl py-5 [&::-webkit-details-marker]:hidden">
+          <AgentMark row={row} />
+          <AgentSummary row={row} />
+          <span className="flex flex-none items-center gap-1.5 text-[0.9375rem] font-semibold text-cream">
+            עריכה
+            <Chevron />
+          </span>
+        </summary>
+        <div className="pb-6">
+          <AgentForm row={row} agent={agent} />
+          <div className="mt-4 flex flex-wrap items-start gap-3">
+            {row.toggle ? (
+              <form action={toggleAgentAction}>
+                <input type="hidden" name="key" value={row.key} />
+                <input type="hidden" name="enabled" value={row.toggle === "enable" ? "1" : "0"} />
+                <Cta tone="ghost" size="sm" type="submit">
+                  {row.toggle === "enable" ? "הפעלת הסוכן" : "השבתת הסוכן"}
+                </Cta>
+              </form>
+            ) : null}
+            {row.deletable ? <DeleteAgent row={row} /> : null}
+          </div>
+        </div>
+      </details>
+    </li>
+  );
+}
+
+function DeleteAgent({ row }: { row: AgentRowView }) {
+  return (
+    <details className="group/del">
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-full px-2 text-[0.9375rem] font-semibold text-cream-muted underline-offset-3 hover:text-cream hover:underline [&::-webkit-details-marker]:hidden">
+        מחיקת הסוכן
+      </summary>
+      <div className="mt-2 max-w-[32rem]">
+        <p className="text-[0.9375rem] leading-relaxed text-cream-muted">ההנחיות של ״{row.name}״ נמחקות. מה שכבר נעשה נשאר ביומן הפעולות.</p>
+        <form action={deleteAgentAction} className="mt-3">
+          <input type="hidden" name="key" value={row.key} />
+          <button
+            type="submit"
+            className="inline-flex min-h-11 items-center justify-center rounded-full bg-[var(--alze-error-on-dark)] px-5 text-[0.9375rem] font-semibold text-night transition-[background-color,transform] duration-150 select-none hover:bg-[#F5B3A2] focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-[var(--alze-error-on-dark)] active:translate-y-px"
+          >
+            למחוק את ״{row.name}״
+          </button>
+        </form>
+      </div>
+    </details>
+  );
+}
+
+/* ---------- forms ---------- */
+
+const FIELD =
+  "h-12 w-full rounded-field border-2 border-cream-muted/60 bg-night px-4 text-[1.0625rem] text-cream transition-[border-color,box-shadow] duration-150 focus-visible:border-honey focus-visible:shadow-[0_0_0_4px_rgb(231_182_92/0.18)] focus-visible:outline-none";
+const NAME_PATTERN = `[A-Za-z0-9\\u05D0-\\u05EA\\u05F3\\u05F4'" \\-]{${AGENT_NAME_MIN},${AGENT_NAME_MAX}}`;
+
+/** A labelled input; the hint is announced as its description, not as part of its name. */
+function TextField({ id, label, hint, ...input }: { id: string; label: string; hint?: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className="text-[0.9375rem] font-semibold">
+        {label}
+      </label>
+      <input id={id} aria-describedby={hint ? `${id}-hint` : undefined} {...input} className={FIELD} />
+      {hint ? (
+        <p id={`${id}-hint`} className="text-[0.875rem] leading-relaxed text-cream-muted">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Element ids per form: the agent key ("custom:<uuid>") or "new". */
+const fieldId = (scope: string, name: string) => `agent-${scope.replace(/[^a-z0-9-]/gi, "-")}-${name}`;
+
+function CapabilityBoxes({ options, checked }: { options: readonly Capability[]; checked: readonly Capability[] }) {
+  return (
+    <fieldset>
+      <legend className="text-[0.9375rem] font-semibold">יכולות</legend>
+      <div className="mt-2 grid gap-x-6 sm:grid-cols-2">
+        {options.map((c) => (
+          <label key={c} className="flex min-h-11 cursor-pointer items-center gap-3 text-[1rem]">
+            <input type="checkbox" name="capabilities" value={c} defaultChecked={checked.includes(c)} className="size-5 flex-none accent-[var(--alze-honey)]" />
+            <span>
+              {CAPABILITIES[c].label}
+              {CAPABILITIES[c].kind === "outbound" ? <span className="text-cream-muted"> (באישור בכפתור)</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function LimitFields({ scope, recipients, maxOutbound }: { scope: string; recipients: readonly string[]; maxOutbound: number | undefined }) {
+  return (
+    <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_14rem]">
+      <TextField
+        id={fieldId(scope, "recipients")}
+        label="כתובות מותרות"
+        name="recipients"
+        defaultValue={recipients.join(", ")}
+        dir="ltr"
+        inputMode="email"
+        autoComplete="off"
+        placeholder="office@example.co.il"
+        hint="מיילים, העברות והזמנות לפגישות רק לכתובות האלה, עד 5, מופרדות בפסיק. ריק: בלי הגבלה, ועדיין הכול באישור."
+      />
+      <TextField
+        id={fieldId(scope, "max")}
+        label="פעולות יוצאות ביום"
+        name="max_outbound"
+        type="number"
+        min={MAX_OUTBOUND_MIN}
+        max={MAX_OUTBOUND_MAX}
+        inputMode="numeric"
+        defaultValue={maxOutbound ?? ""}
+        placeholder={String(DEFAULT_MAX_OUTBOUND)}
+        hint={`עד ${MAX_OUTBOUND_MAX}. ריק: ${DEFAULT_MAX_OUTBOUND}.`}
+      />
+    </div>
+  );
+}
+
+function AgentForm({ row, agent }: { row: AgentRowView; agent: ResolvedAgent }) {
+  const builtin = row.kind === "builtin";
+  const options = builtin ? BUILTIN_AGENTS[row.role as BuiltinRole].capabilities : CAPABILITY_IDS;
+  return (
+    <form action={updateAgentAction} className="grid gap-5 rounded-2xl border border-line bg-night-2/70 p-5 sm:p-6">
+      <input type="hidden" name="key" value={row.key} />
+      {builtin ? null : (
+        <TextField id={fieldId(row.key, "name")} label="שם" name="name" defaultValue={row.name} required minLength={AGENT_NAME_MIN} maxLength={AGENT_NAME_MAX} pattern={NAME_PATTERN} title="אותיות, ספרות, רווח, מקף וגרש; 2 עד 24 תווים" autoComplete="off" />
+      )}
+      <InstructionsField
+        label={builtin ? "הנחיות נוספות" : "מה הסוכן עושה ואיך"}
+        hint={builtin ? `מתווספות להנחיות הקבועות של ״${row.name}״.` : "תחום, סגנון, מה חשוב ומה לא לעשות."}
+        defaultValue={agent.userInstructions ?? ""}
+        max={MAX_INSTRUCTIONS}
+        required={!builtin && !agent.template}
+      />
+      <CapabilityBoxes options={options} checked={agent.capabilities} />
+      <LimitFields scope={row.key} recipients={agent.permissions.recipients ?? []} maxOutbound={agent.permissions.max_outbound_per_day} />
+      <div>
+        <Cta tone="honey" size="sm" type="submit">
+          שמירה
+        </Cta>
+      </div>
+    </form>
+  );
+}
+
+function TemplatePicker() {
+  const options: { id: string; name: string; summary: string }[] = [
+    ...BUILTIN_ORDER.map((r) => ({ id: r, name: BUILTIN_AGENTS[r].name, summary: BUILTIN_AGENTS[r].summary })),
+    { id: "blank", name: "סוכן ריק", summary: "מתחילים מאפס: שם, הנחיות ויכולות" },
+  ];
+  return (
+    <div className="mt-8">
+      <h3 className="font-heading text-[1.25rem] leading-tight font-bold">סוכן חדש</h3>
+      <p className="mt-1 text-[0.9375rem] text-cream-muted">מאיפה מתחילים? אפשר לשנות הכול אחר כך.</p>
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+        {options.map((o) => (
+          <li key={o.id}>
+            <Link
+              href={`/account?new=${o.id}#agents` as Route}
+              className="flex h-full flex-col rounded-2xl border border-line px-4 py-3.5 transition-colors hover:border-cream-muted/60 hover:bg-cream/[0.03]"
+            >
+              <span className="text-[1rem] font-semibold text-cream">{o.name}</span>
+              <span className="mt-0.5 text-[0.875rem] leading-relaxed text-cream-muted">{o.summary}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function NewAgentForm({ template }: { template: BuiltinRole | null }) {
+  const tpl = template ? BUILTIN_AGENTS[template] : null;
+  return (
+    <div className="mt-8">
+      <h3 className="font-heading text-[1.25rem] leading-tight font-bold">{tpl ? `סוכן חדש על בסיס ״${tpl.name}״` : "סוכן חדש"}</h3>
+      <form action={createAgentAction} className="mt-4 grid gap-5 rounded-2xl border border-line bg-night-2/70 p-5 sm:p-6">
+        <input type="hidden" name="template" value={template ?? ""} />
+        <TextField
+          id={fieldId("new", "name")}
+          label="שם"
+          name="name"
+          required
+          minLength={AGENT_NAME_MIN}
+          maxLength={AGENT_NAME_MAX}
+          pattern={NAME_PATTERN}
+          title="אותיות, ספרות, רווח, מקף וגרש; 2 עד 24 תווים"
+          autoComplete="off"
+          placeholder={tpl ? `${tpl.name} אישית` : "חשבוניות"}
+          hint="בוואטסאפ פונים אליו ב-״@שם״. שמות הסוכנים המובנים שמורים."
+        />
+        <InstructionsField label="מה הסוכן עושה ואיך" hint={tpl ? "ההנחיות של התבנית כבר כאן. אפשר לערוך ולהוסיף." : "תחום, סגנון, מה חשוב ומה לא לעשות."} defaultValue={tpl?.instructions ?? ""} max={MAX_INSTRUCTIONS} required={!tpl} />
+        <CapabilityBoxes options={CAPABILITY_IDS} checked={tpl ? tpl.capabilities : ["mail.read"]} />
+        <LimitFields scope="new" recipients={[]} maxOutbound={undefined} />
+        <div className="flex flex-wrap items-center gap-4">
+          <Cta tone="honey" size="sm" type="submit">
+            יצירת הסוכן
+          </Cta>
+          <Link href={"/account#agents" as Route} className="rounded-sm text-[0.9375rem] text-cream-muted underline underline-offset-3 hover:text-cream">
+            ביטול
+          </Link>
+        </div>
+      </form>
+    </div>
+  );
+}

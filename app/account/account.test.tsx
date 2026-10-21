@@ -3,9 +3,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConnectionRow, SubscriptionRow, UsageRow } from "@/lib/db/types";
+import { resolveAgents } from "@/lib/agents/policy";
+import type { AgentRow, ConnectionRow, SubscriptionRow, UsageRow } from "@/lib/db/types";
 import { DeleteAccountForm } from "./_components/delete-account-form";
-import { connectionFor, firstName, formatCount, formatDay, formatPhone, greetingFor, paidPlanOf, statusLine, usageView } from "./view";
+import { InstructionsField } from "./_components/instructions-field";
+import { agentsView, connectionFor, firstName, formatCount, formatDay, formatPhone, greetingFor, paidPlanOf, statusLine, usageView } from "./view";
 
 afterEach(cleanup);
 
@@ -102,6 +104,74 @@ describe("usage for the meter", () => {
     expect(paidPlanOf(sub({ plan: "trial", status: "trial" }), NOW)).toBeNull();
     // the trial was used up before paying: after the plan ends the meter shows it full, not empty
     expect(usageView(sub({ status: "cancelled", next_charge_at: "2026-10-01T00:00:00Z" }), usage({ counted_messages: 20 }), NOW)).toMatchObject({ plan: "trial", used: 10 });
+  });
+});
+
+describe("agentsView (הסוכנים שלי)", () => {
+  const U = "u1";
+  const customRow = (name: string, i: number, patch: Partial<AgentRow> = {}): AgentRow => ({
+    id: `00000000-0000-4000-8000-00000000000${i}`,
+    user_id: U,
+    name,
+    role: "custom",
+    template: null,
+    instructions: "x",
+    tools: ["mail.read"],
+    permissions: {},
+    enabled: true,
+    created_at: `2026-10-0${i}T08:00:00Z`,
+    updated_at: `2026-10-0${i}T08:00:00Z`,
+    ...patch,
+  });
+
+  it("trial: the built-ins to try as they are, no custom agents, a CTA to subscribe", () => {
+    const v = agentsView(resolveAgents(U, [], "trial"), "trial");
+    expect(v.quotaLine).toBe("בתקופת הניסיון אפשר לנסות את שלושת הסוכנים המובנים. סוכן משלך נפתח עם מנוי.");
+    expect(v.canCreate).toBe(false);
+    expect(v.upgrade).toEqual({ label: "להפעלת מנוי" });
+    expect(v.rows.map((r) => [r.name, r.status, r.editable, r.toggle])).toEqual([
+      ["מזכירה", "active", false, null],
+      ["מתמחה", "active", false, null],
+      ["מנהלת חשבונות", "active", false, null],
+    ]);
+    expect(v.rows[0]!.hint).toBe("לנסות בוואטסאפ: ״@מזכירה מה יש לי מחר?״");
+  });
+
+  it("basic: 0 of 1 then 1 of 1; built-ins shown as part of pro; a CTA to upgrade", () => {
+    expect(agentsView(resolveAgents(U, [], "basic"), "basic")).toMatchObject({ quotaLine: "סוכנים משלך: 0 מתוך 1. הסוכנים המובנים כלולים במסלול פרו.", canCreate: true, upgrade: { label: "לשדרוג לפרו" } });
+    const v = agentsView(resolveAgents(U, [customRow("חשבוניות", 1, { template: "bookkeeper" })], "basic"), "basic");
+    expect(v.quotaLine).toBe("סוכנים משלך: 1 מתוך 1. הסוכנים המובנים כלולים במסלול פרו.");
+    expect(v.canCreate).toBe(false);
+    expect(v.rows.filter((r) => r.kind === "builtin").every((r) => r.status === "not_in_plan" && r.statusLabel === "כלול במסלול פרו" && !r.editable)).toBe(true);
+    expect(v.rows.find((r) => r.kind === "custom")).toMatchObject({ name: "חשבוניות", origin: "על בסיס: מנהלת חשבונות", status: "active", statusLabel: "פעיל", editable: true, deletable: true, toggle: "disable", capsLine: "קריאת מייל" });
+  });
+
+  it("pro: built-ins editable (no delete), states for disabled and locked, no upgrade CTA", () => {
+    const rows = [customRow("אחד", 1), customRow("שתיים", 2, { enabled: false }), { ...customRow("מזכירה", 3), role: "secretary" as const, enabled: false }];
+    const v = agentsView(resolveAgents(U, rows, "pro"), "pro");
+    expect(v.quotaLine).toBe("סוכנים משלך: 2 מתוך 3, בנוסף לשלושת הסוכנים המובנים.");
+    expect(v.canCreate).toBe(true);
+    expect(v.upgrade).toBeNull();
+    const sec = v.rows.find((r) => r.role === "secretary")!;
+    expect(sec).toMatchObject({ origin: "מובנה", editable: true, deletable: false, status: "disabled", statusLabel: "מושבת", toggle: "enable" });
+    expect(v.rows.find((r) => r.name === "שתיים")).toMatchObject({ origin: "סוכן משלך", status: "disabled", toggle: "enable" });
+    // downgrade to basic: the older stays, the newer is locked (no toggle — it would stay locked)
+    const down = agentsView(resolveAgents(U, rows, "basic"), "basic");
+    expect(down.rows.find((r) => r.name === "שתיים")).toMatchObject({ status: "locked", statusLabel: "נעול: מעבר למכסת המסלול", toggle: null, deletable: true });
+  });
+});
+
+describe("InstructionsField", () => {
+  it("counts characters live against the limit", async () => {
+    render(<InstructionsField label="מה הסוכן עושה ואיך" hint="תחום וסגנון." defaultValue="שלום" max={1500} required />);
+    const area = screen.getByLabelText("מה הסוכן עושה ואיך");
+    expect(area).toHaveAttribute("name", "instructions");
+    expect(area).toHaveAttribute("maxLength", "1500");
+    expect(screen.getByText("4 מתוך 1,500")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.change(area, { target: { value: "שלום עולם" } });
+    });
+    expect(screen.getByText("9 מתוך 1,500")).toBeInTheDocument();
   });
 });
 

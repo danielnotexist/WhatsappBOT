@@ -17,9 +17,14 @@ import { BRAND } from "@/lib/brand";
 import { getDb } from "@/lib/db";
 import type { ConnectionRow, SubscriptionRow, WaIdentityRow } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
+import { isBuiltinRole } from "@/lib/agents/constraints";
+import { loadAgents } from "@/lib/agents/service";
+import { AgentsSection } from "./_components/agents-section";
 import { DeleteAccountForm } from "./_components/delete-account-form";
+import { Chevron, Row, Section, Tile } from "./_components/parts";
 import { cancelSubscriptionAction, deleteAccountAction, disconnectAction, signOutAction, unlinkPhoneAction } from "./actions";
 import {
+  agentsView,
   connectionFor,
   firstName,
   formatCount,
@@ -83,8 +88,13 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   ]);
   const now = new Date();
   const tz = user.timezone || "Asia/Jerusalem";
-  const notice = typeof sp.notice === "string" ? sp.notice.slice(0, 300) : "";
-  const error = typeof sp.error === "string" ? sp.error.slice(0, 300) : "";
+  const notice = typeof sp.notice === "string" ? sp.notice.slice(0, 400) : "";
+  const error = typeof sp.error === "string" ? sp.error.slice(0, 400) : "";
+  // an agent action lands on #agents — its notice is shown there, not at the top of the page
+  const atAgents = sp.at === "agents";
+  const { agents, plan } = await loadAgents(db, user.id, now, subscription);
+  const newTemplate = typeof sp.new === "string" && (sp.new === "blank" || isBuiltinRole(sp.new)) ? sp.new : null;
+  const payHref = `/pay/${createPayLinkToken(user.id)}`;
   const microsoft = connectionFor(connections, "microsoft");
   const google = connectionFor(connections, "google");
   const linked = linkedPhones(phones);
@@ -114,10 +124,10 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
         <Mascot pose="front" eager sizes="(min-width: 640px) 112px, 64px" className="absolute end-0 top-6 w-16 flex-none sm:static sm:w-28 lg:hidden" />
       </section>
 
-      {notice ? <Banner kind="notice" text={notice} /> : null}
-      {error ? <Banner kind="error" text={error} /> : null}
+      {notice && !atAgents ? <Banner kind="notice" text={notice} /> : null}
+      {error && !atAgents ? <Banner kind="error" text={error} /> : null}
 
-      <div className="grid gap-x-16 gap-y-14 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_auto_1fr]">
+      <div className="grid gap-x-16 gap-y-14 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_auto_auto_1fr]">
         <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} קוראת ושולחת מייל, ורואה את היומן. ניתוק מוחק את הגישה אצלנו.`} className="lg:col-start-1 lg:row-start-1">
           <ul className="divide-y divide-line border-y border-line">
             <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" {...microsoft} />
@@ -135,12 +145,21 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
         <SubscriptionSlip
           subscription={subscription}
           meter={meter}
-          payHref={`/pay/${createPayLinkToken(user.id)}`}
+          payHref={payHref}
           timeZone={tz}
-          className="lg:sticky lg:top-6 lg:col-start-2 lg:row-span-3 lg:row-start-1 lg:self-start"
+          className="lg:sticky lg:top-6 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:self-start"
         />
 
-        <DeleteAccount className="lg:col-start-1 lg:row-start-3" />
+        <AgentsSection
+          view={agentsView(agents, plan)}
+          agents={agents}
+          payHref={payHref}
+          newTemplate={newTemplate}
+          banner={atAgents && (notice || error) ? <Banner kind={error ? "error" : "notice"} text={error || notice} inline /> : null}
+          className="lg:col-start-1 lg:row-start-3"
+        />
+
+        <DeleteAccount className="lg:col-start-1 lg:row-start-4" />
       </div>
     </>
   );
@@ -158,39 +177,6 @@ function keepPrefixes(text: string): ReactNode[] {
     ) : (
       part
     ),
-  );
-}
-
-function Section({ id, title, description, className, children }: { id: string; title: string; description?: string; className?: string; children: ReactNode }) {
-  return (
-    <section aria-labelledby={`${id}-title`} className={className}>
-      <h2 id={`${id}-title`} className="font-heading text-[1.625rem] leading-tight font-bold">
-        {title}
-      </h2>
-      {description ? <p className="mt-1.5 max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">{description}</p> : null}
-      <div className="mt-5">{children}</div>
-    </section>
-  );
-}
-
-function Row({ mark, title, children, action }: { mark: ReactNode; title: ReactNode; children?: ReactNode; action: ReactNode }) {
-  return (
-    <li className="flex items-center gap-4 py-5">
-      {mark}
-      <div className="min-w-0 flex-1">
-        <p className="text-[1.0625rem] leading-snug font-semibold">{title}</p>
-        {children}
-      </div>
-      <div className="flex-none">{action}</div>
-    </li>
-  );
-}
-
-function Tile({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
-  return (
-    <span aria-hidden="true" className={cn("grid size-12 flex-none place-items-center rounded-2xl", muted ? "bg-cream/8" : "bg-cream")}>
-      {children}
-    </span>
   );
 }
 
@@ -295,14 +281,15 @@ function NoPhoneItem() {
   );
 }
 
-function Banner({ kind, text }: { kind: "notice" | "error"; text: string }) {
+function Banner({ kind, text, inline = false }: { kind: "notice" | "error"; text: string; inline?: boolean }) {
   const error = kind === "error";
   return (
     <div
       role={error ? "alert" : "status"}
       className={cn(
         // wide screens: only over the start column, so the hoopoe standing on the subscription slip has its own air
-        "mb-12 flex items-start gap-3 rounded-2xl border px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5 lg:me-[28rem]",
+        "flex items-start gap-3 rounded-2xl border px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5",
+        inline ? "mb-5" : "mb-12 lg:me-[28rem]",
         error ? "border-destructive/45 bg-destructive/10" : "border-sage/35 bg-sage/10",
       )}
     >
@@ -422,14 +409,6 @@ function SubscriptionSlip({
         </details>
       ) : null}
     </section>
-  );
-}
-
-function Chevron() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 flex-none fill-none stroke-current stroke-2 transition-transform duration-200 group-open:rotate-180">
-      <path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
 

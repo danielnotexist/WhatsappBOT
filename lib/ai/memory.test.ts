@@ -4,7 +4,7 @@ import { MockProvider } from "./mock";
 import { MEMORY, maybeSummarize, parseSummary, toHistory } from "./memory";
 import type { MessageRow } from "@/lib/db/types";
 
-const row = (direction: "in" | "out", text: string, i: number): MessageRow => ({ id: `m${i}`, user_id: "u", wa_message_id: direction === "in" ? `w${i}` : null, direction, type: "text", text, media_url: null, transcript: null, model_used: null, tokens_in: null, tokens_out: null, cost_usd: null, created_at: new Date(2026, 9, 20, 8, i).toISOString() });
+const row = (direction: "in" | "out", text: string, i: number): MessageRow => ({ id: `m${i}`, user_id: "u", wa_message_id: direction === "in" ? `w${i}` : null, direction, type: "text", text, media_url: null, transcript: null, model_used: null, tokens_in: null, tokens_out: null, cost_usd: null, agent_key: null, created_at: new Date(2026, 9, 20, 8, i).toISOString() });
 
 describe("memory", () => {
   it("builds alternating history starting with the user and merges consecutive turns", () => {

@@ -35,6 +35,18 @@ describe("GraphClient (recorded fixtures)", () => {
     expect(state.sent[1]).toMatchObject({ reply: "AAMkAGm1", comment: "תשובה" });
   });
 
+  it("forwards a message with the Graph payload shape and lists attachment names", async () => {
+    const { client, state } = make();
+    expect(await client.listAttachments("AAMkAGm1")).toEqual([{ name: "הצעת פשרה 4471.pdf", size: 120_000, contentType: "application/pdf" }]);
+    expect(await client.listAttachments("AAMkAGm2")).toEqual([]);
+    await client.forwardMessage("AAMkAGm1", ["office@barak-cpa.example"], "לטיפולך");
+    const call = state.calls.at(-1)!;
+    expect(call.method).toBe("POST");
+    expect(call.url).toBe("https://graph.microsoft.com/v1.0/me/messages/AAMkAGm1/forward");
+    expect(call.body).toEqual({ comment: "לטיפולך", toRecipients: [{ emailAddress: { address: "office@barak-cpa.example" } }] });
+    expect(state.sent.at(-1)).toMatchObject({ forward: "AAMkAGm1" });
+  });
+
   it("lists, creates, updates and cancels calendar events in the user's time zone", async () => {
     const { client, state } = make();
     const events = await client.calendarView(new Date("2026-10-21T00:00:00Z"), new Date("2026-10-21T23:59:59Z"));

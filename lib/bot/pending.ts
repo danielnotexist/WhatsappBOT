@@ -1,5 +1,7 @@
 import { copy, buttons } from "@/lib/copy/bot";
+import { acopy, agentButtons } from "@/lib/copy/bot-agents";
 import type { PendingActionRow } from "@/lib/db/types";
+import type { ReplyButton } from "@/lib/wa/types";
 import type { BotContext } from "./context";
 
 /** Executes an approved action against the real system (Graph / Google). Registered by later milestones. */
@@ -14,27 +16,34 @@ export function clearExecutorsForTests(): void {
   executors.clear();
 }
 
-/** Renders a freshly created pending action with its approval buttons (PLAN §1: שלח / ערוך / בטל). */
+/**
+ * Renders a freshly created pending action with its approval buttons (PLAN §1: שלח / ערוך / בטל). A draft an agent
+ * prepared opens with the agent's header (docs/design/agents.md §5.5) — the user always knows who prepared it.
+ */
 export async function presentPendingAction(ctx: BotContext, to: string, action: PendingActionRow): Promise<void> {
+  const header = action.agent_name ? `${acopy["agent.reply_header"](action.agent_name)}\n` : "";
+  const send = (body: string, b: ReplyButton[]) => ctx.wa.sendButtons(to, `${header}${body}`, b);
   const p = action.payload as Record<string, string>;
-  if (action.kind === "send_mail") {
-    await ctx.wa.sendButtons(to, copy["act.mail.draft"]({ toName: p.to_name ?? "", toEmail: p.to_email ?? "", subject: p.subject ?? "", body: p.body ?? "", cc: p.cc || undefined, attachment: p.attachment_name || undefined }), buttons.approve(action.id, "שלח"));
+  if (action.kind === "forward_mail") {
+    const attachments = Array.isArray(action.payload.attachments) ? (action.payload.attachments as unknown[]).map(String) : [];
+    await send(acopy["act.mail.forward_confirm"]({ subject: p.subject ?? "", from: p.from ?? "", attachments, to: p.to_email ?? "", comment: p.comment ?? "" }), agentButtons.forward(action.id));
+  } else if (action.kind === "send_mail") {
+    await send(copy["act.mail.draft"]({ toName: p.to_name ?? "", toEmail: p.to_email ?? "", subject: p.subject ?? "", body: p.body ?? "", cc: p.cc || undefined, attachment: p.attachment_name || undefined }), buttons.approve(action.id, "שלח"));
   } else if (action.kind === "create_event") {
-    await ctx.wa.sendButtons(
-      to,
+    await send(
       copy["act.cal.create_confirm"]({ title: p.title ?? "", date: formatDateHe(p.date ?? ""), start: p.start ?? "", end: p.end ?? "", location: p.location || undefined, attendees: Array.isArray(action.payload.attendees) && (action.payload.attendees as string[]).length ? (action.payload.attendees as string[]).join(", ") : undefined }),
       buttons.approve(action.id, "קבע"),
     );
   } else if (action.kind === "update_event") {
     const changes = [p.date ? `תאריך: ${formatDateHe(p.date)}` : "", p.start || p.end ? `שעה: ${p.start || "—"}–${p.end || "—"}` : "", p.subject ? `כותרת: ${p.subject}` : "", p.location ? `מקום: ${p.location}` : ""].filter(Boolean).join("\n");
-    await ctx.wa.sendButtons(to, `*שינוי פגישה*\n${changes || "(אין שינויים)"}\nלהזיז?`, buttons.approve(action.id, "הזז"));
+    await send(`*שינוי פגישה*\n${changes || "(אין שינויים)"}\nלהזיז?`, buttons.approve(action.id, "הזז"));
   } else if (action.kind === "delete_event") {
-    await ctx.wa.sendButtons(to, copy["act.cal.cancel_confirm"](p.subject ?? "", "", ""), [
+    await send(copy["act.cal.cancel_confirm"](p.subject ?? "", "", ""), [
       { id: `pa:approve:${action.id}`, title: "בטל פגישה" },
       { id: `pa:cancel:${action.id}`, title: "השאר" },
     ]);
   } else {
-    await ctx.wa.sendButtons(to, `*פעולה ממתינה לאישור*\n${JSON.stringify(action.payload)}`, buttons.approve(action.id, "אשר"));
+    await send(`*פעולה ממתינה לאישור*\n${JSON.stringify(action.payload)}`, buttons.approve(action.id, "אשר"));
   }
 }
 
@@ -51,9 +60,15 @@ export function parseButtonId(id: string): { verb: "approve" | "edit" | "cancel"
   return m ? { verb: m[1] as "approve" | "edit" | "cancel", actionId: m[2]! } : null;
 }
 
+/** Audit attribution of a pending action: which agent prepared it (docs/design/agents.md §7.4). */
+function attribution(action: PendingActionRow) {
+  return { pending_action_id: action.id, agent_key: action.agent_key, agent_name: action.agent_name };
+}
+
 /**
  * Button press on a pending action. Only the owner, only while pending, only within 10 minutes (PLAN §2.3);
- * approval records the message id of the press and is audited.
+ * approval records the message id of the press and is audited. This is the only place an action executes — the same
+ * for an agent's draft: an agent's permissions can only narrow what it drafts, never skip this step (I1).
  */
 export async function handlePendingButton(ctx: BotContext, userId: string, to: string, buttonId: string, waMessageId: string): Promise<boolean> {
   const parsed = parseButtonId(buttonId);
@@ -71,7 +86,7 @@ export async function handlePendingButton(ctx: BotContext, userId: string, to: s
 
   if (parsed.verb === "cancel") {
     await ctx.db.updatePendingAction(action.id, { status: "cancelled" });
-    await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.cancel`, target: action.id, result: "cancelled" });
+    await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.cancel`, target: action.id, result: "cancelled", ...attribution(action) });
     await ctx.wa.sendText(to, copy["act.mail.cancelled"]());
     return true;
   }
@@ -86,13 +101,13 @@ export async function handlePendingButton(ctx: BotContext, userId: string, to: s
   const executor = executors.get(action.kind);
   if (!executor) {
     await ctx.db.updatePendingAction(action.id, { status: "failed", error: "no executor (connection not available yet)" });
-    await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.execute`, target: action.id, approved_by_msg_id: waMessageId, result: "no_executor" });
+    await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.execute`, target: action.id, approved_by_msg_id: waMessageId, result: "no_executor", ...attribution(action) });
     await ctx.wa.sendText(to, copy["err.not_connected"]());
     return true;
   }
   const result = await executor(action, ctx);
   await ctx.db.updatePendingAction(action.id, result.ok ? { status: "executed", executed_at: ctx.now().toISOString() } : { status: "failed", error: result.message });
-  await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.execute`, target: action.id, approved_by_msg_id: waMessageId, result: result.ok ? "ok" : "failed" });
+  await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.execute`, target: action.id, approved_by_msg_id: waMessageId, result: result.ok ? "ok" : "failed", ...attribution(action) });
   await ctx.wa.sendText(to, result.message);
   return true;
 }

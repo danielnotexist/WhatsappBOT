@@ -231,6 +231,20 @@ export class GraphClient {
     });
   }
 
+  /** Forwards a message with its attachments (POST /me/messages/{id}/forward — covered by Mail.Send, no new scope). */
+  async forwardMessage(id: string, to: string[], comment: string): Promise<void> {
+    await this.request("POST", `/me/messages/${encodeURIComponent(id)}/forward`, {
+      comment,
+      toRecipients: to.map((address) => ({ emailAddress: { address } })),
+    });
+  }
+
+  /** Attachment names / sizes for display (no content). */
+  async listAttachments(id: string): Promise<{ name: string; size: number; contentType: string | null }[]> {
+    const r = await this.request<{ value: { name?: string; size?: number; contentType?: string }[] }>("GET", `/me/messages/${encodeURIComponent(id)}/attachments?$select=name,size,contentType`);
+    return r.value.map((a) => ({ name: a.name ?? "", size: a.size ?? 0, contentType: a.contentType ?? null }));
+  }
+
   // ---------- calendar ----------
 
   private mapEvent(e: RawEvent): GraphEvent {

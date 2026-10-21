@@ -151,7 +151,7 @@ describe("Google executors — failures become Hebrew messages with the right li
   const h = makeHarness();
   let user: { id: string };
   let conn: ConnectionRow;
-  const action = (kind: PendingActionRow["kind"], payload: Record<string, unknown>): PendingActionRow => ({ id: "a1", user_id: user.id, kind, payload, status: "approved", expires_at: "", approved_msg_id: null, executed_at: null, error: null, created_at: "" });
+  const action = (kind: PendingActionRow["kind"], payload: Record<string, unknown>): PendingActionRow => ({ id: "a1", user_id: user.id, kind, payload, status: "approved", expires_at: "", approved_msg_id: null, executed_at: null, error: null, agent_key: null, agent_name: null, created_at: "" });
   beforeEach(async () => {
     user = await h.db.createUser(`u${Math.random()}@example.com`);
     conn = h.db.seedConnection(user.id, "google", "dana.levi@gmail.com");
