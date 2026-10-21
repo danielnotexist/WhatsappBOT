@@ -1,6 +1,7 @@
 "use client";
 
 import { OTPInput, REGEXP_ONLY_DIGITS, type SlotProps } from "input-otp";
+import { useAnimate, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
@@ -11,6 +12,7 @@ import { CODE_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp-constants";
 import { cn } from "@/lib/utils";
 import { authPaths, type AuthMode } from "./email-step";
 import { StepHeading } from "./step-heading";
+import { StepAside, StepBody, StepMascot } from "./step-slots";
 
 export { CODE_LENGTH, RESEND_SECONDS };
 
@@ -25,26 +27,40 @@ export function digitsOnly(s: string): string {
   return s.replace(/\D/g, "").slice(0, CODE_LENGTH);
 }
 
-function Slot({ slot }: { slot: SlotProps }) {
+/** One cell: thin border at rest, ink + halo where the caret is, a small pop when a digit lands, error-red after a miss. */
+function Slot({ slot, invalid }: { slot: SlotProps; invalid: boolean }) {
   return (
     <div
       className={cn(
-        "relative grid h-16 flex-1 place-items-center rounded-field border-2 bg-white/45 font-heading text-[2rem] leading-none font-bold tabular transition-[border-color,box-shadow] duration-150 sm:h-[4.5rem]",
-        slot.isActive ? "border-ink shadow-[0_0_0_3px_rgb(19_36_28/0.25)]" : "border-input",
+        "relative grid h-[3.75rem] min-w-0 flex-1 place-items-center rounded-field bg-white/50 font-heading text-[1.875rem] leading-none font-bold tabular transition-[border-color,box-shadow,background-color] duration-150 sm:h-[4.25rem] sm:text-[2.125rem]",
+        invalid
+          ? "border-2 border-destructive"
+          : slot.isActive
+            ? "border-2 border-foreground bg-white/80 shadow-[0_0_0_4px_rgb(19_36_28/0.16)]"
+            : slot.char
+              ? "border-2 border-foreground/50 bg-white/70"
+              : "border-[1.5px] border-input",
       )}
     >
-      {slot.char ?? <span className="text-ink-muted/50">{slot.placeholderChar}</span>}
-      {slot.hasFakeCaret ? <span aria-hidden="true" className="absolute h-8 w-0.5 animate-caret-blink bg-ink" /> : null}
+      {slot.char ? (
+        <span key={slot.char} className="animate-in duration-150 zoom-in-75 fade-in motion-reduce:animate-none">
+          {slot.char}
+        </span>
+      ) : (
+        <span className="text-foreground/30">{slot.placeholderChar}</span>
+      )}
+      {slot.hasFakeCaret ? <span aria-hidden="true" className="absolute h-8 w-0.5 animate-caret-blink rounded-full bg-foreground" /> : null}
     </div>
   );
 }
 
 /**
- * Step 3 (round plan §3): six cells (input-otp — paste, auto-advance, one-time-code autofill), auto-submit on the
- * sixth digit, a 60-second resend countdown and "change email". Talks to /api/auth/otp/{send,verify}.
+ * Step 3 (round plan §3): six cells in two groups of three (input-otp — paste, auto-advance, one-time-code autofill),
+ * auto-submit on the sixth digit, a 60-second resend countdown and "change email". Talks to /api/auth/otp/{send,verify}.
  */
 export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS, mode = "signup" }: { email: string; updates?: boolean; initialWait?: number; mode?: AuthMode }) {
   const router = useRouter();
+  const reduce = useReducedMotion();
   const labelId = useId();
   const errorId = useId();
   const [code, setCode] = useState("");
@@ -54,6 +70,7 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
   const [deadline, setDeadline] = useState(() => Date.now() + Math.max(0, initialWait) * 1000);
   const [now, setNow] = useState(() => Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
+  const [cells, animateCells] = useAnimate<HTMLDivElement>();
   const remaining = Math.max(0, (deadline - now) / 1000);
 
   useEffect(() => {
@@ -84,6 +101,8 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
             ? `${data.message}${typeof data.attemptsLeft === "number" && data.attemptsLeft > 0 ? ` נשארו ${data.attemptsLeft} ניסיונות.` : ""}`
             : "לא הצלחנו לבדוק את הקוד. אפשר לנסות שוב.",
         );
+        // a short head-shake of the cells, like a door that didn't open (skipped under reduced motion)
+        if (!reduce && cells.current) void animateCells(cells.current, { x: [0, -9, 8, -5, 3, 0] }, { duration: 0.36, ease: "easeOut" });
         setCode("");
         inputRef.current?.focus();
       } catch {
@@ -91,7 +110,7 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
       }
       setBusy(false);
     },
-    [busy, email, router, updates],
+    [animateCells, busy, cells, email, reduce, router, updates],
   );
 
   async function resend() {
@@ -111,91 +130,98 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
   }
 
   const changeHref = `${authPaths[mode].email}?email=${encodeURIComponent(email)}` as Route;
+  const invalid = Boolean(error) && code.length === 0;
 
   return (
-    <form
-      className="flex flex-1 flex-col"
-      noValidate
-      onSubmit={(e) => {
-        e.preventDefault();
-        void verify(code);
-      }}
-    >
-      <StepHeading tag="בדקו את המייל" title="הזינו את הקוד" />
-      <p className="mt-3 text-[1.0625rem]">
-        שלחנו 6 ספרות ל-
-        <bdi dir="ltr" className="font-semibold">
-          {email || "המייל שלך"}
-        </bdi>
-      </p>
+    <>
+      <StepAside>
+        <StepHeading tag="בדקו את המייל" title="הזינו את הקוד" />
+        <p className="mt-3 text-[1.0625rem] lg:mt-5 lg:text-lede">
+          שלחנו 6 ספרות ל-
+          <bdi dir="ltr" className="inline-block max-w-full font-semibold break-all">
+            {email || "המייל שלך"}
+          </bdi>
+        </p>
+        <Link href={changeHref} className="mt-2 self-start rounded-sm text-[0.9375rem] font-semibold text-foreground underline underline-offset-3">
+          שינוי מייל
+        </Link>
+      </StepAside>
 
-      <div className="mt-7" dir="ltr">
-        <span id={labelId} className="sr-only">
-          קוד בן 6 ספרות
-        </span>
-        <OTPInput
-          ref={inputRef}
-          value={code}
-          onChange={(v) => {
-            setCode(v);
-            if (error) setError("");
+      <StepBody>
+        <form
+          className="flex flex-1 flex-col"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            void verify(code);
           }}
-          onComplete={(v: string) => void verify(v)}
-          maxLength={CODE_LENGTH}
-          pattern={REGEXP_ONLY_DIGITS}
-          pasteTransformer={digitsOnly}
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          autoFocus
-          disabled={busy}
-          aria-labelledby={labelId}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
-          containerClassName="flex gap-2 sm:gap-3 has-disabled:opacity-60"
-          render={({ slots }) => (
-            <>
-              {slots.map((slot, i) => (
-                <Slot key={i} slot={slot} />
-              ))}
-            </>
-          )}
-        />
-      </div>
-
-      <p id={errorId} role="alert" aria-live="assertive" className="mt-3 min-h-6 text-[0.9375rem] font-semibold text-destructive">
-        {error}
-      </p>
-      <p role="status" className={cn("text-[0.9375rem]", notice ? "mb-1" : "sr-only")}>
-        {notice}
-      </p>
-
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.9375rem] text-muted-foreground">
-        <span>הקוד תקף 10 דקות</span>
-        <span aria-hidden="true">·</span>
-        {remaining > 0 ? (
-          <span>
-            שליחה חוזרת בעוד <span className="tabular">{formatCountdown(remaining)}</span>
+        >
+          <span id={labelId} className="sr-only">
+            קוד בן 6 ספרות
           </span>
-        ) : (
-          <button type="button" onClick={() => void resend()} className="font-semibold text-foreground underline underline-offset-3">
-            שליחה חוזרת
-          </button>
-        )}
-      </div>
-      <Link href={changeHref} className="mt-2 self-start text-[0.9375rem] font-semibold text-foreground underline underline-offset-3">
-        שינוי מייל
-      </Link>
+          <div ref={cells} dir="ltr">
+            <OTPInput
+              ref={inputRef}
+              value={code}
+              onChange={(v) => {
+                setCode(v);
+                if (error) setError("");
+              }}
+              onComplete={(v: string) => void verify(v)}
+              maxLength={CODE_LENGTH}
+              pattern={REGEXP_ONLY_DIGITS}
+              pasteTransformer={digitsOnly}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              disabled={busy}
+              aria-labelledby={labelId}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? errorId : undefined}
+              containerClassName="flex items-center gap-1.5 sm:gap-2 has-disabled:opacity-60"
+              render={({ slots }) => (
+                <>
+                  {slots.slice(0, 3).map((slot, i) => (
+                    <Slot key={i} slot={slot} invalid={invalid} />
+                  ))}
+                  <span aria-hidden="true" className="mx-0.5 h-0.5 w-2.5 flex-none rounded-full bg-foreground/35 sm:mx-1 sm:w-3" />
+                  {slots.slice(3).map((slot, i) => (
+                    <Slot key={i + 3} slot={slot} invalid={invalid} />
+                  ))}
+                </>
+              )}
+            />
+          </div>
 
-      <div className="mt-auto pt-8">
-        <Cta tone="ink" type="submit" block disabled={code.length !== CODE_LENGTH || busy} aria-busy={busy}>
-          {busy ? "בודקים…" : "המשך"}
-        </Cta>
-      </div>
-      {mode === "signup" ? (
-        <div className="mt-6">
-          <StepProgress step={2} />
-        </div>
-      ) : null}
-    </form>
+          <p id={errorId} role="alert" aria-live="assertive" className="mt-3 min-h-6 text-[0.9375rem] leading-snug font-semibold text-destructive">
+            {error}
+          </p>
+          <p role="status" className={cn("text-[0.9375rem]", notice ? "mb-2" : "sr-only")}>
+            {notice}
+          </p>
+
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[0.9375rem]">
+            <span className="text-muted-foreground">הקוד תקף 10 דקות.</span>
+            {remaining > 0 ? (
+              <span className="text-muted-foreground">
+                שליחה חוזרת בעוד <span className="tabular">{formatCountdown(remaining)}</span>
+              </span>
+            ) : (
+              <button type="button" onClick={() => void resend()} className="rounded-sm font-semibold text-foreground underline underline-offset-3">
+                שליחה חוזרת
+              </button>
+            )}
+          </div>
+
+          <Cta tone="ink" type="submit" block disabled={code.length !== CODE_LENGTH || busy} aria-busy={busy} className="mt-8">
+            {busy ? "בודקים…" : "המשך"}
+          </Cta>
+          <div className="mt-auto flex items-end justify-between gap-4 pt-8">
+            {mode === "signup" ? <StepProgress step={2} /> : <span />}
+            <StepMascot pose="envelope" />
+          </div>
+        </form>
+      </StepBody>
+    </>
   );
 }

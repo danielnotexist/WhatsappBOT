@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { ConnectTransition } from "@/components/auth/connect-transition";
-import { isConnectProvider, type ConnectProvider } from "@/lib/auth/oauth-providers";
+import { ConnectTransition, HandoffSheet } from "@/components/auth/connect-transition";
 import { Wordmark } from "@/components/brand/wordmark";
+import { isConnectProvider, type ConnectProvider } from "@/lib/auth/oauth-providers";
 
 export const metadata: Metadata = { title: "מתחברים", robots: { index: false } };
 
@@ -14,7 +14,7 @@ export function generateStaticParams(): { provider: ConnectProvider }[] {
 /** Step 5 (round plan §3): the light hand-off screen between עלזה and the provider. */
 export default function ConnectProviderPage(props: PageProps<"/connect/[provider]">) {
   return (
-    <div className="surface-light flex min-h-dvh flex-col bg-cream">
+    <HandoffSheet>
       <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl items-center px-4 sm:px-8">
         <Wordmark className="text-ink" />
       </header>
@@ -23,7 +23,7 @@ export default function ConnectProviderPage(props: PageProps<"/connect/[provider
           <Transition params={props.params} />
         </Suspense>
       </main>
-    </div>
+    </HandoffSheet>
   );
 }
 

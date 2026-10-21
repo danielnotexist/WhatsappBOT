@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeStep, digitsOnly, formatCountdown } from "./code-step";
 import { ConnectStep, adminMailto } from "./connect-step";
 import { EmailStep, looksLikeEmail } from "./email-step";
-import { toneForPath } from "./signup-shell";
+import { deckForPath, toneForPath } from "./signup-shell";
 import { Toggle } from "./toggle";
 
 const push = vi.fn();
@@ -54,6 +54,15 @@ describe("helpers", () => {
     expect(toneForPath("/start/ready")).toBe("ready");
     expect(toneForPath("/login/email")).toBe("email");
     expect(toneForPath("/login/whatsapp")).toBe("connect");
+  });
+
+  it("keeps the papers still to come in the deck — signup only", () => {
+    expect(deckForPath("/start/email")).toEqual(["code", "connect", "ready"]);
+    expect(deckForPath("/start/code")).toEqual(["connect", "ready"]);
+    expect(deckForPath("/start/connect")).toEqual(["ready"]);
+    expect(deckForPath("/start/ready")).toEqual([]);
+    expect(deckForPath("/login/email")).toEqual([]);
+    expect(deckForPath("/start")).toEqual([]);
   });
 
   it("builds the IT-admin mail with the consent link", () => {
