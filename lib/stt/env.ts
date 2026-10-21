@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { EnvError, dataMode, requireEnv } from "@/lib/env";
+import { isDemo } from "@/lib/demo";
+import { EnvError, integrationsMocked, requireEnv } from "@/lib/env";
 import { FallbackStt } from "./fallback";
 import { MockStt } from "./mock";
 import { OpenAiStt } from "./openai";
@@ -8,7 +9,7 @@ import type { SttProvider } from "./types";
 
 /**
  * STT env (kept out of lib/env.ts's full-app schema because both keys are optional for the app as a whole):
- *   STT_PROVIDER   soniox (default) | openai | mock   (DATA_MODE=memory defaults to mock)
+ *   STT_PROVIDER   soniox (default) | openai | mock   (DATA_MODE=memory defaults to mock; DEMO_MODE=1 is always mock)
  *   SONIOX_API_KEY required for soniox (already in lib/env.ts)
  *   OPENAI_API_KEY required for openai; with soniox it enables the gpt-4o-transcribe fallback
  * Missing / invalid values throw lib/env's EnvError (Hebrew, names only).
@@ -34,8 +35,9 @@ export function requireSttEnv<K extends keyof SttEnv>(keys: readonly K[], source
 
 /** Builds the provider from env (no network calls). */
 export function sttFromEnv(source: Record<string, string | undefined> = process.env, fetchImpl?: typeof fetch): SttProvider {
+  if (isDemo(source)) return new MockStt(); // the demo never calls a paid API, whatever STT_PROVIDER says
   const raw = source.STT_PROVIDER?.trim();
-  const provider = raw ? requireSttEnv(["STT_PROVIDER"], source).STT_PROVIDER : dataMode(source) === "memory" ? "mock" : "soniox";
+  const provider = raw ? requireSttEnv(["STT_PROVIDER"], source).STT_PROVIDER : integrationsMocked(source) ? "mock" : "soniox";
   if (provider === "mock") return new MockStt();
   if (provider === "openai") return new OpenAiStt({ apiKey: requireSttEnv(["OPENAI_API_KEY"], source).OPENAI_API_KEY, fetchImpl });
   const soniox = new SonioxStt({ apiKey: requireEnv(["SONIOX_API_KEY"], source).SONIOX_API_KEY, fetchImpl });

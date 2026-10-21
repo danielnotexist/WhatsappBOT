@@ -1,12 +1,13 @@
 import "server-only";
+import { isDemo } from "@/lib/demo";
 import { requireEnv } from "@/lib/env";
 
-/** A placeholder number for DATA_MODE=memory development (never a real line). */
+/** A placeholder number for DATA_MODE=memory development and the demo (never a real line). */
 export const DEV_PUBLIC_NUMBER = "972500000000";
 
-/** עלזה's WhatsApp number for wa.me links (E.164 digits, no "+"). Hebrew EnvError when missing outside memory mode. */
+/** עלזה's WhatsApp number for wa.me links (E.164 digits, no "+"). Hebrew EnvError when missing outside memory/demo mode. */
 export function publicWaNumber(): string {
-  if (process.env.DATA_MODE === "memory" && !process.env.WA_PUBLIC_NUMBER) return DEV_PUBLIC_NUMBER;
+  if ((process.env.DATA_MODE === "memory" || isDemo()) && !process.env.WA_PUBLIC_NUMBER) return DEV_PUBLIC_NUMBER;
   return requireEnv(["WA_PUBLIC_NUMBER"]).WA_PUBLIC_NUMBER;
 }
 

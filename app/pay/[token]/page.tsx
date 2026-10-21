@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { PLANS } from "@/lib/billing/plans";
 import { getDb } from "@/lib/db";
@@ -27,6 +28,7 @@ async function PayCard({ params, searchParams }: { params: PageProps<"/pay/[toke
   const sp = await searchParams;
   const error = typeof sp.error === "string" ? sp.error : "";
   const link = verifyPayLinkToken(token);
+  await ensureDemoSessionUser();
   const user = link ? await getDb().getUser(link.userId) : null;
   if (!link || !user) {
     return (

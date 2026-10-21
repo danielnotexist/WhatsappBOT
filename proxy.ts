@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DEMO_COPY, isDemo } from "@/lib/demo";
 
 /**
  * proxy.ts — כותרות אבטחה לכל תשובה (ב-Next 16 הקובץ `middleware.ts` הוחלף ב-`proxy.ts`; אותה פונקציונליות).
@@ -45,6 +46,8 @@ export function proxy() {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(name, value);
   }
+  // מצב הדגמה (lib/demo.ts): לא לאינדוקס בשום מנוע חיפוש — נבדק בכל בקשה, גם אם ה-build נעשה בלי DEMO_MODE
+  if (isDemo()) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
   return response;
 }
 

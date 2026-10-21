@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:demo": "playwright test -c playwright.demo.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",

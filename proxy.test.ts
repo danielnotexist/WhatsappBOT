@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CSP_REPORT_ONLY, SECURITY_HEADERS, config, proxy } from "./proxy";
 
 describe("proxy.ts security headers", () => {
@@ -24,6 +24,20 @@ describe("proxy.ts security headers", () => {
     expect(SECURITY_HEADERS["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
     expect(SECURITY_HEADERS["Permissions-Policy"]).toContain("camera=()");
     expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("DENY");
+  });
+
+  it("DEMO_MODE=1 adds X-Robots-Tag: noindex, nofollow (read per request); nothing outside the demo", () => {
+    expect(proxy().headers.get("X-Robots-Tag")).toBeNull();
+    vi.stubEnv("DEMO_MODE", "1");
+    vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 2).toString("base64"));
+    try {
+      expect(proxy().headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+      // a misconfigured demo does not serve pages at all
+      vi.stubEnv("WA_ACCESS_TOKEN", "real");
+      expect(() => proxy()).toThrow(/WA_ACCESS_TOKEN/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("skips static assets in the matcher", () => {

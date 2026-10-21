@@ -1,14 +1,22 @@
 import "server-only";
 import { getDb } from "@/lib/db";
+import { DEMO_OTP_CODE, isDemo } from "@/lib/demo";
 import { getMailer } from "@/lib/mail";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
-import { sendOtp, verifyOtp, type OtpSendResult, type OtpVerifyResult } from "./otp";
+import { sendOtp, verifyOtp, type OtpDeps, type OtpSendResult, type OtpVerifyResult } from "./otp";
 
-/** Wires the OTP logic to the process-wide db / mailer / limiter. Used by the route handlers and the server actions. */
+/**
+ * Wires the OTP logic to the process-wide db / mailer / limiter. Used by the route handlers and the server actions.
+ * DEMO_MODE=1: the fixed code DEMO_OTP_CODE (lib/demo.ts) for every email — nothing stored, nothing mailed.
+ */
+function deps(): OtpDeps {
+  return { db: getDb(), mailer: getMailer(), limiter: getRateLimiter(), fixedCode: isDemo() ? DEMO_OTP_CODE : undefined };
+}
+
 export async function sendOtpForRequest(email: unknown, headers: Headers): Promise<OtpSendResult> {
-  return sendOtp({ db: getDb(), mailer: getMailer(), limiter: getRateLimiter() }, email, clientIp(headers));
+  return sendOtp(deps(), email, clientIp(headers));
 }
 
 export async function verifyOtpForRequest(email: unknown, code: unknown, headers: Headers): Promise<OtpVerifyResult> {
-  return verifyOtp({ db: getDb(), mailer: getMailer(), limiter: getRateLimiter() }, email, code, clientIp(headers));
+  return verifyOtp(deps(), email, code, clientIp(headers));
 }

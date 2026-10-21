@@ -1,3 +1,4 @@
+import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { completePayment } from "@/lib/billing/service";
 import { EnvError } from "@/lib/env";
@@ -9,6 +10,7 @@ import { EnvError } from "@/lib/env";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   try {
+    await ensureDemoSessionUser();
     const result = await completePayment(getBillingContext(), url.search.slice(1));
     const dest = new URL("/account", process.env.APP_URL || url.origin);
     dest.searchParams.set(result.ok ? "notice" : "error", result.ok ? "התשלום התקבל והחשבון פעיל. אפשר לחזור לוואטסאפ." : result.message);

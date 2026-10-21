@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { CodeStep } from "@/components/auth/code-step";
+import { DemoCodeNote } from "@/components/demo/DemoCodeNote";
 import { RESEND_SECONDS } from "@/lib/auth/otp-constants";
+import { isDemo } from "@/lib/demo";
 
 export const metadata: Metadata = { title: "קוד אימות" };
 
@@ -20,5 +22,11 @@ async function WithParams({ searchParams }: { searchParams: PageProps<"/start/co
   const email = typeof sp.email === "string" ? sp.email : "";
   if (!email) redirect("/start/email");
   const wait = typeof sp.wait === "string" ? Math.min(RESEND_SECONDS, Math.max(0, Number(sp.wait) || 0)) : RESEND_SECONDS;
-  return <CodeStep email={email} updates={sp.updates === "1"} initialWait={wait} />;
+  return (
+    <>
+      {/* DEMO_MODE: no mail goes out — the card names the code that works (lib/demo.ts) */}
+      {isDemo() ? <DemoCodeNote /> : null}
+      <CodeStep email={email} updates={sp.updates === "1"} initialWait={wait} />
+    </>
+  );
 }

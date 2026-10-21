@@ -56,6 +56,12 @@ export class MemoryDb implements Db {
   reminders: ReminderRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
+  /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
+  private readonly userIdFor: (email: string) => string;
+
+  constructor(opts: { userIdFor?: (email: string) => string } = {}) {
+    this.userIdFor = opts.userIdFor ?? (() => randomUUID());
+  }
 
   async findUserByEmail(email: string): Promise<UserRow | null> {
     for (const u of this.users.values()) if (u.email === email && !u.deleted_at) return u;
@@ -69,8 +75,27 @@ export class MemoryDb implements Db {
 
   async createUser(email: string): Promise<UserRow> {
     if (await this.findUserByEmail(email)) throw new Error(`duplicate email: ${email}`);
+    return this.insertUser(this.userIdFor(email), email);
+  }
+
+  /**
+   * DEMO_MODE only: brings back a user this instance never saw, under the id and email of a signed session
+   * (another serverless instance created it). Null when the email already belongs to a different live user.
+   */
+  async restoreUser(id: string, email: string): Promise<UserRow | null> {
+    const existing = this.users.get(id);
+    if (existing) return existing.deleted_at ? null : existing;
+    const sameEmail = await this.findUserByEmail(email);
+    if (sameEmail) return null;
+    const user = this.insertUser(id, email);
+    this.audit.push({ user_id: id, action: "demo.restore_user", target: email, result: "ok", created_at: iso() });
+    return user;
+  }
+
+  private insertUser(id: string, email: string): UserRow {
+    if (this.users.has(id)) throw new Error(`duplicate user id: ${id}`);
     const user: UserRow = {
-      id: randomUUID(),
+      id,
       email,
       name: null,
       business_name: null,
