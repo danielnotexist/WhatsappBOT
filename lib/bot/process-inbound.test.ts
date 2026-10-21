@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { consumeLoginToken } from "@/lib/auth/login-token";
+import { LOGIN_RE } from "./login-link";
 import { processInbound } from "./process-inbound";
 import { makeHarness } from "./test-harness";
 
@@ -44,11 +46,33 @@ describe("processInbound", () => {
     const h = makeHarness();
     await readyUser(h);
     await processInbound(h.ctx, h.inbound(null as unknown as string, { type: "other", text: null }));
-    expect(h.wa.texts.at(-1)).toContain("אני עדיין לא עובד");
+    expect(h.wa.texts.at(-1)).toContain("אני עדיין לא עובדת");
     h.ai.enqueue(() => {
       throw new Error("boom");
     });
     await processInbound(h.ctx, h.inbound("מה יש לי מחר?"));
     expect(h.wa.texts.at(-1)).toContain("לא הצלחתי להשלים");
+  });
+
+  it("answers \"כניסה\" with a one-time site login link — also after the trial ended, without counting it", async () => {
+    const h = makeHarness();
+    const user = await readyUser(h);
+    for (let i = 1; i <= 11; i++) await processInbound(h.ctx, h.inbound(`שאלה ${i}`));
+    const before = (await h.db.getCurrentUsage(user.id))?.counted_messages;
+    const r = await processInbound(h.ctx, h.inbound("כניסה"));
+    expect(r.note).toBe("login link");
+    const text = h.wa.texts.at(-1)!;
+    expect(text).toContain("קישור כניסה לאזור האישי");
+    const url = new URL(text.match(/https:\/\/\S+/)![0]);
+    expect(url.origin).toBe("https://app.example.co.il");
+    expect(url.pathname.startsWith("/login/w/")).toBe(true);
+    expect((await h.db.getCurrentUsage(user.id))?.counted_messages).toBe(before);
+    const token = decodeURIComponent(url.pathname.slice("/login/w/".length));
+    expect(await consumeLoginToken(h.db, token, { now: h.ctx.now() })).toEqual({ ok: true, userId: user.id });
+  });
+
+  it("recognises only the whole-message login keyword", () => {
+    for (const t of ["כניסה", "כניסה.", "קישור כניסה", "כניסה לאתר", "לאזור האישי", "LOGIN"]) expect(LOGIN_RE.test(t), t).toBe(true);
+    for (const t of ["כניסה לפגישה מחר ב-10", "מה הכניסה?", "תזכיר לי כניסה"]) expect(LOGIN_RE.test(t), t).toBe(false);
   });
 });

@@ -66,6 +66,17 @@ describe("POST /api/auth/otp/{send,verify}", () => {
     expect(session?.userId).toBe([...db.users.keys()][0]);
   });
 
+  it("records the newsletter opt-in only when the toggle was on", async () => {
+    await sendPost(post("/api/auth/otp/send", { email: "on@example.com" }));
+    await verifyPost(post("/api/auth/otp/verify", { email: "on@example.com", code: mailer.sent.at(-1)!.code, updates: true }));
+    await sendPost(post("/api/auth/otp/send", { email: "off@example.com" }, "5.6.7.8"));
+    await verifyPost(post("/api/auth/otp/verify", { email: "off@example.com", code: mailer.sent.at(-1)!.code }, "5.6.7.8"));
+    const on = await db.findUserByEmail("on@example.com");
+    const off = await db.findUserByEmail("off@example.com");
+    expect(on!.profile.marketing_opt_in).toMatchObject({ value: true, source: "signup_form" });
+    expect(off!.profile.marketing_opt_in).toBeUndefined();
+  });
+
   it("returns 400 for a bad email and 429 with retry-after on cooldown", async () => {
     expect((await sendPost(post("/api/auth/otp/send", { email: "nope" }))).status).toBe(400);
     expect((await sendPost(post("/api/auth/otp/send", {}))).status).toBe(400);

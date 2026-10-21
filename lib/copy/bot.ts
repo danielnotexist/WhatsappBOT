@@ -16,6 +16,8 @@ export const copy = {
   "link.second_phone": (maskedPhone: string, siteLink: string) =>
     `החשבון הזה כבר מקושר למספר אחר (${maskedPhone}).\nלכל חשבון יש מספר וואטסאפ אחד. כדי להעביר את החשבון למספר הזה, נכנסים לאזור האישי ובוחרים "החלפת מספר":\n${siteLink}`,
   "link.number_belongs_to_other": () => "המספר הזה כבר מקושר לחשבון אחר. כדי לקשר אותו לחשבון חדש, קודם מנתקים אותו מהחשבון הקיים באזור האישי.",
+  "link.login_link": (loginLink: string) =>
+    `הנה קישור כניסה לאזור האישי באתר:\n${loginLink}\nהוא עובד פעם אחת, ל-10 הדקות הקרובות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.`,
 
   // ---- 2. onboarding ----
   "onb.welcome": (name: string | null) =>

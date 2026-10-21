@@ -1,49 +1,33 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
+import { ConnectStep } from "@/components/auth/connect-step";
 import { getSession } from "@/lib/auth/current-user";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { createConnectLinkToken } from "@/lib/ms/connect-link";
 
-export const metadata: Metadata = { title: "חיבור" };
+export const metadata: Metadata = { title: "חיבור המייל" };
 
-/**
- * Step 3: connect Microsoft 365 (first) or Google, or skip (PLAN §1). The OAuth routes arrive in Milestone 4/6;
- * until then the buttons link to the (not yet existing) start endpoints and are disabled.
- */
-export default function ConnectPage() {
+/** Step 4: connect Microsoft / Gmail or skip. Signed-in only; the Microsoft callback may come back with `?error=`. */
+export default function StartConnectPage(props: PageProps<"/start/connect">) {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
-      <Suspense fallback={null}>
-        <ConnectCard />
-      </Suspense>
-    </main>
+    <Suspense fallback={<ConnectStep />}>
+      <WithSession searchParams={props.searchParams} />
+    </Suspense>
   );
 }
 
-async function ConnectCard() {
+async function WithSession({ searchParams }: { searchParams: PageProps<"/start/connect">["searchParams"] }) {
+  await connection(); // session expiry and the admin link's expiry use the current time
   const session = await getSession();
-  if (!session) redirect("/start");
-  return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle className="font-heading text-2xl">לחבר את המייל והיומן</CardTitle>
-        <CardDescription>
-          חיבור ישיר ומאובטח (OAuth). הסיסמה נשארת אצל Microsoft/Google. אפשר לדלג ולחבר אחר כך, מתוך השיחה.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <Button disabled title="זמין באבן דרך 4">
-          חיבור Microsoft 365 (בקרוב)
-        </Button>
-        <Button variant="outline" disabled title="זמין באבן דרך 6">
-          חיבור Google (בקרוב)
-        </Button>
-        <Button variant="ghost" nativeButton={false} render={<Link href="/start/link" />}>
-          דילוג — להמשיך לוואטסאפ
-        </Button>
-      </CardContent>
-    </Card>
-  );
+  if (!session) redirect("/start/email");
+  const sp = await searchParams;
+  const error = typeof sp.error === "string" ? sp.error.slice(0, 300) : "";
+  const appUrl = process.env.APP_URL || "http://localhost:3000";
+  // the IT admin opens this without our session: a one-time 30-minute start link for the tenant-wide consent
+  const adminLink =
+    error && sp.admin === "1"
+      ? new URL(`/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(session.userId, "microsoft"))}`, appUrl).toString()
+      : null;
+  return <ConnectStep error={error} adminLink={adminLink} />;
 }

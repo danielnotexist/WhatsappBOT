@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { getSession } from "@/lib/auth/current-user";
 import { getDb } from "@/lib/db";
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "האזור האישי" };
 /** Personal area skeleton: connections, WhatsApp numbers, subscription, delete account (PLAN §11 milestone 1). */
 export default function AccountPage(props: PageProps<"/account">) {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-12">
+    <main id="main" className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-12">
       <Suspense fallback={<p className="text-muted-foreground">טוען…</p>}>
         <Account searchParams={props.searchParams} />
       </Suspense>
@@ -24,11 +25,12 @@ export default function AccountPage(props: PageProps<"/account">) {
 }
 
 async function Account({ searchParams }: { searchParams: PageProps<"/account">["searchParams"] }) {
+  await connection(); // the session check compares against the current time
   const session = await getSession();
-  if (!session) redirect("/start");
+  if (!session) redirect("/login");
   const db = getDb();
   const user = await db.getUser(session.userId);
-  if (!user) redirect("/start");
+  if (!user) redirect("/login");
   const [connections, phones, subscription, usage, sp] = await Promise.all([
     db.listConnections(user.id),
     db.listWaIdentities(user.id),
@@ -134,7 +136,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
                 </form>
               </div>
             ))}
-          <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/start/link" />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/start/ready" />}>
             קישור מספר (קוד חדש)
           </Button>
         </CardContent>

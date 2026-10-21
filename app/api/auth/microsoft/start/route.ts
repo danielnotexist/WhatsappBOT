@@ -7,10 +7,11 @@ import { getMsConfig } from "@/lib/ms";
 import { buildAdminConsentUrl, buildAuthorizeUrl, pkcePair } from "@/lib/ms/oauth";
 
 /**
- * GET /api/auth/microsoft/start[?t=<one-time chat token>][&admin=1]
+ * GET /api/auth/microsoft/start[?t=<one-time chat token>][&admin=1][&returnTo=onboarding]
  * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat.
  * Stores state + PKCE verifier on the user profile (works from any device), then redirects to Microsoft.
  * `admin=1` → tenant-wide admin consent URL instead (PLAN §8 #2).
+ * `returnTo=onboarding` (or `return=onboarding`) → the callback lands on /start/ready (signup) instead of /account.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -38,8 +39,10 @@ export async function GET(request: Request) {
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
   const admin = url.searchParams.get("admin") === "1";
+  // where the callback lands: back into the signup flow (/start/ready) or the personal area (allow-list, no open redirect)
+  const returnTo = (url.searchParams.get("returnTo") ?? url.searchParams.get("return")) === "onboarding" ? "/start/ready" : "/account";
   const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
-  await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, started_at: new Date().toISOString(), via: t ? "chat" : "web" } } });
+  await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, started_at: new Date().toISOString(), via: t ? "chat" : "web", return_to: returnTo } } });
   const dest = admin
     ? buildAdminConsentUrl(cfg, { state, redirectUri: cfg.redirectUri, tenant: url.searchParams.get("tenant") ?? "organizations" })
     : buildAuthorizeUrl(cfg, { state, codeChallenge: challenge, loginHint: user.email });

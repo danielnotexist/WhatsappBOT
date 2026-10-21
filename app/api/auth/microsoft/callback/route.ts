@@ -8,9 +8,28 @@ import { ensureInboxSubscription } from "@/lib/ms/subscriptions";
 import { sealTokens } from "@/lib/ms/token-store";
 import { getWaSender } from "@/lib/wa";
 
+type ReturnTo = "/start/ready" | "/account";
+
 function accountRedirect(request: Request, key: "notice" | "error", message: string): Response {
   const dest = new URL("/account", process.env.APP_URL || new URL(request.url).origin);
   dest.searchParams.set(key, message);
+  return Response.redirect(dest.toString() as Route, 303);
+}
+
+/**
+ * Where the user lands after Microsoft. Signup (`return_to: /start/ready`): success → /start/ready?connected=microsoft,
+ * failure → back to /start/connect with the reason (and `admin=1` when the organisation needs an IT admin).
+ * Otherwise the personal area with a notice/error, as before.
+ */
+function finish(request: Request, returnTo: ReturnTo, key: "notice" | "error", message: string, opts: { admin?: boolean } = {}): Response {
+  if (returnTo !== "/start/ready") return accountRedirect(request, key, message);
+  const base = process.env.APP_URL || new URL(request.url).origin;
+  const dest = key === "notice" ? new URL("/start/ready", base) : new URL("/start/connect", base);
+  if (key === "notice") dest.searchParams.set("connected", "microsoft");
+  else {
+    dest.searchParams.set("error", message);
+    if (opts.admin) dest.searchParams.set("admin", "1");
+  }
   return Response.redirect(dest.toString() as Route, 303);
 }
 
@@ -25,7 +44,8 @@ export async function GET(request: Request) {
   const db = getDb();
   const user = state ? await db.findUserByOauthState("microsoft", state) : null;
   if (!user) return accountRedirect(request, "error", "החיבור לא הושלם: המצב לא זוהה (אולי הקישור פג). אפשר להתחיל שוב.");
-  const pending = ((user.profile.oauth_pending as Record<string, unknown>)?.microsoft ?? {}) as { verifier?: string; admin?: boolean; via?: string };
+  const pending = ((user.profile.oauth_pending as Record<string, unknown>)?.microsoft ?? {}) as { verifier?: string; admin?: boolean; via?: string; return_to?: string };
+  const returnTo: ReturnTo = pending.return_to === "/start/ready" ? "/start/ready" : "/account";
   await db.mergeUserProfile(user.id, { oauth_pending: { ...((user.profile.oauth_pending as Record<string, unknown>) ?? {}), microsoft: null } });
 
   const phone = (await db.listWaIdentities(user.id)).find((w) => w.status === "active")?.phone_e164 ?? null;
@@ -56,9 +76,9 @@ export async function GET(request: Request) {
     if (needsAdmin) {
       const adminLink = new URL("/api/auth/microsoft/start?admin=1", process.env.APP_URL || url.origin).toString();
       await tell(copy["err.admin_consent_needed"](user.business_name ?? "הארגון", adminLink));
-      return accountRedirect(request, "error", "הארגון דורש אישור מנהל. שלחנו בוואטסאפ טקסט להעביר למנהל ה-IT.");
+      return finish(request, returnTo, "error", phone ? "הארגון דורש אישור מנהל. שלחנו בוואטסאפ טקסט להעביר למנהל ה-IT." : "הארגון דורש אישור חד-פעמי של מנהל ה-IT.", { admin: true });
     }
-    return accountRedirect(request, "error", `החיבור ל-Microsoft 365 לא הושלם${desc ? `: ${desc.split("\n")[0]}` : ""}.`);
+    return finish(request, returnTo, "error", `החיבור ל-Microsoft 365 לא הושלם${desc ? `: ${desc.split("\n")[0]}` : ""}.`);
   }
 
   let cfg;
@@ -83,16 +103,16 @@ export async function GET(request: Request) {
       console.warn("[ms:callback] post-connect setup failed:", (e as Error).message);
     }
     await tell(copy["onb.connect_done"]("Microsoft 365", accountEmail));
-    return accountRedirect(request, "notice", `החיבור ל-Microsoft 365 הושלם (${accountEmail}).`);
+    return finish(request, returnTo, "notice", `החיבור ל-Microsoft 365 הושלם (${accountEmail}).`);
   } catch (e) {
     if (e instanceof MsOAuthError) {
       await db.addAudit({ user_id: user.id, action: "ms.connect", result: `token:${e.code}` });
       if (e.needsAdminConsent) {
         const adminLink = new URL("/api/auth/microsoft/start?admin=1", process.env.APP_URL || url.origin).toString();
         await tell(copy["err.admin_consent_needed"](user.business_name ?? "הארגון", adminLink));
-        return accountRedirect(request, "error", "הארגון דורש אישור מנהל. שלחנו בוואטסאפ טקסט להעביר למנהל ה-IT.");
+        return finish(request, returnTo, "error", phone ? "הארגון דורש אישור מנהל. שלחנו בוואטסאפ טקסט להעביר למנהל ה-IT." : "הארגון דורש אישור חד-פעמי של מנהל ה-IT.", { admin: true });
       }
-      return accountRedirect(request, "error", `החיבור נכשל (${e.code}). אפשר לנסות שוב.`);
+      return finish(request, returnTo, "error", `החיבור נכשל (${e.code}). אפשר לנסות שוב.`);
     }
     throw e;
   }

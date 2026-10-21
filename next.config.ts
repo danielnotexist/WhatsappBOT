@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   typedRoutes: true,
   poweredByHeader: false,
+  // no floating dev badge (it overlaps the mobile CTA and the design screenshots)
+  devIndicators: false,
+  // the old "link to WhatsApp" step is part of /start/ready now (round plan §3 row 6); old links in chat keep working
+  async redirects() {
+    return [{ source: "/start/link", destination: "/start/ready", permanent: false }];
+  },
   turbopack: {
     rules: {
       "*.css": {

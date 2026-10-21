@@ -12,3 +12,7 @@ screenshots/*.png
 
 # agent worktrees (Claude Code) — never commit
 .claude/worktrees/
+
+# Playwright
+test-results/
+playwright-report/

@@ -61,6 +61,30 @@ describe("Microsoft connect routes (memory mode)", () => {
     expect((await startGet(new Request("https://app.example.co.il/api/auth/microsoft/start?t=bad"))).status).toBe(410);
   });
 
+  it("return=onboarding: success lands on /start/ready, failure goes back to /start/connect (admin flag when needed)", async () => {
+    const user = await db.createUser("dana@example.com");
+    const start = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?returnTo=onboarding&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const ok = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?code=abc&state=${state}`));
+    const okUrl = new URL(ok.headers.get("location")!);
+    expect(okUrl.pathname).toBe("/start/ready");
+    expect(okUrl.searchParams.get("connected")).toBe("microsoft");
+
+    const again = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?returnTo=onboarding&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    const st2 = new URL(again.headers.get("location")!).searchParams.get("state")!;
+    const denied = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?error=consent_required&error_description=AADSTS65001&state=${st2}`));
+    const deniedUrl = new URL(denied.headers.get("location")!);
+    expect(deniedUrl.pathname).toBe("/start/connect");
+    expect(deniedUrl.searchParams.get("admin")).toBe("1");
+    expect(deniedUrl.searchParams.get("error")).toContain("מנהל ה-IT");
+
+    // anything else in `return` keeps the personal area (allow-list)
+    const other = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?return=https://evil.example&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    const st3 = new URL(other.headers.get("location")!).searchParams.get("state")!;
+    const back = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?code=abc&state=${st3}`));
+    expect(new URL(back.headers.get("location")!).pathname).toBe("/account");
+  });
+
   it("admin consent is required → Hebrew IT text with the admin link in WhatsApp", async () => {
     const user = await db.createUser("dana@example.com");
     await db.updateUserProfile(user.id, { business_name: "משרד לוי" });

@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "תשלום" };
 /** Personal payment page reached from the WhatsApp link (no session needed). Placeholder UI. */
 export default function PayPage(props: PageProps<"/pay/[token]">) {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
+    <main id="main" className="flex flex-1 flex-col items-center justify-center px-6 py-16">
       <Suspense fallback={null}>
         <PayCard params={props.params} searchParams={props.searchParams} />
       </Suspense>

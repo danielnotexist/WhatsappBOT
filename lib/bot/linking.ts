@@ -23,11 +23,11 @@ export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage):
   const row = await ctx.db.findLinkToken(token);
   if (!row) {
     const { blocked } = await ctx.db.recordLinkAttempt(phone, LINK.maxTokenAttempts, LINK.blockMs);
-    if (!blocked) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/link")));
+    if (!blocked) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/ready")));
     return { handled: true, note: "invalid token" };
   }
   if (row.used_at || Date.parse(row.expires_at) <= ctx.now().getTime()) {
-    await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/link")));
+    await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/ready")));
     return { handled: true, note: "expired token" };
   }
   const user = await ctx.db.getUser(row.user_id);

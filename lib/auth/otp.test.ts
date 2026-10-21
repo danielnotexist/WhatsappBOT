@@ -140,3 +140,13 @@ describe("verifyOtp", () => {
     expect((await verifyOtp(deps, "DANA@example.com", spaced, "1.1.1.1")).ok).toBe(true);
   });
 });
+
+describe("client-side OTP constants", () => {
+  it("match the server policy", async () => {
+    const c = await import("./otp-constants");
+    const { OTP_POLICY } = await import("./otp");
+    expect(c.CODE_LENGTH).toBe(OTP_POLICY.digits);
+    expect(c.RESEND_SECONDS * 1000).toBe(OTP_POLICY.resendCooldownMs);
+    expect(c.CODE_TTL_MINUTES * 60_000).toBe(OTP_POLICY.ttlMs);
+  });
+});

@@ -27,7 +27,7 @@ export function PhoneMockup({
     >
       <div
         className={cn(
-          "relative flex aspect-[9/19.5] flex-col overflow-hidden rounded-[2.125rem] bg-[var(--wa-bg)] text-[var(--wa-fg)]",
+          "@container relative flex aspect-[9/19.5] flex-col overflow-hidden rounded-[2.125rem] bg-[var(--wa-bg)] text-[var(--wa-fg)]",
           screenClassName,
         )}
       >

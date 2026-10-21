@@ -1,69 +1,43 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { requestCodeAction } from "./actions";
+import Link from "next/link";
+import { Cta } from "@/components/brand/cta";
+import { Handwritten } from "@/components/brand/handwritten";
+import { IncomingCall } from "@/components/brand/incoming-call";
+import { PhoneMockup } from "@/components/brand/phone-mockup";
+import { BRAND } from "@/lib/brand";
 
-export const metadata: Metadata = { title: "התחלה" };
+export const metadata: Metadata = { title: "הרשמה", description: BRAND.description };
 
 /**
- * Step 1 of signup: email → 6-digit code by mail (PLAN §1). Placeholder UI until a design direction is chosen.
- * searchParams is request-time, so the form sits inside <Suspense> (Cache Components).
+ * Step 1 (round plan §3): עלזה is calling — phone first, then the handwritten line, the headline, "about a minute",
+ * "בואו נתחיל" and the sign-in link. On phones the CTA stays pinned to the bottom so it is always in reach. Static.
  */
-export default function StartPage(props: PageProps<"/start">) {
+export default function StartIntroPage() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-16">
-      <Suspense fallback={<StartForm />}>
-        <StartFormWithParams searchParams={props.searchParams} />
-      </Suspense>
-    </main>
-  );
-}
-
-async function StartFormWithParams({ searchParams }: { searchParams: PageProps<"/start">["searchParams"] }) {
-  const sp = await searchParams;
-  const email = typeof sp.email === "string" ? sp.email : "";
-  const error = typeof sp.error === "string" ? sp.error : "";
-  return <StartForm email={email} error={error} />;
-}
-
-function StartForm({ email = "", error = "" }: { email?: string; error?: string }) {
-  return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle className="font-heading text-2xl">נתחיל</CardTitle>
-        <CardDescription>נשלח קוד בן 6 ספרות למייל. בלי סיסמה, בלי טפסים.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={requestCodeAction} className="flex flex-col gap-3">
-          <label htmlFor="email" className="text-sm font-medium">
-            כתובת המייל של העסק
-          </label>
-          <Input
-            id="email"
-            type="email"
-            name="email"
-            dir="ltr"
-            inputMode="email"
-            autoComplete="email"
-            placeholder="name@company.co.il"
-            className="text-end placeholder:text-end"
-            defaultValue={email}
-            required
-            maxLength={254}
-          />
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <Button type="submit">שליחת קוד</Button>
-          <p className="text-xs text-muted-foreground">
-            ההרשמה מהווה הסכמה לתנאי השימוש ולמדיניות הפרטיות. ללא ניוזלטר.
-          </p>
-        </form>
-      </CardContent>
-    </Card>
+    <div className="mx-auto grid w-full max-w-6xl flex-1 items-center gap-8 pt-1 pb-32 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16 lg:pt-2 lg:pb-20">
+      <div className="flex justify-center lg:order-2">
+        <PhoneMockup label={`${BRAND.name} מתקשרת`} className="w-[min(100%,12.5rem)] sm:w-[min(100%,19rem)]">
+          <IncomingCall />
+        </PhoneMockup>
+      </div>
+      <div className="flex flex-col items-start lg:order-1">
+        <Handwritten tone="sage">עושה את העבודה, באמת.</Handwritten>
+        <h1 className="mt-3 text-hero font-bold">
+          העוזרת האישית שלך, <span className="headline-light">בוואטסאפ</span>.
+        </h1>
+        <p className="mt-5 text-lede text-cream-muted">לוקח בערך דקה.</p>
+        <div className="max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:bg-[linear-gradient(to_top,var(--alze-night)_65%,transparent)] max-lg:px-4 max-lg:pt-6 max-lg:pb-[max(1rem,env(safe-area-inset-bottom))] lg:mt-9">
+          <Cta href="/start/email" className="max-lg:w-full lg:min-w-56">
+            בואו נתחיל
+          </Cta>
+        </div>
+        <p className="mt-6 text-[0.9375rem] text-cream-muted">
+          כבר יש לך חשבון?{" "}
+          <Link href="/login" className="font-semibold text-cream underline underline-offset-3">
+            כניסה
+          </Link>
+        </p>
+      </div>
+    </div>
   );
 }

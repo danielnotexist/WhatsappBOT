@@ -11,6 +11,7 @@ import { handleUnlinkedPhone } from "./linking";
 import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
 import { connectLinkFor } from "./context";
+import { handleLoginKeyword } from "./login-link";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -50,7 +51,10 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     return { handled: true, note: "pending button" };
   }
 
-  // 3. onboarding questions
+  // 3. "כניסה" → one-time sign-in link for the site (before onboarding and billing: it must always work)
+  if (await handleLoginKeyword(ctx, user.id, msg, say)) return { handled: true, note: "login link" };
+
+  // 3b. onboarding questions
   if (onboardingOf(user) && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };
 
   // 4. media we cannot process yet (voice transcription arrives in Milestone 5)
