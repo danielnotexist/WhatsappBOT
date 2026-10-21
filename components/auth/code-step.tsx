@@ -3,6 +3,7 @@
 import { OTPInput, REGEXP_ONLY_DIGITS, type SlotProps } from "input-otp";
 import { useAnimate, useReducedMotion } from "motion/react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -58,7 +59,7 @@ function Slot({ slot, invalid }: { slot: SlotProps; invalid: boolean }) {
  * Step 3 (round plan §3): six cells in two groups of three (input-otp — paste, auto-advance, one-time-code autofill),
  * auto-submit on the sixth digit, a 60-second resend countdown and "change email". Talks to /api/auth/otp/{send,verify}.
  */
-export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS, mode = "signup" }: { email: string; updates?: boolean; initialWait?: number; mode?: AuthMode }) {
+export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS, mode = "signup", demoNote }: { email: string; updates?: boolean; initialWait?: number; mode?: AuthMode; demoNote?: ReactNode }) {
   const router = useRouter();
   const reduce = useReducedMotion();
   const labelId = useId();
@@ -148,6 +149,7 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
       </StepAside>
 
       <StepBody>
+        {demoNote}
         <form
           className="flex flex-1 flex-col"
           noValidate

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DemoWaGate } from "@/components/demo/DemoWaGate";
 import { Cta, type CtaTone } from "./cta";
 import { WhatsappGlyph } from "./provider-logo";
 
@@ -15,10 +16,8 @@ export function waMessageOf(href: string): string {
  * THE single place that renders a button opening WhatsApp (a wa.me link with a prefilled message):
  * /start/ready ("חיבור לוואטסאפ") and /login/whatsapp ("פתיחת וואטסאפ").
  *
- * ── Demo wiring point ──
- * In the demo deployment the coordinator wraps `button` below with components/demo/DemoWaDialog.tsx (agent A), e.g.
- *   return isDemo() ? <DemoWaDialog href={href} message={waMessageOf(href)}>{button}</DemoWaDialog> : button;
- * Nothing else changes: every wa.me button on the site goes through this component, with the real href and token.
+ * In DEMO_MODE `DemoWaGate` swaps the link for a dialog with the prefilled message (nothing opens WhatsApp).
+ * Every wa.me button on the site goes through this component, with the real href and token.
  */
 export function WaLinkButton({
   href,
@@ -39,5 +38,6 @@ export function WaLinkButton({
       {children}
     </Cta>
   );
-  return button;
+  // In DEMO_MODE the link opens a dialog showing the prefilled message instead of WhatsApp (agent A's gate).
+  return <DemoWaGate href={href}>{button}</DemoWaGate>;
 }

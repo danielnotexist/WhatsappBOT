@@ -22,11 +22,6 @@ async function WithParams({ searchParams }: { searchParams: PageProps<"/start/co
   const email = typeof sp.email === "string" ? sp.email : "";
   if (!email) redirect("/start/email");
   const wait = typeof sp.wait === "string" ? Math.min(RESEND_SECONDS, Math.max(0, Number(sp.wait) || 0)) : RESEND_SECONDS;
-  return (
-    <>
-      {/* DEMO_MODE: no mail goes out — the card names the code that works (lib/demo.ts) */}
-      {isDemo() ? <DemoCodeNote /> : null}
-      <CodeStep email={email} updates={sp.updates === "1"} initialWait={wait} />
-    </>
-  );
+  // DEMO_MODE: no mail goes out — the card names the code that works (lib/demo.ts)
+  return <CodeStep email={email} updates={sp.updates === "1"} initialWait={wait} demoNote={isDemo() ? <DemoCodeNote /> : null} />;
 }
