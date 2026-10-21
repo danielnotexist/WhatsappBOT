@@ -142,7 +142,7 @@ export async function runEval(args: CliArgs): Promise<string> {
   for (const message of dataset.messages) for (const provider of providers) if (!done.get(provider.id)?.has(message.id)) tasks.push({ provider, message });
   if (tasks.length === 0) console.log('  כל הרשומות כבר קיימות — אין מה להריץ (מחק את תיקיית הריצה כדי להריץ מחדש).');
   if (!args.dryRun) {
-    const estimate = tasks.reduce((s, t) => s + estimateUsd(t.provider.id, 1, ESTIMATE_PROFILES.evalMessage), 0);
+    const estimate = tasks.reduce((s, t) => s + estimateUsd(t.provider.model, 1, ESTIMATE_PROFILES.evalMessage), 0);
     ledger.assertEstimate(`${tasks.length} קריאות`, estimate);
   }
   let stoppedByBudget = false;

@@ -23,6 +23,7 @@ export default defineConfig({
       "scripts/**",
       "design/**",
       "supabase/**",
+      ".claude/**",
     ],
     setupFiles: ["./vitest.setup.ts"],
     css: false,

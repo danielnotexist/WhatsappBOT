@@ -5,16 +5,16 @@ export const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 /** Plain-text + HTML body for the sign-in code. RTL, Hebrew, no links (nothing to phish). */
 export function otpEmailContent(mail: OtpMail, productName: string): { subject: string; text: string; html: string } {
-  const subject = `${mail.code} — קוד הכניסה ל-${productName}`;
+  const subject = `${mail.code} — קוד הכניסה ל${productName}`;
   const text = [
-    `קוד הכניסה שלך ל-${productName}:`,
+    `קוד הכניסה שלך ל${productName}:`,
     "",
     mail.code,
     "",
     `הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.`,
   ].join("\n");
   const html = `<!doctype html><html lang="he" dir="rtl"><body style="font-family:Arial,Helvetica,sans-serif;direction:rtl;text-align:right;color:#1e2a2e">
-<p>קוד הכניסה שלך ל-${escapeHtml(productName)}:</p>
+<p>קוד הכניסה שלך ל${escapeHtml(productName)}:</p>
 <p style="font-size:32px;font-weight:700;letter-spacing:.2em;direction:ltr;text-align:right">${mail.code}</p>
 <p>הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.</p>
 </body></html>`;
@@ -27,7 +27,7 @@ function escapeHtml(s: string): string {
 
 export interface ResendMailerOptions {
   apiKey: string;
-  /** e.g. `{{שם}} <no-reply@example.co.il>` — the domain must be verified in Resend. */
+  /** e.g. `עלזה <no-reply@example.co.il>` — the domain must be verified in Resend. */
   from: string;
   productName: string;
   fetchImpl?: typeof fetch;

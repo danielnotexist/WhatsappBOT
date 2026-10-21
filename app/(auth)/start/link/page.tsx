@@ -7,7 +7,7 @@ import { getSession } from "@/lib/auth/current-user";
 import { issueLinkToken, linkMessage, waMeUrl } from "@/lib/auth/link-token";
 import { getDb } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
-import { PRODUCT_NAME } from "@/lib/product";
+import { PRODUCT_NAME } from "@/lib/brand";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 

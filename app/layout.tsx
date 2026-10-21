@@ -1,21 +1,21 @@
 import type { Metadata, Viewport } from "next";
 import { DirectionProvider } from "@/components/ui/direction";
 import { Toaster } from "@/components/ui/sonner";
+import { BRAND } from "@/lib/brand";
 import { fontVariables } from "@/lib/fonts";
 import "./globals.css";
 
-const APP_NAME = "עוזר AI בוואטסאפ";
+const APP_NAME = BRAND.name;
 const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
   applicationName: APP_NAME,
   title: {
-    default: `${APP_NAME} לעסקים קטנים`,
+    default: `${APP_NAME} — ${BRAND.tagline}`,
     template: `%s · ${APP_NAME}`,
   },
-  description:
-    "עוזר אישי בוואטסאפ שמטפל במייל, ביומן ובקבצים של העסק שלך — בעברית, עם חיבור ל-Microsoft 365 ול-Google.",
+  description: BRAND.description,
   openGraph: {
     type: "website",
     locale: "he_IL",

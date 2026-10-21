@@ -9,3 +9,6 @@ results/
 screenshots/*.png
 !design/directions/screenshots/*.png
 *.tsbuildinfo
+
+# agent worktrees (Claude Code) — never commit
+.claude/worktrees/

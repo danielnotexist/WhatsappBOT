@@ -11,14 +11,25 @@ describe("link tokens", () => {
     }
   });
 
-  it("builds the wa.me link with the Hebrew message and extracts the token back", () => {
+  it("builds the wa.me link with the branded Hebrew message and extracts the token back", () => {
     const url = waMeUrl("972501234567", "ABCD-2345");
     expect(url.startsWith("https://wa.me/972501234567?text=")).toBe(true);
+    expect(linkMessage("ABCD-2345")).toBe("היי עלזה! אפשר לקשר את החשבון שלי (ABCD-2345)");
     expect(decodeURIComponent(url.split("text=")[1]!)).toBe(linkMessage("ABCD-2345"));
-    expect(extractLinkToken("היי! לקשר את החשבון שלי: ABCD-2345")).toBe("ABCD-2345");
+    expect(extractLinkToken(linkMessage("ABCD-2345"))).toBe("ABCD-2345");
     expect(extractLinkToken("abcd2345")).toBe("ABCD-2345");
     expect(extractLinkToken("ABCD–2345")).toBe("ABCD-2345"); // en dash from a phone keyboard
     expect(extractLinkToken("מה יש לי מחר?")).toBeNull();
+  });
+
+  it("finds the token through bidi marks, mirrored parentheses and older message formats", () => {
+    expect(extractLinkToken("היי עלזה! אפשר לקשר את החשבון שלי (\u200EABCD-2345\u200E)")).toBe("ABCD-2345");
+    expect(extractLinkToken("היי עלזה! אפשר לקשר את החשבון שלי )ABCD-2345(")).toBe("ABCD-2345");
+    expect(extractLinkToken("\u202Bהיי עלזה! (abcd−2345)\u202C")).toBe("ABCD-2345"); // minus sign, lower case
+    expect(extractLinkToken("היי! לקשר את החשבון שלי: ABCD-2345")).toBe("ABCD-2345"); // the previous format
+    // the parenthesised token wins over another 8-character word in the same message
+    expect(extractLinkToken("REF12345 היי עלזה (WXYZ-6789)")).toBe("WXYZ-6789");
+    expect(extractLinkToken("היי עלזה (ABC-12)")).toBeNull();
   });
 
   it("reuses a fresh token and rotates one that is about to expire or was used", async () => {

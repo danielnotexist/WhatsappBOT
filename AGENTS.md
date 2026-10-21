@@ -4,7 +4,8 @@ Rules for AI agents working in this repository. The product spec is `docs/PLAN.m
 the running progress log is `docs/PROGRESS.md` (Hebrew — update it in every commit).
 
 - Language: all user-facing text in Hebrew (professional, warm, no jokes, no "שלח/י" forms — neutral phrasing). Code, identifiers and comments in English.
-- Product name is not chosen yet: keep the `{{שם}}` placeholder (candidates in `docs/naming.md`). Design direction is not chosen yet (`design/directions/`).
+- Product name: **עלזה** (Latin "Alze"), chosen by Daniel. Single source: `lib/brand.ts` — never hard-code the name. The assistant speaks about herself in the feminine (`docs/copy/style-guide.md`).
+- Design direction: **"לילה ירוק"** — dark, cinematic, our own (never copy readywhen's text, logo or mascot). Tokens in `app/globals.css`, fonts in `lib/fonts.ts`, components in `components/brand/`; work by `.claude/skills/frontend-design/SKILL.md`. Logical CSS only (ps/pe/ms/me/start/end) — enforced by a test. The signup flow must keep the screen order of `docs/PLAN.md` / the round plan §3. `design/directions/` is archive.
 - No paid API calls, no deployments, no installs outside the repo. Every integration has a mock/dry-run path and fails fast with a Hebrew message listing missing env vars (`lib/env.ts`).
 - Before every commit: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` (root), `npm run typecheck` + `npm run pipeline -- --dry-run` (scripts/hebrew-eval), `supabase/tests/run-local.sh` (supabase).
 - Never commit secrets, `node_modules/`, `results/`, `.next/`.

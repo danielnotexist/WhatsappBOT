@@ -3,7 +3,15 @@ import type { MessageParam, Tool } from "@anthropic-ai/sdk/resources/messages";
 import { requireEnv } from "@/lib/env";
 import { AiProviderError, type AiProvider, type ChatMessage, type CompletionRequest, type CompletionResponse, type ModelTier, type ToolCall } from "./types";
 
-/** Model ids per tier (docs/hebrew-eval-report.md): Haiku 5.5 router, Sonnet 5.5 strong. Override with env. */
+/**
+ * Model ids per tier — locked by the Hebrew eval (docs/hebrew-eval-report.md, run m0-20261020, 21.10.2026):
+ *  - router = Claude Haiku 5.5, adaptive thinking, effort low: classifies every message and answers only the simple
+ *    ones itself. On the 17 simple messages it scored 3.81 overall / safety 5.00 (Sonnet: 3.79 / 5.00) at $0.0005 per
+ *    message (15× cheaper); with thinking off it leaked English in 14/100 answers, with adaptive in 1/100.
+ *    It does NOT pass the bar for tool/complex work (Hebrew 3.73 < 4.0) — those always go to the strong tier.
+ *  - strong = Claude Sonnet 5.5, adaptive thinking, effort low: best overall (3.89; Hebrew 4.03; 0 sends without approval).
+ * Override with AI_ROUTER_MODEL / AI_STRONG_MODEL.
+ */
 export const DEFAULT_MODELS: Record<ModelTier, string> = {
   router: process.env.AI_ROUTER_MODEL || "claude-haiku-5-5",
   strong: process.env.AI_STRONG_MODEL || "claude-sonnet-5-5",
@@ -72,6 +80,7 @@ export class AnthropicProvider implements AiProvider {
     try {
       const res = await this.client.messages.create({
         model,
+        // Thinking tokens count toward max_tokens (adaptive is on for both tiers) — keep headroom.
         max_tokens: req.maxTokens ?? (req.tier === "router" ? 1024 : 4096),
         system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
         messages: toAnthropicMessages(req.messages),

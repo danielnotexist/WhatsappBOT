@@ -1,4 +1,4 @@
-# תזכיר: סעיף 4.7 "AI Providers" בתנאי WhatsApp Business Platform של Meta — ואיך {{שם}} מתמקם מולו
+# תזכיר: סעיף 4.7 "AI Providers" בתנאי WhatsApp Business Platform של Meta — ואיך עלזה מתמקמת מולו
 
 > **טיוטה לבדיקת עו"ד — אינו ייעוץ משפטי.** נכתב 20.10.2026 על בסיס מקורות ציבוריים (רשימה בסוף). ההחלטה העסקית (PLAN §8 סיכון #1): בונים במקביל לבדיקה המשפטית, עם תוכנית B מוכנה.
 
@@ -20,9 +20,9 @@
 
 **המשמעות לישראל:** ישראל **לא** ברשימת המדינות המוחרגות. ההיתר קיים רק במקומות שבהם רגולטור חייב את Meta. מה שמותר בכל מקום: AI שהוא **נלווה** לשירות עסקי ("AI integrated as part of broader business services, like customer-support bots").
 
-## 3. איפה {{שם}} עומד
+## 3. איפה עלזה עומדת
 
-**הטענה שלנו (positioning):** {{שם}} אינו "עוזר AI כללי" ואינו ספק מודלים. הוא **שירות משרדי לעסק** — ניהול מייל, יומן וקבצים של העסק דרך החיבור ל-Microsoft 365/Google — שמשתמש ב-AI כטכנולוגיית עיבוד (כמו שמערכת CRM משתמשת ב-AI לסיכום). המשתמש הוא בעל העסק (לקוח שלנו), לא "הציבור"; השיחה היא שירות לקוחות של {{שם}} ללקוחותיו.
+**הטענה שלנו (positioning):** עלזה אינה "עוזר AI כללי" ואינה ספק מודלים. היא **שירות משרדי לעסק** — ניהול מייל, יומן וקבצים של העסק דרך החיבור ל-Microsoft 365/Google — שמשתמש ב-AI כטכנולוגיית עיבוד (כמו שמערכת CRM משתמשת ב-AI לסיכום). המשתמש הוא בעל העסק (לקוח שלנו), לא "הציבור"; השיחה היא שירות לקוחות של עלזה ללקוחותיה.
 
 **נקודות לטובתנו**
 1. **לא general-purpose:** הבוט מסרב לשאלות כלליות שאינן קשורות למשרד (אין "כתוב לי שיר", אין חיפוש ברשת, אין עזרה בשיעורי בית). ה-system prompt וה-router מגבילים לכוונות מוגדרות (21 intents ב-`scripts/hebrew-eval/dataset`). זה **חייב להישאר כך** גם כהגבלת מוצר.
@@ -46,12 +46,12 @@
 ## 4. שלוש שאלות פתוחות לעו"ד
 
 1. **מבחן "primary functionality":** האם שירות שבו 100% מהאינטראקציות עוברות דרך LLM, אך הפלט תמיד נוגע לנתוני העסק של המשתמש (מייל/יומן/קבצים), הוא "AI as primary functionality" או "AI as incidental"? יש פסיקה/הנחיה/תקדים (כולל מקרים של Zapier/Make/Notion-style assistants שנשארו בפלטפורמה)?
-2. **מספר אחד לכולם:** האם הארכיטקטורה (WABA אחד של {{שם}}, לקוחות = משתמשי קצה שמקשרים את המספר שלהם) הופכת אותנו ל-"AI Provider ... making available such technologies" כלפי הציבור, לעומת תוכנית B (מספר של כל עסק, {{שם}} כ-Solution Provider בלבד)? האם Embedded Signup משנה את הניתוח?
+2. **מספר אחד לכולם:** האם הארכיטקטורה (WABA אחד של עלזה, לקוחות = משתמשי קצה שמקשרים את המספר שלהם) הופכת אותנו ל-"AI Provider ... making available such technologies" כלפי הציבור, לעומת תוכנית B (מספר של כל עסק, עלזה כ-Solution Provider בלבד)? האם Embedded Signup משנה את הניתוח?
 3. **חשיפה וסעדים:** מה הסנקציה המעשית (השבתת WABA, אובדן המספר, חסימת ה-Business Manager של דניאל כולל נכסים אחרים?) ואיזה ערעור/SLA קיים? האם כדאי לעבוד דרך BSP ישראלי (למשל GlobalMessaging/CommBox/Infobip) שיישא בחלק מהסיכון ויש לו ערוץ ל-Meta?
 
 ## 5. תוכנית B — מספר וואטסאפ לכל עסק (Embedded Signup)
 
-אם חוות הדעת שלילית או ש-Meta מתנגדת: כל לקוח מחבר **מספר משלו** (SIM של העסק או מספר וירטואלי) ל-WABA **משלו** דרך **Embedded Signup** (Meta's Tech Provider / Solution Partner flow), ו-{{שם}} פועל כ-**Solution Provider** שמנהל את ה-WABA עבורו. במקרה הזה "העסק" מבחינת Meta הוא משרד עו"ד לוי, והוא "משתמש ב-AI לשירות הלקוחות שלו" — הדפוס שמותר במפורש; הסעיף מתיר לעסק "retain an AI Provider as your Solution Provider".
+אם חוות הדעת שלילית או ש-Meta מתנגדת: כל לקוח מחבר **מספר משלו** (SIM של העסק או מספר וירטואלי) ל-WABA **משלו** דרך **Embedded Signup** (Meta's Tech Provider / Solution Partner flow), ועלזה פועלת כ-**Solution Provider** שמנהל את ה-WABA עבורו. במקרה הזה "העסק" מבחינת Meta הוא משרד עו"ד לוי, והוא "משתמש ב-AI לשירות הלקוחות שלו" — הדפוס שמותר במפורש; הסעיף מתיר לעסק "retain an AI Provider as your Solution Provider".
 
 | היבט | מספר אחד (תוכנית A) | מספר לכל עסק (תוכנית B) |
 |---|---|---|
@@ -71,7 +71,7 @@ Subject: Clarification request — Section 4.7 (AI Providers) for a business pro
 
 Hello,
 
-We are an Israeli company building {{שם}}, a WhatsApp-based office assistant for small professional businesses (law firms, accountants, consultants, clinics). Before we launch, we would like to confirm that our use case is compatible with Section 4.7 ("AI Providers") of the Meta Terms for WhatsApp Business Platform.
+We are an Israeli company building Alze (עלזה), a WhatsApp-based office assistant for small professional businesses (law firms, accountants, consultants, clinics). Before we launch, we would like to confirm that our use case is compatible with Section 4.7 ("AI Providers") of the Meta Terms for WhatsApp Business Platform.
 
 How the service works:
 - Each customer is a business owner who signs up on our website, connects their own Microsoft 365 or Google Workspace account (mail, calendar, files) via OAuth, and links their personal WhatsApp number to their account.

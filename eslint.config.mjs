@@ -19,6 +19,7 @@ const eslintConfig = defineConfig([
     "scripts/**",
     "design/**",
     "supabase/**",
+    ".claude/**",
   ]),
 ]);
 

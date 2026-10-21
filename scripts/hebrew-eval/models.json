@@ -6,12 +6,26 @@
       "name": "Claude Haiku 5.5 (thinking off)",
       "provider": "anthropic",
       "model": "claude-haiku-5-5",
-      "enabled": true,
+      "enabled": false,
+      "$comment": "Leaked English reasoning in m0-20261020 (21/100 non-Hebrew answers) — kept for comparison only.",
       "params": {
         "thinking": "disabled",
         "effort": "low",
         "max_tokens": 2048
       }
+    },
+    {
+      "id": "claude-haiku-5-5-adaptive",
+      "name": "Claude Haiku 5.5 (adaptive, effort low)",
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "enabled": true,
+      "params": {
+        "thinking": "adaptive",
+        "effort": "low",
+        "max_tokens": 4096
+      },
+      "$comment": "Router candidate as configured in lib/ai (adaptive thinking, effort low). Thinking counts toward max_tokens, hence 4096."
     },
     {
       "id": "claude-sonnet-5-5",

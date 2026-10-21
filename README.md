@@ -76,7 +76,7 @@ lib/
   bot/                  process-inbound.ts (הצינור: dedupe → זהות → ✅/typing → כפתורים → היכרות → מכסה → עוזר → זיכרון), linking.ts, onboarding.ts, pending.ts (שלח/ערוך/בטל + executors), context.ts
   copy/bot.ts           כל הטקסטים של הבוט לפי ה-ids ב-docs/copy/bot-copy.md (בדיקה מוודאת שכל id מתועד)
   ms/                   oauth.ts (PKCE, authorize/admin-consent URLs, token exchange/refresh, סיווג AADSTS), graph.ts (מייל/יומן/קבצים/subscriptions, HTML→טקסט), token-store.ts (רענון + הצפנה), files-text.ts (PDF/Office→טקסט עם unpdf), tools.ts (כלי Graph למודל + executors לשליחה/יומן), subscriptions.ts + renewal.ts, connect-link.ts (קישור 30 דק'), __fixtures__/ (Graph מוקלט לבדיקות ול-DATA_MODE=memory)
-  product.ts            PRODUCT_NAME = "{{שם}}" עד שייבחר שם
+  brand.ts              BRAND — השם (עלזה / Alze), תגית, דומיין
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
   hyp/                  sign.ts (APISign SIGN/VERIFY), client.ts (HypClient: דף תשלום, VERIFY, getToken, soft עם טוקן + SendHesh, PrintHesh; MockHypGateway), index.ts
   billing/              plans.ts (99/750, 299/3000, ימי ניסיון חוזר 1/3/5), pay-link.ts (קישור /pay/<token> חתום, 7 ימים), subscription.ts (מכונת מצבים: הפעלה, חיוב חודשי, past_due), service.ts (startPayment, completePayment, runChargeJob + הודעות/תבניות)

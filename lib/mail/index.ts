@@ -1,7 +1,7 @@
 import "server-only";
 import { dataMode } from "@/lib/env";
 import { globalSingleton, setGlobalSingleton } from "@/lib/global-singleton";
-import { PRODUCT_NAME } from "@/lib/product";
+import { PRODUCT_NAME } from "@/lib/brand";
 import { ConsoleMailer } from "./console";
 import { ResendMailer } from "./resend";
 import type { Mailer } from "./types";

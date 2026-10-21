@@ -41,7 +41,7 @@ describe("billing service", () => {
     expect((await db.getSubscription(user.id))!.status).toBe("active");
     expect(wa.sent.at(-1)!.kind).toBe("text"); // inside the 24h window → free text
     expect(wa.texts.at(-1)).toContain("החשבון פעיל");
-    expect(wa.texts.at(-1)).toContain("ממשיך מאיפה שעצרנו");
+    expect(wa.texts.at(-1)).toContain("ממשיכה מאיפה שעצרנו");
     expect(await db.countTrialMessage(user.id)).toBe(749);
     // same redirect again → no second payment, still ok
     const again = await completePayment(ctx, `Id=401594866&CCode=0&Amount=99&ACode=0502150&Order=${user.id}%3Abasic&Sign=abc`);

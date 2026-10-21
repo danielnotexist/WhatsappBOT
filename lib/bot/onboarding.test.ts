@@ -43,7 +43,7 @@ describe("onboarding", () => {
     expect(h.wa.sent.at(-1)!.buttons!.map((b) => b.id)).toEqual(["onb:connect:microsoft", "onb:connect:google", "onb:connect:later"]);
 
     await processInbound(h.ctx, h.button("onb:connect:later", "אחר כך"));
-    expect(h.wa.texts.at(-2)).toContain("בלי חיבור אני יכול לעזור");
+    expect(h.wa.texts.at(-2)).toContain("בלי חיבור אני יכולה לעזור");
     expect(h.wa.texts.at(-1)).toContain("זהו, אנחנו מסודרים");
     expect(((await h.db.getUser(user.id))!.profile.onboarding as { step: string }).step).toBe("done");
 

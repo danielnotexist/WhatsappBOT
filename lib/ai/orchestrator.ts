@@ -79,7 +79,7 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
   };
 
   // 1. router
-  const routed = await input.ai.complete({ tier: "router", system: `${system}\n\n${ROUTER_INSTRUCTIONS}`, messages: history, json: true, maxTokens: 400 });
+  const routed = await input.ai.complete({ tier: "router", system: `${system}\n\n${ROUTER_INSTRUCTIONS}`, messages: history, json: true, maxTokens: 1024 }); // adaptive thinking shares this budget (eval p95 ≈ 470 output tokens)
   addCost(routed);
   const verdict = parseRouterVerdict(routed.text);
   if (verdict && verdict.complexity === "simple" && verdict.reply) {
