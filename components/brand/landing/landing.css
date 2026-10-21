@@ -1,0 +1,169 @@
+/*
+ * Landing page only (app/page.tsx). Plain CSS for what Tailwind utilities cannot say well: Lenis' html rules,
+ * the hero's one entrance (the phone "turns on" in a dark room) and the screen light. Logical properties only.
+ * Under prefers-reduced-motion the global rule in app/globals.css collapses every animation to its end state.
+ */
+
+/* Lenis (smooth scroll, this page only) — its stylesheet, inlined */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+.lenis [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+@keyframes alze-phone-in {
+  from {
+    opacity: 0;
+    transform: translateY(1.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes alze-screen-on {
+  0%,
+  35% {
+    filter: brightness(0.12) saturate(0.4);
+  }
+  100% {
+    filter: none;
+  }
+}
+
+@keyframes alze-light-on {
+  0%,
+  30% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* the hero phone rises out of the dark, then its screen lights up and throws light on the "table" */
+.alze-hero-phone {
+  animation: alze-phone-in 1s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+.alze-hero-phone [data-screen] {
+  animation: alze-screen-on 1.6s cubic-bezier(0.33, 1, 0.68, 1) 0.2s both;
+}
+.alze-hero-light {
+  animation: alze-light-on 1.8s ease-out 0.2s both;
+}
+/* …and a beat later the hoopoe lands on it */
+.alze-hero-bird {
+  animation: alze-phone-in 0.8s cubic-bezier(0.22, 1, 0.36, 1) 1.05s both;
+}
+
+/* the whole page: the night colour + the same film grain as .stage, without its key light (sections light themselves) */
+.alze-night {
+  background-color: var(--alze-night);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* light thrown by a phone screen: a green-white pool, wider than tall */
+.alze-screen-light {
+  background: radial-gradient(
+    closest-side,
+    rgb(120 200 170 / 0.2),
+    rgb(0 168 132 / 0.07) 55%,
+    transparent 100%
+  );
+}
+
+/* the paper price sheet sits on the night stage like the signup cards */
+.alze-paper-grain {
+  background-color: var(--alze-paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .07 0 0 0 0 .14 0 0 0 0 .11 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* FAQ: the plus turns into a cross when a question opens (motion that answers the person's action) */
+.alze-faq summary::-webkit-details-marker {
+  display: none;
+}
+.alze-faq [data-plus] {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.alze-faq details[open] [data-plus] {
+  transform: rotate(45deg);
+}
+
+/* the hoopoe: a perched bird breathes, a flying one floats; hovering makes her shuffle on her feet */
+@keyframes alze-breathe {
+  0%,
+  100% {
+    transform: none;
+  }
+  50% {
+    transform: scale(1.012, 1.024);
+  }
+}
+@keyframes alze-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.55rem);
+  }
+}
+@keyframes alze-wiggle {
+  0%,
+  100% {
+    rotate: 0deg;
+  }
+  30% {
+    rotate: -4deg;
+  }
+  65% {
+    rotate: 3deg;
+  }
+}
+.alze-mascot {
+  transform-origin: 50% 97%;
+}
+.alze-breathe > img {
+  transform-origin: 50% 97%;
+  animation: alze-breathe 4.6s ease-in-out infinite;
+}
+.alze-float > img {
+  animation: alze-float 6s ease-in-out infinite;
+}
+.alze-mascot:hover {
+  animation: alze-wiggle 0.7s ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .alze-breathe > img,
+  .alze-float > img,
+  .alze-mascot:hover {
+    animation: none !important;
+  }
+}
+
+/* the hero's chat demo (components/brand/chat-demo.tsx) still draws the placeholder avatar: show her profile picture
+   there instead. Once ChatDemo renders the picture itself, `:has(> svg)` stops matching and this does nothing. */
+.alze-hero-phone .bg-paper:has(> svg) {
+  background: var(--alze-avatar) center / cover no-repeat;
+}
+.alze-hero-phone .bg-paper:has(> svg) > svg {
+  opacity: 0;
+}
+
+/* below-the-fold sections: the browser skips their style/layout/paint until they come near the viewport (they stay in
+   the accessibility tree and in find-in-page); `auto` remembers the real height once rendered, so anchors land right */
+.alze-defer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60rem;
+}
+
+/* a cropped phone (the vertical sequence on phones): the frame fades out at the bottom edge */
+.alze-crop {
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
