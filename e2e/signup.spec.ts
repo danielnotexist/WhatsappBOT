@@ -49,7 +49,18 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await expect(page).toHaveURL(/\/start\/code\?/);
     await expect(page.getByText(`שלחנו 6 ספרות ל-${email}`)).toBeVisible();
     await expect(page.getByText(/שליחה חוזרת בעוד 0:[0-5]\d/)).toBeVisible();
-    await expect(page.getByRole("link", { name: "שינוי מייל" })).toHaveAttribute("href", `/start/email?email=${encodeURIComponent(email)}`);
+    await expect(page.getByRole("link", { name: "שינוי מייל" })).toHaveAttribute("href", `/start/email?email=${encodeURIComponent(email)}&updates=1`);
+
+    // "שינוי מייל" → a fresh email card with the address and the opt-in kept, its button awake; then on again
+    // (a code was sent less than a minute ago, so the card goes straight back with the cooldown)
+    await page.getByRole("link", { name: "שינוי מייל" }).click();
+    await expect(page).toHaveURL(/\/start\/email\?email=/);
+    await expect(page.getByLabel("כתובת מייל")).toHaveValue(email);
+    await expect(page.getByRole("switch", { name: "עדכונים וטיפים" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("button", { name: "שליחת קוד" })).toBeEnabled();
+    await page.getByRole("button", { name: "שליחת קוד" }).click();
+    await expect(page).toHaveURL(/\/start\/code\?.*updates=1/);
+    await expect(page.getByText(`שלחנו 6 ספרות ל-${email}`)).toBeVisible();
     const code = await readCode(ctx.request, email);
     await enterCode(page, code === "000000" ? "111111" : "000000");
     await expect(page.getByRole("alert").filter({ hasText: "הקוד לא נכון" })).toBeVisible();

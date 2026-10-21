@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { palette } from "@/lib/design/tokens";
+import { useHydrated } from "@/lib/hooks/use-hydrated";
 
 /**
  * One burst of confetti when mounted (/start/ready). canvas-confetti is loaded on demand, draws on our own
- * canvas (no worker → no blob: URL for the CSP), and does nothing under prefers-reduced-motion.
+ * canvas (no worker → no blob: URL for the CSP), and does nothing under prefers-reduced-motion. The canvas covers the
+ * viewport from <body> (a portal, client-only), so no ancestor — a step sliding in with a transform — can box it in.
  */
 export function Confetti({ delayMs = 250 }: { delayMs?: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hydrated = useHydrated();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -32,7 +36,8 @@ export function Confetti({ delayMs = 250 }: { delayMs?: number }) {
       window.clearTimeout(timer);
       reset?.();
     };
-  }, [delayMs]);
+  }, [delayMs, hydrated]);
 
-  return <canvas ref={canvasRef} aria-hidden="true" data-testid="confetti" className="pointer-events-none fixed inset-0 z-50 size-full" />;
+  if (!hydrated) return null;
+  return createPortal(<canvas ref={canvasRef} aria-hidden="true" data-testid="confetti" className="pointer-events-none fixed inset-0 z-50 size-full" />, document.body);
 }

@@ -38,7 +38,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
             <b className="font-semibold text-honey">טיוטה.</b> המסמך עדיין בבדיקה משפטית ואינו בתוקף. הנוסח הסופי יפורסם כאן לפני ההשקה.
           </p>
         </div>
-        <article className="mt-8 max-w-[68ch] text-[1.0625rem] leading-[1.8] [&_h1]:leading-[1.12] [&_h2]:leading-[1.2] [&_h3]:leading-[1.3] [&_li]:ps-1">
+        <article className="mt-8 max-w-[68ch] text-[1.0625rem] break-words leading-[1.8] [&_h1]:leading-[1.12] [&_h2]:leading-[1.2] [&_h3]:leading-[1.3] [&_li]:ps-1">
           {children}
         </article>
       </main>

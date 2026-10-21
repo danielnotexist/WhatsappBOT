@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import type { Route } from "next";
-import { useRouter } from "next/navigation";
-import { useId, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useId, useLayoutEffect, useState, type FormEvent } from "react";
 import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
 import { cn } from "@/lib/utils";
@@ -18,29 +18,60 @@ export function looksLikeEmail(s: string): boolean {
 
 export type AuthMode = "signup" | "login";
 
-/** "where to go next" for each mode — keeps the URLs in one place */
+/** "where to go next" for each mode — keeps the URLs in one place (`next`: where a code usually leads) */
 export const authPaths = {
-  signup: { email: "/start/email", code: "/start/code" },
-  login: { email: "/login/email", code: "/login/code" },
-} as const satisfies Record<AuthMode, { email: Route; code: Route }>;
+  signup: { email: "/start/email", code: "/start/code", next: "/start/connect" },
+  login: { email: "/login/email", code: "/login/code", next: "/account" },
+} as const satisfies Record<AuthMode, { email: Route; code: Route; next: Route }>;
 
 /** Shared look of the text fields on the paper: a calm border that turns ink with a soft halo on focus. */
 export const fieldClass =
   "h-14 w-full rounded-field border-2 border-input bg-white/50 text-[1.125rem] text-foreground transition-[border-color,background-color,box-shadow] duration-150 placeholder:text-muted-foreground/65 hover:bg-white/65 focus-visible:border-foreground focus-visible:bg-white/80 focus-visible:shadow-[0_0_0_4px_rgb(19_36_28/0.16)] focus-visible:outline-none aria-invalid:border-destructive";
 
 /**
+ * The email card of a static page: `?email=` / `?updates=` (from "שינוי מייל") are read here, on the client, so a
+ * client-side navigation draws the card at once (no server round-trip, no empty card). Keyed by the router's
+ * bfcacheId, so a link back to this step starts it fresh (and with its entrance) instead of revealing the old,
+ * submitted form.
+ */
+export function EmailStepFromUrl({ mode = "signup" }: { mode?: AuthMode }) {
+  const params = useSearchParams();
+  const { bfcacheId } = useRouter();
+  return <EmailStep key={bfcacheId} mode={mode} initialEmail={params.get("email") ?? ""} initialUpdates={mode === "signup" && params.get("updates") === "1"} />;
+}
+
+/**
  * Step 2 (round plan §3): the email card. The send button stays disabled until the address looks valid; the
  * "updates and tips" toggle is OFF by default (anti-spam law) and travels to the code step in the URL.
  */
-export function EmailStep({ mode = "signup", initialEmail = "" }: { mode?: AuthMode; initialEmail?: string }) {
+export function EmailStep({
+  mode = "signup",
+  initialEmail = "",
+  initialUpdates = false,
+  autoFocus = true,
+}: {
+  mode?: AuthMode;
+  initialEmail?: string;
+  initialUpdates?: boolean;
+  /** false on a page's static fallback, so the browser focuses the field of the card that replaces it */
+  autoFocus?: boolean;
+}) {
   const router = useRouter();
   const inputId = useId();
   const errorId = useId();
   const [email, setEmail] = useState(initialEmail);
-  const [updates, setUpdates] = useState(false);
+  const [updates, setUpdates] = useState(initialUpdates);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const valid = looksLikeEmail(email);
+
+  // the code card is the next screen: load it while the address is being finished, so it can open at once
+  useEffect(() => {
+    if (valid) router.prefetch(authPaths[mode].code);
+  }, [valid, mode, router]);
+
+  // the router keeps this step (hidden) after "שליחת קוד"; coming back to it, the button must be awake again
+  useLayoutEffect(() => () => setBusy(false), []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -91,7 +122,7 @@ export function EmailStep({ mode = "signup", initialEmail = "" }: { mode?: AuthM
               autoComplete="email"
               autoCapitalize="none"
               spellCheck={false}
-              autoFocus
+              autoFocus={autoFocus}
               required
               maxLength={254}
               placeholder="name@company.co.il"

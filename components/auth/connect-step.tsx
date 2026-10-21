@@ -67,12 +67,30 @@ export function adminMailto(adminLink: string): string {
   return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
+/** Why the last connection failed (the OAuth callback's `?error=`), and the IT-admin mail when the organisation needs one. */
+export function ConnectError({ error, adminLink }: { error: string; adminLink?: string | null }) {
+  return (
+    <div role="alert" className="mb-6 rounded-2xl border-2 border-destructive/40 bg-white/40 p-4 text-[0.9375rem] leading-snug">
+      <p className="font-semibold text-destructive">{error}</p>
+      {adminLink ? (
+        <p className="mt-2">
+          <a href={adminMailto(adminLink)} className="font-semibold underline underline-offset-3">
+            שליחה למנהל ה-IT
+          </a>
+          : מייל מוכן עם קישור לאישור. אחרי האישור מתחברים שוב מכאן.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Step 4 (round plan §3): give עלזה her first superpower. Microsoft first (primary), Gmail second, skip.
  * After a failed Microsoft round-trip the callback brings the user back here with the reason; when the
- * organisation needs an admin, a "send to the IT admin" mail link appears.
+ * organisation needs an admin, a "send to the IT admin" mail link appears. `notice` takes the request-time part
+ * (the page streams the session check and the error there), so the card itself is static and never redrawn.
  */
-export function ConnectStep({ error, adminLink }: { error?: string; adminLink?: string | null }) {
+export function ConnectStep({ error, adminLink, notice }: { error?: string; adminLink?: string | null; notice?: ReactNode }) {
   return (
     <>
       <StepAside>
@@ -93,19 +111,8 @@ export function ConnectStep({ error, adminLink }: { error?: string; adminLink?: 
       </StepAside>
 
       <StepBody>
-        {error ? (
-          <div role="alert" className="mb-6 rounded-2xl border-2 border-destructive/40 bg-white/40 p-4 text-[0.9375rem] leading-snug">
-            <p className="font-semibold text-destructive">{error}</p>
-            {adminLink ? (
-              <p className="mt-2">
-                <a href={adminMailto(adminLink)} className="font-semibold underline underline-offset-3">
-                  שליחה למנהל ה-IT
-                </a>
-                : מייל מוכן עם קישור לאישור. אחרי האישור מתחברים שוב מכאן.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        {error ? <ConnectError error={error} adminLink={adminLink} /> : null}
+        {notice}
 
         <div className="flex flex-col gap-3">
           {/* official logos on a white chip, on the start side of the label (Microsoft / Google sign-in branding) */}

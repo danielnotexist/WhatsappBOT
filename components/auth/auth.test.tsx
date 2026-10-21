@@ -1,15 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CodeStep, digitsOnly, formatCountdown } from "./code-step";
+import { CodeStep, CodeStepFromUrl, digitsOnly, formatCountdown, waitFromParam } from "./code-step";
 import { ConnectStep, adminMailto } from "./connect-step";
-import { EmailStep, looksLikeEmail } from "./email-step";
+import { EmailStep, EmailStepFromUrl, looksLikeEmail } from "./email-step";
 import { deckForPath, toneForPath } from "./signup-shell";
 import { Toggle } from "./toggle";
 
 const push = vi.fn();
 const replace = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push, replace }), usePathname: () => "/start/email" }));
+const prefetch = vi.fn();
+let search = new URLSearchParams();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push, replace, prefetch, bfcacheId: "_b_1_" }),
+  usePathname: () => "/start/email",
+  useSearchParams: () => search,
+}));
 
 function mockFetch(handler: (url: string, body: Record<string, unknown>) => unknown) {
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -27,6 +33,8 @@ beforeEach(() => {
   document.elementFromPoint = () => null;
   push.mockClear();
   replace.mockClear();
+  prefetch.mockClear();
+  search = new URLSearchParams();
 });
 afterEach(() => {
   cleanup();
@@ -44,6 +52,11 @@ describe("helpers", () => {
     expect(formatCountdown(0.2)).toBe("0:01");
     expect(digitsOnly("הקוד שלך: 123 456")).toBe("123456");
     expect(digitsOnly("1234567")).toBe("123456");
+    expect(waitFromParam(null)).toBe(60);
+    expect(waitFromParam("42")).toBe(42);
+    expect(waitFromParam("900")).toBe(60);
+    expect(waitFromParam("-5")).toBe(0);
+    expect(waitFromParam("x")).toBe(0);
   });
 
   it("maps routes to card tones (cream → pink → sage → night)", () => {
@@ -102,6 +115,21 @@ describe("EmailStep", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("יותר מדי קודים לכתובת הזו.");
     expect(push).not.toHaveBeenCalled();
   });
+
+  it("loads the code card ahead once the address looks valid", () => {
+    render(<EmailStep mode="login" />);
+    expect(prefetch).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("כתובת מייל"), { target: { value: "dana@levi-law.co.il" } });
+    expect(prefetch).toHaveBeenCalledWith("/login/code");
+  });
+
+  it("reads ?email= and the opt-in from the URL on the client (\"שינוי מייל\")", () => {
+    search = new URLSearchParams({ email: "dana@levi-law.co.il", updates: "1" });
+    render(<EmailStepFromUrl />);
+    expect(screen.getByLabelText("כתובת מייל")).toHaveValue("dana@levi-law.co.il");
+    expect(screen.getByRole("switch", { name: "עדכונים וטיפים" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("button", { name: "שליחת קוד" })).toBeEnabled();
+  });
 });
 
 describe("CodeStep", () => {
@@ -136,6 +164,29 @@ describe("CodeStep", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "קוד בן 6 ספרות" }), { target: { value: "000000" } });
     });
     await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("הקוד לא נכון. נשארו 3 ניסיונות."));
+  });
+
+  it("reads email / opt-in / cooldown from the URL on the client and loads the next screen ahead", async () => {
+    search = new URLSearchParams({ email: "dana@levi-law.co.il", updates: "1", wait: "7" });
+    const fetchMock = mockFetch(() => ({ ok: true, isNewUser: true, next: "/start/connect" }));
+    render(<CodeStepFromUrl demoNote={<p role="note">הערה</p>} />);
+    expect(screen.getByText("dana@levi-law.co.il")).toBeInTheDocument();
+    expect(screen.getByText("0:07")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("הערה");
+    expect(screen.getByRole("link", { name: "שינוי מייל" })).toHaveAttribute("href", "/start/email?email=dana%40levi-law.co.il&updates=1");
+    expect(prefetch).toHaveBeenCalledWith("/start/connect");
+    expect(replace).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.change(screen.getByRole("textbox", { name: "קוד בן 6 ספרות" }), { target: { value: "123456" } });
+    });
+    await vi.waitFor(() => expect(replace).toHaveBeenCalledWith("/start/connect"));
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1]!.body))).toEqual({ email: "dana@levi-law.co.il", code: "123456", updates: true });
+  });
+
+  it("goes back to the email card when the URL has no email (login mode → /login/email, next /account)", () => {
+    render(<CodeStepFromUrl mode="login" />);
+    expect(replace).toHaveBeenCalledWith("/login/email");
+    expect(prefetch).toHaveBeenCalledWith("/account");
   });
 });
 

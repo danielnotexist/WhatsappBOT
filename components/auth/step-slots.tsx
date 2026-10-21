@@ -1,22 +1,49 @@
 "use client";
 
 import { motion, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Mascot, type MascotPoseName } from "@/components/brand/mascot";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { cn } from "@/lib/utils";
+import { ENTRANCE_DURATION, ENTRANCE_EASE, ENTRANCE_RISE, entranceGuard } from "./entrance";
 
-const EASE = [0.22, 1, 0.36, 1] as const;
-
-/** Enter softly on client-side navigation only — the server HTML is visible at once, with or without JS. */
-function useEntrance(delay: number) {
+/**
+ * Enter softly on client-side navigation only — the server HTML is visible at once, with or without JS. Once per
+ * screen (./entrance.ts): a Suspense fallback that gives way to the streamed step does not start the entrance over,
+ * and a step the router shows again after another one (back/forward) enters like any step change.
+ */
+function useEntrance(slot: "aside" | "body", delay: number) {
   const reduce = useReducedMotion();
   const hydrated = useHydrated();
+  const pathname = usePathname() ?? "";
   const on = hydrated && !reduce;
+  // decided once, when the slot mounts (motion reads `initial` only then)
+  const [{ screen, plan }] = useState(() => ({ screen: pathname, plan: entranceGuard.plan(slot, pathname, delay, performance.now(), on) }));
+  const ref = useRef<HTMLDivElement>(null);
+  const shown = useRef(false);
+
+  useLayoutEffect(() => {
+    const { visit, replay } = entranceGuard.enter(slot, screen, plan, performance.now(), shown.current);
+    shown.current = true;
+    const el = ref.current;
+    if (replay && on && typeof el?.animate === "function") {
+      // the same entrance as a fresh step, applied before the first paint (Web Animations start synchronously)
+      el.animate([{ opacity: 0, transform: `translateY(${ENTRANCE_RISE}px)` }, { opacity: 1, transform: "none" }], {
+        duration: ENTRANCE_DURATION * 1000,
+        delay: delay * 1000,
+        easing: `cubic-bezier(${ENTRANCE_EASE.join(", ")})`,
+        fill: "backwards",
+      });
+    }
+    return () => entranceGuard.leave(visit);
+  }, [slot, screen, plan, delay, on]);
+
   return {
-    initial: on ? { opacity: 0, y: 10 } : false,
+    ref,
+    initial: plan.delay === null ? false : { opacity: 0, y: ENTRANCE_RISE },
     animate: { opacity: 1, y: 0 },
-    transition: { duration: on ? 0.42 : 0, delay: on ? delay : 0, ease: EASE },
+    transition: { duration: plan.delay === null ? 0 : ENTRANCE_DURATION, delay: plan.delay ?? 0, ease: ENTRANCE_EASE },
   } as const;
 }
 
@@ -25,7 +52,7 @@ function useEntrance(delay: number) {
  * on wide screens it leaves the paper for the dark stage, so the stage tokens come back (cream type, honey focus).
  */
 export function StepAside({ children, className }: { children: ReactNode; className?: string }) {
-  const entrance = useEntrance(0.1);
+  const entrance = useEntrance("aside", 0.1);
   return (
     <motion.div
       data-slot="step-aside"
@@ -54,7 +81,7 @@ export function StepMascot({ pose }: { pose: MascotPoseName }) {
 
 /** The answer side of a step: the fields and the actions. Always on the paper. */
 export function StepBody({ children, className }: { children: ReactNode; className?: string }) {
-  const entrance = useEntrance(0.16);
+  const entrance = useEntrance("body", 0.16);
   return (
     <motion.div
       data-slot="step-body"

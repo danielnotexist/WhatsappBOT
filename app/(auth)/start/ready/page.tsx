@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { ReadyStep } from "@/components/auth/ready-step";
+import { ReadyLink, ReadyLinkPending, ReadyStep } from "@/components/auth/ready-step";
 import { getSession } from "@/lib/auth/current-user";
 import { issueLinkToken, waMeUrl } from "@/lib/auth/link-token";
 import { getDb } from "@/lib/db";
@@ -11,12 +11,20 @@ import { switchEmailAction } from "../actions";
 
 export const metadata: Metadata = { title: "העוזרת שלך מוכנה" };
 
-/** Step 6: confetti + the wa.me link with a one-time token (and a QR on desktop). */
+/**
+ * Step 6: the step is static and drawn at once; the wa.me link with its one-time token (and the QR, the confetti) is
+ * made per request and streams into it, with the same block as a placeholder until then.
+ */
 export default function StartReadyPage(props: PageProps<"/start/ready">) {
   return (
-    <Suspense fallback={null}>
-      <Ready searchParams={props.searchParams} />
-    </Suspense>
+    <ReadyStep
+      signOutAction={switchEmailAction}
+      link={
+        <Suspense fallback={<ReadyLinkPending />}>
+          <Ready searchParams={props.searchParams} />
+        </Suspense>
+      }
+    />
   );
 }
 
@@ -25,12 +33,5 @@ async function Ready({ searchParams }: { searchParams: PageProps<"/start/ready">
   const session = await getSession();
   if (!session) redirect("/start/email");
   const [token, sp] = await Promise.all([issueLinkToken(getDb(), session.userId), searchParams]);
-  return (
-    <ReadyStep
-      waHref={waMeUrl(publicWaNumber(), token.token)}
-      token={token.token}
-      connected={typeof sp.connected === "string" ? sp.connected : null}
-      signOutAction={switchEmailAction}
-    />
-  );
+  return <ReadyLink waHref={waMeUrl(publicWaNumber(), token.token)} token={token.token} connected={typeof sp.connected === "string" ? sp.connected : null} />;
 }

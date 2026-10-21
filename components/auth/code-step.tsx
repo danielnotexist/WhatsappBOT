@@ -5,7 +5,7 @@ import { useAnimate, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { Route } from "next";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
@@ -55,11 +55,58 @@ function Slot({ slot, invalid }: { slot: SlotProps; invalid: boolean }) {
   );
 }
 
+/** `?wait=` from the email card (a code was sent less than a minute ago): 0…RESEND_SECONDS; missing → a full minute. */
+export function waitFromParam(value: string | null): number {
+  return value === null ? RESEND_SECONDS : Math.min(RESEND_SECONDS, Math.max(0, Number(value) || 0));
+}
+
+/**
+ * The code card of a static page: email / opt-in / cooldown come in the URL from the email card and are read here,
+ * on the client, so the card is drawn at once on a client-side navigation (no server round-trip, no empty card).
+ * Without an email there is nothing to verify → back to the email card. Keyed by the router's bfcacheId: a new visit
+ * starts fresh (new countdown, empty cells) instead of revealing the previous one.
+ */
+export function CodeStepFromUrl({ mode = "signup", demoNote }: { mode?: AuthMode; demoNote?: ReactNode }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const email = params.get("email") ?? "";
+
+  useEffect(() => {
+    if (!email) router.replace(authPaths[mode].email);
+  }, [email, mode, router]);
+
+  return (
+    <CodeStep
+      key={router.bfcacheId}
+      mode={mode}
+      email={email}
+      updates={mode === "signup" && params.get("updates") === "1"}
+      initialWait={waitFromParam(params.get("wait"))}
+      demoNote={demoNote}
+    />
+  );
+}
+
 /**
  * Step 3 (round plan §3): six cells in two groups of three (input-otp — paste, auto-advance, one-time-code autofill),
  * auto-submit on the sixth digit, a 60-second resend countdown and "change email". Talks to /api/auth/otp/{send,verify}.
  */
-export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS, mode = "signup", demoNote }: { email: string; updates?: boolean; initialWait?: number; mode?: AuthMode; demoNote?: ReactNode }) {
+export function CodeStep({
+  email,
+  updates = false,
+  initialWait = RESEND_SECONDS,
+  mode = "signup",
+  demoNote,
+  autoFocus = true,
+}: {
+  email: string;
+  updates?: boolean;
+  initialWait?: number;
+  mode?: AuthMode;
+  demoNote?: ReactNode;
+  /** false on a page's static fallback, so the browser focuses the cells of the card that replaces it */
+  autoFocus?: boolean;
+}) {
   const router = useRouter();
   const reduce = useReducedMotion();
   const labelId = useId();
@@ -68,11 +115,17 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [deadline, setDeadline] = useState(() => Date.now() + Math.max(0, initialWait) * 1000);
-  const [now, setNow] = useState(() => Date.now());
+  // the countdown runs from when the card is shown in a browser; a prerendered (static) card shows the full wait
+  const [deadline, setDeadline] = useState<number | null>(() => (typeof window === "undefined" ? null : Date.now() + Math.max(0, initialWait) * 1000));
+  const [now, setNow] = useState(() => (typeof window === "undefined" ? 0 : Date.now()));
   const inputRef = useRef<HTMLInputElement>(null);
   const [cells, animateCells] = useAnimate<HTMLDivElement>();
-  const remaining = Math.max(0, (deadline - now) / 1000);
+  const remaining = deadline === null ? Math.max(0, initialWait) : Math.max(0, (deadline - now) / 1000);
+
+  // the screen after a good code: load it now, so it opens at once
+  useEffect(() => {
+    router.prefetch(authPaths[mode].next);
+  }, [mode, router]);
 
   useEffect(() => {
     if (remaining <= 0) return;
@@ -130,7 +183,8 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
     }
   }
 
-  const changeHref = `${authPaths[mode].email}?email=${encodeURIComponent(email)}` as Route;
+  // back to the email card with the address, and the opt-in the user chose there
+  const changeHref = `${authPaths[mode].email}?email=${encodeURIComponent(email)}${updates ? "&updates=1" : ""}` as Route;
   const invalid = Boolean(error) && code.length === 0;
 
   return (
@@ -175,7 +229,7 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
               pasteTransformer={digitsOnly}
               inputMode="numeric"
               autoComplete="one-time-code"
-              autoFocus
+              autoFocus={autoFocus}
               disabled={busy}
               aria-labelledby={labelId}
               aria-invalid={error ? true : undefined}
