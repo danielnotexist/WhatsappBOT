@@ -241,6 +241,21 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm e2e        # מריץ next dev במצב memory על פורט 3100 עם Chromium מ-/opt/pw-browsers
 ```
 
+### 2026-10-21 — סבב "עלזה" 4: נקודת ביקורת — צילומי ההרשמה
+
+**מה נעשה**
+- **צילומי מסך** (כהה) של כל שלבי ההרשמה ב-375×812 וב-1280×800: `design/signup-screens/{start,email,code,connect,connect-microsoft,ready,login}-{375,1280}.png`, ובנייד גם `*-375-full.png` לדפים שנגללים (start, ready).
+- **בדיקה אוטומטית** (`e2e/screens.spec.ts`, חלק מ-`pnpm e2e`): בכל מסך ובשני הגדלים — אין גלילה אופקית, ו-**axe-core 4.14: 0 ממצאים serious/critical** (WCAG 2.0/2.1/2.2 A+AA + best-practice).
+- תוקן בדרך: ניגודיות שעות ההודעה על בועה ירוקה (`--wa-meta-out`, נבדק ב-AA יחד עם צבעי הוואטסאפ במוקאפ), `role="group"` לבועה קולית עם תווית, אזור השיחה הנגלל נגיש במקלדת, הטלפון בדף "מוכנה" במחשב, ה-CTA הנעוץ בנייד כולל את "כבר יש לך חשבון? כניסה", ריווח בכרטיס הקוד, `PROVIDERS` הועבר למודול משותף (בשרת היה client reference ולכן `/connect/*` החזיר 404).
+
+**איך בודקים / מצלמים מחדש**
+```bash
+pnpm e2e                                              # כולל overflow + axe
+CAPTURE_SCREENS=1 pnpm e2e e2e/screens.spec.ts        # כותב את הצילומים ל-design/signup-screens/
+```
+
+**דרוש מדניאל:** לעבור על הצילומים ולאשר את הכיוון לפני ליטוש דף הנחיתה, הכניסה והאזור האישי (שלב 5 בתוכנית הסבב).
+
 ## מה נשאר (אבני דרך 5–7)
 - אבן דרך 5: תבניות Meta (רישום 7 התבניות), סיכום בוקר ותזכורות (jobs + `/api/jobs/run`), תמלול Soniox להקלטות, טיפול ב-change notifications (מייל חדש → מידע לסיכום).
 - אבן דרך 6: Google (Calendar + drive.file + gmail.send; CASA לקריאת Gmail).

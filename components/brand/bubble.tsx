@@ -26,17 +26,20 @@ export function Bubble({
 }) {
   return (
     <div
+      role={label ? "group" : undefined}
       aria-label={label}
       className={cn(
         "relative max-w-[86%] rounded-xl px-2.5 pt-1.5 pb-5 text-[0.875rem] leading-[1.45] break-words whitespace-pre-line shadow-[0_1px_0.5px_rgb(0_0_0/0.25)]",
-        side === "in" ? "self-start rounded-ss-[3px] bg-[var(--wa-in)]" : "self-end rounded-se-[3px] bg-[var(--wa-out)]",
+        side === "in"
+          ? "self-start rounded-ss-[3px] bg-[var(--wa-in)] [--wa-meta:var(--wa-meta-in)]"
+          : "self-end rounded-se-[3px] bg-[var(--wa-out)] [--wa-meta:var(--wa-meta-out)]",
         reaction && "mb-3",
         className,
       )}
     >
       {children}
       {time ? (
-        <span className="absolute end-2 bottom-1 inline-flex items-center gap-1 text-[0.6875rem] text-[var(--wa-time)] tabular">
+        <span className="absolute end-2 bottom-1 inline-flex items-center gap-1 text-[0.6875rem] text-[var(--wa-meta)] tabular">
           {time}
           {side === "out" ? (
             <span aria-hidden="true" className="text-[var(--wa-link)]">

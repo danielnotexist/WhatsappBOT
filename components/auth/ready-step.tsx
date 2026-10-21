@@ -11,7 +11,7 @@ import { StepHeading } from "./step-heading";
 export const READY_SCRIPT: ChatStep[] = [
   { kind: "chip", text: "היום" },
   { kind: "voice", duration: "0:34", time: "08:12", react: true },
-  { kind: "typing", ms: 1300, wait: 300 },
+  { kind: "typing", ms: 900, wait: 200 },
   {
     kind: "in",
     time: "08:13",
@@ -35,7 +35,7 @@ export async function ReadyStep({
   signOutAction: () => Promise<void>;
 }) {
   return (
-    <div className="grid flex-1 gap-10 lg:grid-cols-[1fr_auto] lg:gap-14">
+    <div className="grid flex-1 gap-10 lg:grid-cols-[minmax(0,1fr)_17.5rem] lg:gap-14">
       <Confetti />
       <div className="flex flex-col">
         <StepHeading tag="נכנסת." title="העוזרת שלך " light="מוכנה" after="." onDark size="hero" />
@@ -77,7 +77,7 @@ export async function ReadyStep({
       </div>
 
       <div className="flex justify-center lg:items-center">
-        <PhoneMockup label={`דוגמה לשיחה עם ${BRAND.name} בוואטסאפ`} className="w-[min(100%,17.5rem)]">
+        <PhoneMockup label={`דוגמה לשיחה עם ${BRAND.name} בוואטסאפ`} className="w-[17.5rem] max-w-full">
           <ChatDemo script={READY_SCRIPT} loop={false} replayable={false} />
         </PhoneMockup>
       </div>

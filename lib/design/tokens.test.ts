@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { cardTones, contrastPairs, contrastRatio, cssVar, palette, type PaletteName } from "./tokens";
+import { cardTones, contrastPairs, contrastRatio, cssVar, palette, waMockup, type PaletteName } from "./tokens";
 
 const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
 
@@ -30,6 +30,13 @@ describe("design tokens (לילה ירוק)", () => {
     for (const name of Object.keys(palette) as PaletteName[]) {
       const m = css.match(new RegExp(`${cssVar(name)}:\\s*(#[0-9A-Fa-f]{6});`));
       expect(m?.[1]?.toUpperCase(), cssVar(name)).toBe(palette[name].toUpperCase());
+    }
+  });
+
+  it("the WhatsApp mockup colours in CSS match", () => {
+    const names: Record<keyof typeof waMockup, string> = { bg: "--wa-bg", in: "--wa-in", out: "--wa-out", fg: "--wa-fg", head: "--wa-head", link: "--wa-link", time: "--wa-time", chip: "--wa-chip", metaIn: "--wa-meta-in", metaOut: "--wa-meta-out" };
+    for (const [k, v] of Object.entries(names)) {
+      expect(css.match(new RegExp(`${v}:\\s*(#[0-9A-Fa-f]{6});`))?.[1]?.toUpperCase(), v).toBe(waMockup[k as keyof typeof waMockup]);
     }
   });
 

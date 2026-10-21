@@ -43,6 +43,20 @@ export const palette = {
 
 export type PaletteName = keyof typeof palette;
 
+/** WhatsApp (dark) colours inside the phone mockups — `--wa-*` in app/globals.css. */
+export const waMockup = {
+  bg: "#0B141A",
+  in: "#202C33",
+  out: "#005C4B",
+  fg: "#E9EDEF",
+  head: "#1F2C34",
+  link: "#53BDEB",
+  time: "#8696A0",
+  chip: "#182229",
+  metaIn: "#8696A0",
+  metaOut: "#BFD6CF",
+} as const;
+
 /** The card colour per signup step (round plan §2/§3). */
 export const cardTones = {
   email: { bg: palette.paper, fg: palette.ink, muted: palette.inkMuted, light: true },
@@ -103,6 +117,14 @@ export const contrastPairs: { label: string; fg: string; bg: string; min: number
     { label: `input border / focus ring on ${tone}`, fg: palette.inkMuted, bg: palette[tone], min: 3 },
     { label: `ink CTA label on ${tone}`, fg: palette.cream, bg: palette.ink, min: 4.5 },
   ]),
+  // WhatsApp mockups (bubbles, timestamps, buttons)
+  { label: "wa text on incoming", fg: waMockup.fg, bg: waMockup.in, min: 4.5 },
+  { label: "wa text on outgoing", fg: waMockup.fg, bg: waMockup.out, min: 4.5 },
+  { label: "wa time on incoming", fg: waMockup.metaIn, bg: waMockup.in, min: 4.5 },
+  { label: "wa time on outgoing", fg: waMockup.metaOut, bg: waMockup.out, min: 4.5 },
+  { label: "wa button label", fg: waMockup.link, bg: waMockup.in, min: 4.5 },
+  { label: "wa chip / status", fg: waMockup.time, bg: waMockup.chip, min: 4.5 },
+  { label: "wa header status", fg: waMockup.time, bg: waMockup.head, min: 4.5 },
   // the light transition screen (/connect/[provider])
   { label: "ink on cream", fg: palette.ink, bg: palette.cream, min: 4.5 },
   { label: "ink muted on cream", fg: palette.inkMuted, bg: palette.cream, min: 4.5 },

@@ -232,6 +232,9 @@ export function ChatDemo({
       <div
         ref={logRef}
         aria-live="off"
+        role="log"
+        aria-label="השיחה"
+        tabIndex={0}
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain px-2.5 py-3 [scrollbar-width:none] [&>*]:flex-none"
       >
         {list.map((m) => {

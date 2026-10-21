@@ -165,11 +165,11 @@ export function CodeStep({ email, updates = false, initialWait = RESEND_SECONDS,
       <p id={errorId} role="alert" aria-live="assertive" className="mt-3 min-h-6 text-[0.9375rem] font-semibold text-destructive">
         {error}
       </p>
-      <p role="status" className="min-h-6 text-[0.9375rem]">
+      <p role="status" className={cn("text-[0.9375rem]", notice ? "mb-1" : "sr-only")}>
         {notice}
       </p>
 
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.9375rem] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.9375rem] text-muted-foreground">
         <span>הקוד תקף 10 דקות</span>
         <span aria-hidden="true">·</span>
         {remaining > 0 ? (

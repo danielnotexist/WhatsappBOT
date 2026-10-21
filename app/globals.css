@@ -148,6 +148,9 @@
   --wa-head: #1F2C34;
   --wa-link: #53BDEB;
   --wa-time: #8696A0;
+  /* timestamps / meta inside a bubble: grey on incoming, light sage on the green outgoing bubble (AA on both) */
+  --wa-meta-in: #8696A0;
+  --wa-meta-out: #BFD6CF;
   --wa-chip: #182229;
   --wa-green: #00A884;
   --wa-red: #F15C6D;
