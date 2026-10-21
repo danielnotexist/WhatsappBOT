@@ -1,5 +1,6 @@
 import { connection } from "next/server";
-import { checkServerEnv } from "@/lib/env";
+import { isDemo } from "@/lib/demo";
+import { checkServerEnv, dataMode } from "@/lib/env";
 
 /**
  * GET /api/health — בדיקת חיות ל-Vercel/מוניטורינג.
@@ -9,6 +10,13 @@ export async function GET() {
   // מסמן ל-Next (Cache Components) שהתשובה תלויה בבקשה ולא ניתנת ל-prerender.
   await connection();
   const env = checkServerEnv();
+  // "demo-memory" / "demo-supabase" במצב הדגמה (lib/demo.ts) — בלי ערכים, רק המצב
+  let mode: string;
+  try {
+    mode = isDemo() ? `demo-${dataMode()}` : dataMode();
+  } catch {
+    mode = "misconfigured";
+  }
 
   return Response.json(
     {
@@ -17,8 +25,9 @@ export async function GET() {
       time: new Date().toISOString(),
       region: process.env.VERCEL_REGION ?? "local",
       commit: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+      mode,
       checks: {
-        env: env.ok ? "ok" : "incomplete",
+        env: env.ok ? "ok" : mode.startsWith("demo") ? "demo" : "incomplete",
       },
     },
     { headers: { "cache-control": "no-store" } },

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { demoHasSupabase, isDemo } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -81,17 +82,29 @@ export const serverSchema = z.object({
 
 /**
  * מצב נתונים: "supabase" (ברירת מחדל) או "memory" — שכבת נתונים בזיכרון + מיילר לקונסול, לפיתוח/בדיקות בלי Supabase ו-Resend.
- * לא מותר ב-production.
+ * לא מותר ב-production — חוץ ממצב הדגמה (`DEMO_MODE=1`, lib/demo.ts): שם Supabase אם הוגדר (SUPABASE_*), אחרת זיכרון,
+ * גם ב-production. DATA_MODE מפורש גובר גם בהדגמה.
  */
 export const dataModeSchema = z.enum(["supabase", "memory"]).default("supabase");
 export type DataMode = z.infer<typeof dataModeSchema>;
 
 export function dataMode(source: Record<string, string | undefined> = process.env): DataMode {
+  if (isDemo(source)) {
+    return dataModeSchema.parse(source.DATA_MODE?.trim() || (demoHasSupabase(source) ? "supabase" : "memory"));
+  }
   const mode = dataModeSchema.parse(source.DATA_MODE || undefined);
   if (mode === "memory" && source.NODE_ENV === "production") {
     throw new Error("DATA_MODE=memory אסור ב-production — הסירו את המשתנה או הגדירו supabase.");
   }
   return mode;
+}
+
+/**
+ * Outbound integrations (WhatsApp, AI, Microsoft, Google, HYP, mail, STT, queue) use their mocks: in DATA_MODE=memory
+ * (dev/tests) and always in DEMO_MODE=1 — also when the demo keeps its data in Supabase and whatever keys exist.
+ */
+export function integrationsMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return isDemo(source) || dataMode(source) === "memory";
 }
 
 /**

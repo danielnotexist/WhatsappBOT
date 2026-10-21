@@ -2,6 +2,7 @@
 
 import type { Route } from "next";
 import { redirect } from "next/navigation";
+import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
@@ -15,6 +16,7 @@ export async function startPaymentAction(formData: FormData): Promise<void> {
   const link = verifyPayLinkToken(token);
   if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent("הקישור לא בתוקף — אפשר לבקש קישור חדש בשיחה.")}` as Route);
   const ctx = getBillingContext();
+  await ensureDemoSessionUser();
   const user = await ctx.db.getUser(link.userId);
   if (!user) redirect("/start");
   let url: string;

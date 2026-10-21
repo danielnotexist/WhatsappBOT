@@ -1,4 +1,5 @@
 import "server-only";
+import { isDemo } from "@/lib/demo";
 import { globalSingleton, setGlobalSingleton } from "@/lib/global-singleton";
 import { LocalQueue } from "./local";
 import { QStashQueue } from "./qstash";
@@ -11,10 +12,11 @@ const NAME = "queue";
 /**
  * QStash when QSTASH_TOKEN is set (production); otherwise the in-process local fallback with a warning.
  * Production without QStash is a misconfiguration we surface loudly but do not block on — the webhook
- * must keep answering 200 to Meta.
+ * must keep answering 200 to Meta. DEMO_MODE=1 always uses the local queue (nothing leaves the process).
  */
 export function getQueue(): Queue {
   return globalSingleton<Queue>(NAME, () => {
+    if (isDemo()) return new LocalQueue();
     const token = process.env.QSTASH_TOKEN?.trim();
     if (token) return new QStashQueue(token);
     const level = process.env.NODE_ENV === "production" ? "error" : "warn";

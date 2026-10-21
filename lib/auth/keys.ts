@@ -1,16 +1,21 @@
 import { createHmac, hkdfSync, randomBytes } from "node:crypto";
 import { keyFromBase64 } from "@/lib/crypto";
+import { demoFlag } from "@/lib/demo";
 import { globalSingleton } from "@/lib/global-singleton";
 
 /**
  * Sub-keys derived from TOKEN_ENC_KEY with HKDF, so one secret in Vercel covers token encryption,
  * session signing and OTP hashing without three env vars. Different `info` → independent keys.
  */
-export type KeyPurpose = "session" | "otp" | "internal";
+export type KeyPurpose = "session" | "otp" | "internal" | "demo";
 
 function masterKey(): Buffer {
   const fromEnv = process.env.TOKEN_ENC_KEY;
   if (fromEnv) return keyFromBase64(fromEnv);
+  // The demo runs on several serverless instances: a per-process key would log everyone out on every hop.
+  if (demoFlag()) {
+    throw new Error("מצב ההדגמה (DEMO_MODE=1) דורש TOKEN_ENC_KEY קבוע, כדי שה-session יעבוד בכל השרתים. יצירה: openssl rand -base64 32");
+  }
   // Dev convenience only: DATA_MODE=memory may run without TOKEN_ENC_KEY (sessions die with the process).
   if (process.env.DATA_MODE === "memory" && process.env.NODE_ENV !== "production") {
     return globalSingleton("dev-master-key", () => {

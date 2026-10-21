@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { demoSessionClaims } from "@/lib/auth/demo-user";
 import { verifyOtpForRequest } from "@/lib/auth/otp-service";
 import { SESSION_COOKIE, createSessionToken, sessionCookieOptions } from "@/lib/auth/session";
 import { getDb } from "@/lib/db";
@@ -21,7 +22,8 @@ export async function POST(request: Request) {
       await getDb().mergeUserProfile(result.userId, { marketing_opt_in: { value: true, at: new Date().toISOString(), source: "signup_form" } });
     }
     const store = await cookies();
-    store.set(SESSION_COOKIE, createSessionToken(result.userId), sessionCookieOptions());
+    // demo on the memory store: the email rides in the session so any serverless instance can recreate the user
+    store.set(SESSION_COOKIE, createSessionToken(result.userId, demoSessionClaims(result.email)), sessionCookieOptions());
     return Response.json(
       { ok: true, isNewUser: result.isNewUser, next: result.isNewUser ? "/start/connect" : "/account" },
       { headers: { "cache-control": "no-store" } },

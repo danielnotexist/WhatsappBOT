@@ -20,7 +20,7 @@ export type OtpSendResult =
   | { ok: false; code: "invalid_email" | "cooldown" | "too_many" | "rate_limited" | "mail_failed"; message: string; retryAfterSeconds?: number };
 
 export type OtpVerifyResult =
-  | { ok: true; userId: string; isNewUser: boolean }
+  | { ok: true; userId: string; isNewUser: boolean; email: string }
   | { ok: false; code: "invalid_email" | "invalid_code" | "expired" | "no_code" | "too_many_attempts" | "rate_limited"; message: string; attemptsLeft?: number };
 
 export const OTP_MESSAGES = {
@@ -68,6 +68,12 @@ export interface OtpDeps {
   limiter: RateLimiter;
   now?: () => Date;
   otpKey?: Buffer;
+  /**
+   * DEMO_MODE only (lib/demo.ts DEMO_OTP_CODE): this code signs in any email, statelessly — nothing is stored or
+   * mailed, so it works on whichever serverless instance answers. The per-IP limits (and a per-email send limit in
+   * the limiter) still apply.
+   */
+  fixedCode?: string;
 }
 
 export async function sendOtp(deps: OtpDeps, rawEmail: unknown, ip: string): Promise<OtpSendResult> {
@@ -76,6 +82,12 @@ export async function sendOtp(deps: OtpDeps, rawEmail: unknown, ip: string): Pro
   if (!email) return { ok: false, code: "invalid_email", message: OTP_MESSAGES.invalid_email };
   if (!deps.limiter.hit(`otp:send:ip:${ip}`, OTP_POLICY.maxSendsPerIpPerHour, 3_600_000, now.getTime())) {
     return { ok: false, code: "rate_limited", message: OTP_MESSAGES.rate_limited, retryAfterSeconds: 600 };
+  }
+  if (deps.fixedCode) {
+    if (!deps.limiter.hit(`otp:send:email:${email}`, OTP_POLICY.maxPerHourPerEmail, 3_600_000, now.getTime())) {
+      return { ok: false, code: "too_many", message: OTP_MESSAGES.too_many, retryAfterSeconds: 3600 };
+    }
+    return { ok: true, cooldownSeconds: OTP_POLICY.resendCooldownMs / 1000 };
   }
 
   const latest = await deps.db.latestOtp(email);
@@ -113,6 +125,12 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
   if (!deps.limiter.hit(`otp:verify:ip:${ip}`, OTP_POLICY.maxVerifiesPerIpPerHour, 3_600_000, now.getTime())) {
     return { ok: false, code: "rate_limited", message: OTP_MESSAGES.rate_limited };
   }
+  if (deps.fixedCode) {
+    const a = Buffer.from(code);
+    const b = Buffer.from(deps.fixedCode);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, code: "invalid_code", message: OTP_MESSAGES.invalid_code };
+    return signIn(deps.db, email);
+  }
 
   const latest = await deps.db.latestOtp(email);
   if (!latest) return { ok: false, code: "no_code", message: OTP_MESSAGES.no_code };
@@ -134,14 +152,19 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
   }
 
   await deps.db.markOtpUsed(latest.id);
-  let user = await deps.db.findUserByEmail(email);
+  return signIn(deps.db, email);
+}
+
+/** The code checked out: the existing user (login) or a new one (signup), audited either way. */
+async function signIn(db: Db, email: string): Promise<OtpVerifyResult> {
+  let user = await db.findUserByEmail(email);
   let isNewUser = false;
   if (!user) {
-    user = await deps.db.createUser(email);
+    user = await db.createUser(email);
     isNewUser = true;
-    await deps.db.addAudit({ user_id: user.id, action: "signup", target: email, result: "ok" });
+    await db.addAudit({ user_id: user.id, action: "signup", target: email, result: "ok" });
   } else {
-    await deps.db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });
+    await db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });
   }
-  return { ok: true, userId: user.id, isNewUser };
+  return { ok: true, userId: user.id, isNewUser, email };
 }

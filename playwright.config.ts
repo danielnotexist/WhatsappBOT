@@ -12,6 +12,8 @@ const baseURL = `http://localhost:${E2E_PORT}`;
 
 export default defineConfig({
   testDir: "e2e",
+  // DEMO_MODE runs against a production build with its own servers: playwright.demo.config.ts (pnpm e2e:demo)
+  testIgnore: ["demo.spec.ts"],
   timeout: 120_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

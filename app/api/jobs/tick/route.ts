@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { getDb } from "@/lib/db";
+import { isDemo } from "@/lib/demo";
 import { dataMode } from "@/lib/env";
 import { dispatchDueJobs } from "@/lib/jobs/run";
 import { getQueue } from "@/lib/queue";
@@ -17,7 +18,8 @@ function safeEqual(a: string, b: string): boolean {
  * dev loop (no secret needed there; memory mode is refused in production by lib/env).
  */
 export async function POST(request: Request) {
-  const devMemory = dataMode() === "memory";
+  // the demo runs in production on a public URL: it keeps the secret check like the real thing
+  const devMemory = dataMode() === "memory" && !isDemo();
   if (!devMemory) {
     const given = request.headers.get(INTERNAL_SECRET_HEADER) ?? "";
     if (!given || !safeEqual(given, internalSecret())) return new Response("invalid internal secret", { status: 401 });

@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { DemoBar } from "@/components/demo/DemoBar";
 import { DirectionProvider } from "@/components/ui/direction";
 import { Toaster } from "@/components/ui/sonner";
 import { BRAND } from "@/lib/brand";
+import { isDemo } from "@/lib/demo";
 import { fontVariables } from "@/lib/fonts";
 import "./globals.css";
 
@@ -22,6 +24,8 @@ export const metadata: Metadata = {
     siteName: APP_NAME,
   },
   formatDetection: { telephone: false },
+  // מצב הדגמה: noindex כבר ב-<head> (נקבע ב-build; ב-Vercel אותם משתנים ל-build ול-runtime). בזמן ריצה — X-Robots-Tag ב-proxy.ts.
+  ...(isDemo() ? { robots: { index: false, follow: false } } : {}),
 };
 
 export const viewport: Viewport = {
@@ -42,6 +46,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         >
           דילוג לתוכן
         </a>
+        <DemoBar />
         <DirectionProvider direction="rtl">
           {children}
           <Toaster />

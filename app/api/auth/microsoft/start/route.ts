@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
-import { parseReturnTo } from "@/lib/auth/oauth-return";
 import { getSession } from "@/lib/auth/current-user";
+import { demoConnect } from "@/lib/auth/demo-connect";
+import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { getDb } from "@/lib/db";
+import { isDemo } from "@/lib/demo";
 import { EnvError } from "@/lib/env";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { getMsConfig } from "@/lib/ms";
@@ -13,6 +15,7 @@ import { buildAdminConsentUrl, buildAuthorizeUrl, pkcePair } from "@/lib/ms/oaut
  * Stores state + PKCE verifier on the user profile (works from any device), then redirects to Microsoft.
  * `admin=1` → tenant-wide admin consent URL instead (PLAN §8 #2).
  * `returnTo=onboarding` → the callback lands on /start/ready (signup) instead of /account (lib/auth/oauth-return.ts).
+ * DEMO_MODE=1 → no Microsoft at all: lib/auth/demo-connect.ts writes a fixture connection and we land right away.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -29,6 +32,14 @@ export async function GET(request: Request) {
   if (!userId) return Response.redirect(new URL("/start", process.env.APP_URL || url.origin).toString(), 303);
   const user = await db.getUser(userId);
   if (!user) return Response.redirect(new URL("/start", process.env.APP_URL || url.origin).toString(), 303);
+  // where the callback lands: back into the signup flow or the personal area (fixed paths only — no open redirect)
+  const returnTo = parseReturnTo(url.searchParams.get("returnTo"));
+
+  // DEMO_MODE: no Microsoft — a fixture connection through the data layer, then the same landing as the callback
+  if (isDemo()) {
+    const { notice } = await demoConnect(db, user, "microsoft");
+    return Response.redirect(oauthReturnUrl(process.env.APP_URL || url.origin, returnTo, "microsoft", { ok: true, notice }), 303);
+  }
 
   let cfg;
   try {
@@ -40,8 +51,6 @@ export async function GET(request: Request) {
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
   const admin = url.searchParams.get("admin") === "1";
-  // where the callback lands: back into the signup flow or the personal area (fixed paths only — no open redirect)
-  const returnTo = parseReturnTo(url.searchParams.get("returnTo"));
   const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
   await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, started_at: new Date().toISOString(), via: t ? "chat" : "web", returnTo } } });
   const dest = admin

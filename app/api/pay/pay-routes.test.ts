@@ -11,6 +11,9 @@ import { GET as mockGet } from "./mock/route";
 import { GET as returnGet } from "./return/route";
 import { POST as jobsPost } from "../jobs/run/route";
 
+// the mock payment page marks itself request-time with connection(), which needs a request scope outside Next
+vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
+
 describe("/api/pay/* and /api/jobs/run", () => {
   let db: MemoryDb;
   let hyp: MockHypGateway;
