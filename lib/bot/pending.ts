@@ -18,7 +18,7 @@ export function clearExecutorsForTests(): void {
 export async function presentPendingAction(ctx: BotContext, to: string, action: PendingActionRow): Promise<void> {
   const p = action.payload as Record<string, string>;
   if (action.kind === "send_mail") {
-    await ctx.wa.sendButtons(to, copy["act.mail.draft"]({ toName: p.to_name ?? "", toEmail: p.to_email ?? "", subject: p.subject ?? "", body: p.body ?? "" }), buttons.approve(action.id, "שלח"));
+    await ctx.wa.sendButtons(to, copy["act.mail.draft"]({ toName: p.to_name ?? "", toEmail: p.to_email ?? "", subject: p.subject ?? "", body: p.body ?? "", cc: p.cc || undefined, attachment: p.attachment_name || undefined }), buttons.approve(action.id, "שלח"));
   } else if (action.kind === "create_event") {
     await ctx.wa.sendButtons(
       to,

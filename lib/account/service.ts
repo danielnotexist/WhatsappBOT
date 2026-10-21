@@ -1,15 +1,20 @@
-import type { Db } from "@/lib/db/types";
+import type { ConnectionRow, Db } from "@/lib/db/types";
+import { revokeAtProvider } from "@/lib/google/revoke";
 
 /** Business logic of the personal area — framework-free so it is unit-testable with MemoryDb. */
 export type AccountActionResult = { ok: true; message: string } | { ok: false; message: string };
 
+/** Provider-side revoke before the local tokens are wiped (Google: oauth2 revoke; Microsoft: none per-app). */
+export type ProviderRevoker = (db: Db, connection: ConnectionRow) => Promise<unknown>;
+
 export const DELETE_CONFIRM_WORD = "מחיקה";
 
-export async function disconnectConnectionFor(db: Db, userId: string, connectionId: string): Promise<AccountActionResult> {
+export async function disconnectConnectionFor(db: Db, userId: string, connectionId: string, revoke: ProviderRevoker = revokeAtProvider): Promise<AccountActionResult> {
   if (!connectionId) return { ok: false, message: "לא נבחר חיבור." };
+  const owned = (await db.listConnections(userId)).find((c) => c.id === connectionId);
+  if (owned && owned.status !== "revoked") await revoke(db, owned);
   const row = await db.revokeConnection(userId, connectionId);
   if (!row) return { ok: false, message: "החיבור לא נמצא." };
-  // The provider-side revoke (Graph/Google token revocation) is added with the OAuth modules (Milestone 4/6).
   await db.addAudit({ user_id: userId, action: "connection.revoke", target: `${row.provider}:${row.account_email ?? ""}`, result: "ok" });
   return { ok: true, message: `החיבור ל-${row.provider === "microsoft" ? "Microsoft 365" : "Google"} נותק.` };
 }
@@ -32,14 +37,17 @@ export async function cancelSubscriptionFor(db: Db, userId: string): Promise<Acc
   return { ok: true, message: `המנוי בוטל ויישאר פעיל עד ${until}. לא יהיה חיוב נוסף.` };
 }
 
-export async function deleteAccountFor(db: Db, userId: string, confirmWord: string): Promise<AccountActionResult> {
+export async function deleteAccountFor(db: Db, userId: string, confirmWord: string, revoke: ProviderRevoker = revokeAtProvider): Promise<AccountActionResult> {
   if (confirmWord.trim() !== DELETE_CONFIRM_WORD) {
     return { ok: false, message: `כדי למחוק יש להקליד את המילה "${DELETE_CONFIRM_WORD}".` };
   }
   const user = await db.getUser(userId);
   if (!user) return { ok: false, message: "החשבון לא נמצא." };
   // Order matters: revoke what we can before the cascade removes the rows.
-  for (const c of await db.listConnections(userId)) if (c.status === "active") await db.revokeConnection(userId, c.id);
+  for (const c of await db.listConnections(userId)) {
+    if (c.status !== "revoked") await revoke(db, c);
+    if (c.status === "active") await db.revokeConnection(userId, c.id);
+  }
   const sub = await db.getSubscription(userId);
   if (sub && sub.status !== "cancelled") await db.cancelSubscription(userId);
   await db.addAudit({ user_id: null, action: "account.delete", target: user.email, result: "ok" });

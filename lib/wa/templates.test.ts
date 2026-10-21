@@ -31,7 +31,7 @@ describe("WhatsApp templates", () => {
     const docDefs = [...doc.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => JSON.parse(m[1]!) as { name?: string; category?: string; components?: { type: string; text?: string; buttons?: { type: string; text: string }[] }[] }).filter((d) => d.name);
     const ours = templateDefinitions("https://APP_DOMAIN");
     expect(ours.map((d) => d.name).sort()).toEqual(docDefs.map((d) => d.name!).sort());
-    const norm = (s: string | undefined) => (s ?? "").replaceAll("{{שם}}", "<name>").replaceAll(PRODUCT_NAME, "<name>");
+    const norm = (s: string | undefined) => (s ?? "").replaceAll(PRODUCT_NAME, "<name>");
     for (const d of docDefs) {
       const o = ours.find((x) => x.name === d.name)!;
       expect(o.category, d.name).toBe(d.category);

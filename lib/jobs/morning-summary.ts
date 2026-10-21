@@ -1,7 +1,8 @@
 /**
  * Morning summary (PLAN §11 milestone 5, bot-copy.md §4.5): at the user's `morning_time`, Sunday–Thursday,
  * today's meetings + emails awaiting a reply + today's reminders — free text inside the 24-hour window,
- * the `morning_summary` template outside it.
+ * the `morning_summary` template outside it. Meetings come from Microsoft 365 and/or Google Calendar (merged);
+ * emails only from Microsoft 365 (Gmail reading needs CASA — Milestone 6 phase 1 sends only).
  *
  * Scheduling: one `morning_summary` job per user per local day, dedupe key
  * `morning_summary:<user>:<YYYY-MM-DD>:<HHMM>` — created by SQL `schedule_morning_summaries()` (pg_cron,
@@ -10,6 +11,7 @@
  */
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
+import type { GoogleClient, GoogleEvent } from "@/lib/google/client";
 import type { GraphClient, GraphEvent, GraphMessage } from "@/lib/ms/graph";
 import { DEFAULT_TZ, addDays, clockHe, dateKey, dayLabelHe, localDateOf, parseClock, parseDateKey, weekdayOf, zonedParts, zonedToUtc, type LocalDate } from "@/lib/time/zoned";
 import { morningSummaryTemplate } from "@/lib/wa/templates";
@@ -23,6 +25,8 @@ const MAX_EMAILS = 5;
 export interface MorningDeps extends ProactiveDeps {
   /** Graph for the user's active Microsoft connection (null when not connected) */
   graphFor(user: UserRow): Promise<{ graph: GraphClient; accountEmail: string | null } | null>;
+  /** Google Calendar for the user's active Google connection (null / absent when not connected) */
+  googleFor?(user: UserRow): Promise<{ google: Pick<GoogleClient, "listEvents"> } | null>;
 }
 
 const tzOf = (user: UserRow) => user.timezone || DEFAULT_TZ;
@@ -131,7 +135,19 @@ async function sentSince(graph: GraphClient, since: Date): Promise<SentRef[]> {
   return (r?.value ?? []).map((v) => ({ conversationId: v.conversationId ?? null, sentDateTime: v.sentDateTime ?? "" }));
 }
 
-const meetingLine = (e: GraphEvent) => (e.isAllDay ? `• כל היום — ${e.subject || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.subject || "(ללא כותרת)"}`);
+/** One meeting of the day from either calendar; `start` is the local wall-clock date-time ("…T09:00…"). */
+interface DayEvent {
+  allDay: boolean;
+  start: string;
+  title: string;
+}
+const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject });
+const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary });
+/** Google: drop cancelled occurrences and invitations the user declined. */
+const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.attendees.some((a) => a.self && a.response === "declined");
+/** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
+const byStart = (a: DayEvent, b: DayEvent) => (a.allDay === b.allDay ? (a.allDay ? 0 : a.start.slice(11, 16).localeCompare(b.start.slice(11, 16))) : a.allDay ? -1 : 1);
+const meetingLine = (e: DayEvent) => (e.allDay ? `• כל היום — ${e.title || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.title || "(ללא כותרת)"}`);
 const emailLine = (m: GraphMessage) => `• ${m.from?.name || m.from?.address || "?"} — ${m.subject || "(ללא נושא)"}`;
 const capped = (lines: string[], max: number) => (lines.length > max ? [...lines.slice(0, max), `• ועוד ${lines.length - max}`] : lines);
 
@@ -141,7 +157,7 @@ export interface MorningSummary {
   emails: string[];
   reminders: string[];
   closer: string;
-  /** Graph was reachable (meetings / emails are real, not just missing) */
+  /** Graph or Google Calendar was reachable (meetings / emails are real, not just missing) */
   connected: boolean;
   empty: boolean;
 }
@@ -159,14 +175,13 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   const dayStart = zonedToUtc({ ...day, hour: 0, minute: 0 }, tz);
   const dayEnd = zonedToUtc({ ...addDays(day, 1), hour: 0, minute: 0 }, tz);
 
-  let meetings: string[] = [];
+  const dayEvents: DayEvent[] = [];
   let emails: string[] = [];
   let connected = false;
   const g = await deps.graphFor(user).catch(() => null);
   if (g) {
     try {
-      const events = await g.graph.calendarView(dayStart, dayEnd, tz);
-      meetings = capped(events.map(meetingLine), MAX_MEETINGS);
+      dayEvents.push(...(await g.graph.calendarView(dayStart, dayEnd, tz)).map(fromGraph));
       connected = true;
     } catch (e) {
       console.warn(`[morning] calendar failed for ${user.id}:`, (e as Error).message);
@@ -181,6 +196,17 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       console.warn(`[morning] mail failed for ${user.id}:`, (e as Error).message);
     }
   }
+  const google = deps.googleFor ? await deps.googleFor(user).catch(() => null) : null;
+  if (google) {
+    try {
+      dayEvents.push(...(await google.google.listEvents({ timeMin: dayStart, timeMax: dayEnd, timeZone: tz, maxResults: 50 })).filter(googleAttending).map(fromGoogle));
+      connected = true;
+    } catch (e) {
+      // invalid_grant already marked the connection expired (lib/google/token-store.ts); reconnect is prompted in chat
+      console.warn(`[morning] google calendar failed for ${user.id}:`, (e as Error).message);
+    }
+  }
+  const meetings = capped([...dayEvents].sort(byStart).map(meetingLine), MAX_MEETINGS);
 
   const due = await deps.db.listReminders(user.id, { statuses: ["scheduled"], dueFrom: dayStart, dueBefore: dayEnd, limit: 20 });
   const reminders = due.map((r) => {

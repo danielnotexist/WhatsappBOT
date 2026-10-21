@@ -24,10 +24,9 @@ export const LINK = {
   blockMs: 24 * 3_600_000,
 } as const;
 
-/** One-time 30-minute OAuth start link for the chat (Microsoft now; Google in Milestone 6 lands on /start/connect). */
+/** One-time 30-minute OAuth start link for the chat: /api/auth/{microsoft|google}/start?t=<signed token>. */
 export function connectLinkFor(ctx: BotContext, userId: string, provider: "microsoft" | "google"): string {
-  if (provider === "google") return new URL("/start/connect", ctx.appUrl).toString();
-  return new URL(`/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(userId, provider, { now: ctx.now() }))}`, ctx.appUrl).toString();
+  return new URL(`/api/auth/${provider}/start?t=${encodeURIComponent(createConnectLinkToken(userId, provider, { now: ctx.now() }))}`, ctx.appUrl).toString();
 }
 
 export function siteLink(ctx: BotContext, path: string): string {

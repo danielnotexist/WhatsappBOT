@@ -6,22 +6,30 @@ import { getWaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
 import { activeMicrosoftConnection, graphForConnection, graphForUser } from "@/lib/ms";
 import { graphExecutors, graphTools } from "@/lib/ms/tools";
+import { activeGoogleConnection, googleForConnection, googleForUser } from "@/lib/google";
+import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispatch";
+import { googleExecutors, googleTools } from "@/lib/google/tools";
 import type { BotContext } from "./context";
 import { registerExecutor } from "./pending";
 import { processInbound } from "./process-inbound";
 
 let executorsRegistered = false;
 
-/** Production entry: wires the process-wide singletons (and the Graph tools/executors) into the pure pipeline. */
+/** Production entry: wires the process-wide singletons (and the Graph/Google tools/executors) into the pure pipeline. */
 export async function handleInbound(message: InboundMessage): Promise<{ handled: boolean; note?: string }> {
   const db = getDb();
   if (!executorsRegistered) {
-    const ex = graphExecutors(async (userId) => {
+    const microsoft = graphExecutors(async (userId) => {
       const user = await db.getUser(userId);
       if (!user) return null;
       const g = await graphForUser(db, user);
       return g ? { graph: g.graph, timeZone: g.timeZone } : null;
     });
+    const google = googleExecutors(async (userId) => {
+      const user = await db.getUser(userId);
+      return user ? googleForUser(db, user) : null;
+    });
+    const ex = routeExecutorsByProvider({ microsoft, google }, (action) => providerForAction(db, action));
     for (const [kind, fn] of Object.entries(ex)) registerExecutor(kind as keyof typeof ex, fn);
     executorsRegistered = true;
   }
@@ -33,9 +41,12 @@ export async function handleInbound(message: InboundMessage): Promise<{ handled:
     appUrl: process.env.APP_URL || "http://localhost:3000",
     stt: getSttProvider,
     async extraTools(user, connections) {
-      const conn = activeMicrosoftConnection(connections);
-      if (!conn) return [];
-      return graphTools({ graph: async () => graphForConnection(db, conn), timeZone: user.timezone });
+      const ms = activeMicrosoftConnection(connections);
+      const g = activeGoogleConnection(connections);
+      return [
+        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone }) : []),
+        ...(g ? googleTools({ google: async () => googleForConnection(db, g), timeZone: user.timezone, scopes: g.scopes, accountEmail: g.account_email }) : []),
+      ];
     },
   };
   return processInbound(ctx, message);

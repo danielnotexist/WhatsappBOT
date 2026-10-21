@@ -7,12 +7,12 @@ import { copy } from "@/lib/copy/bot";
 import type { MessageType } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
-import type { BotContext } from "./context";
+import { connectLinkFor, type BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
 import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
 import { transcribeVoiceNote } from "./voice";
-import { connectLinkFor } from "./context";
+import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -46,7 +46,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });
   };
 
-  // 1b. voice notes (Milestone 5): "מקשיב…" → download → STT → transcript on the message → continue as text
+  // 1b. voice notes (Milestone 5): "מקשיבה…" → download → STT → transcript on the message → continue as text
   if (msg.type === "audio" && ctx.stt) {
     const voice = await transcribeVoiceNote(ctx, user.id, msg, stored.id);
     if (!voice.ok) return { handled: true, note: voice.note };
@@ -112,19 +112,20 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   // 6. explicit connect requests ("לחבר את המייל", "חבר שוב") — no model needed
   const freshUser = (await ctx.db.getUser(user.id)) ?? user;
   const connections = await ctx.db.listConnections(user.id);
-  if (/^(לחבר|חבר|תחבר|חיבור)\b.*(מייל|יומן|microsoft|outlook|365|שוב)|^חבר שוב$/i.test(text)) {
-    const expired = connections.find((c) => c.provider === "microsoft" && c.status === "expired");
-    const link = connectLinkFor(ctx, user.id, "microsoft");
-    await say(expired ? copy["err.connection_expired"]("Microsoft 365", link) : copy["onb.connect_link"]("Microsoft 365", link));
+  const connectProvider = connectRequestProvider(text, connections);
+  if (connectProvider) {
+    const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
+    const link = connectLinkFor(ctx, user.id, connectProvider);
+    await say(expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link));
     return { handled: true, note: "connect link" };
   }
-  const expiredMs = connections.find((c) => c.provider === "microsoft" && c.status === "expired");
-  if (expiredMs && !connections.some((c) => c.provider === "microsoft" && c.status === "active") && /מייל|יומן|פגיש|קובץ|מסמך|סיכום/.test(text)) {
-    await say(copy["err.connection_expired"]("Microsoft 365", connectLinkFor(ctx, user.id, "microsoft")));
+  const reconnect = reconnectProviderFor(text, connections);
+  if (reconnect) {
+    await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)));
     return { handled: true, note: "connection expired" };
   }
 
-  // 7. assistant (Graph tools when a Microsoft connection is active)
+  // 7. assistant (Graph / Google tools when a connection is active; reminder tools always)
   let reply: string;
   try {
     const out = await runAssistant({ db: ctx.db, ai: ctx.ai, user: freshUser, connections, text, now: ctx.now(), tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections) : [] });

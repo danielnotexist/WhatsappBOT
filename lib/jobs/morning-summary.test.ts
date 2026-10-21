@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
 import type { UserRow } from "@/lib/db/types";
+import { createGoogleFixture } from "@/lib/google/__fixtures__/google-fixtures";
+import { GoogleClient } from "@/lib/google/client";
 import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
@@ -103,6 +105,28 @@ describe("morning summary — the job", () => {
     await processInbound(withReminder.h.ctx, withReminder.h.inbound("תודה"));
     await runMorningSummaryJob(withReminder.deps, withReminder.job);
     expect(withReminder.h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\n\n*תזכורות*\n• 14:00 להתקשר לבנק\n\nשיהיה יום טוב.");
+  });
+
+  it("Google-only users get today's Google Calendar meetings (no email section: Gmail is send-only in phase 1)", async () => {
+    const { h, user, deps, job } = await setup({ connected: false });
+    const fx = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
+    await createReminder(h.db, user, { text: "להתקשר לבנק", when: "היום ב-14:00" }, h.ctx.now());
+    expect(await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google }) }, job)).toEqual({ status: "sent", mode: "template", localDate: "2026-10-21" });
+    expect(h.wa.sent.at(-1)!.template!.params.map((p) => p.text)).toEqual(["יום ד׳ 21.10", "• כל היום — יום הולדת לנועה  • 09:00 פגישת צוות שבועית  • 13:00 שיחה עם משפחת אברהם", "—", "• 14:00 להתקשר לבנק"]);
+    // events.list asked for the local day (00:00–24:00 Israel time), wall-clock times in the user's zone
+    const cal = new URL(fx.state.calls.find((c) => c.url.includes("/calendars/primary/events"))!.url);
+    expect(cal.searchParams.get("timeMin")).toBe("2026-10-20T21:00:00.000Z");
+    expect(cal.searchParams.get("timeMax")).toBe("2026-10-21T21:00:00.000Z");
+    expect(cal.searchParams.get("timeZone")).toBe("Asia/Jerusalem");
+  });
+
+  it("with both Microsoft 365 and Google connected, the two calendars are merged by time", async () => {
+    const { h, deps, job } = await setup();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: createGoogleFixture().fetchImpl });
+    await processInbound(h.ctx, h.inbound("תודה"));
+    await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google }) }, job);
+    expect(h.wa.texts.at(-1)).toContain("*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n• 13:00 שיחה עם משפחת אברהם\n\n*מיילים שמחכים לתשובה*");
   });
 
   it("an empty connected day still gets the short message", async () => {

@@ -57,6 +57,8 @@ export const serverSchema = z.object({
   // ---- Google ----
   GOOGLE_CLIENT_ID: nonEmpty,
   GOOGLE_CLIENT_SECRET: nonEmpty,
+  /** קריאת Gmail (scope מוגבל) — false עד שעוברים CASA. ראו docs/google-setup.md */
+  GOOGLE_GMAIL_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().default(false)),
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,
