@@ -1,18 +1,43 @@
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import type { Metadata } from "next";
+import { DaySection } from "@/components/brand/landing/day-scenes";
+import { Faq } from "@/components/brand/landing/faq";
+import { FinalCta } from "@/components/brand/landing/final-cta";
+import { LandingFooter } from "@/components/brand/landing/footer";
+import { LandingHeader } from "@/components/brand/landing/header";
+import { Hero } from "@/components/brand/landing/hero";
+import { Pricing } from "@/components/brand/landing/pricing";
+import { Professions } from "@/components/brand/landing/professions";
+import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
+import { Trust } from "@/components/brand/landing/trust";
+import { BRAND } from "@/lib/brand";
+import "@/components/brand/landing/landing.css";
+
+export const metadata: Metadata = {
+  title: { absolute: `${BRAND.name} — ${BRAND.tagline}` },
+  description: BRAND.description,
+  openGraph: { title: `${BRAND.name} — ${BRAND.tagline}`, description: BRAND.description },
+};
 
 /**
- * דף נחיתה — placeholder בלבד. כיווני העיצוב (PLAN §10) נבנים בנפרד; כאן רק כותרת אחת ו-CTA אחד.
+ * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo → one working day in a pinned phone →
+ * by profession → trust → pricing → FAQ → end card → footer. Static (prerendered); the client islands are the chat
+ * demo, the day scene's switch (pinned version lazy-loaded on large screens) and Lenis.
  */
 export default function HomePage() {
   return (
-    <main id="main" className="flex flex-1 flex-col items-center justify-center gap-10 px-6 py-24 text-center">
-      <h1 className="max-w-3xl font-heading text-4xl leading-tight font-bold text-balance sm:text-6xl">
-        עוזר אישי בוואטסאפ שמטפל במייל, ביומן ובקבצים של העסק שלך — בעברית
-      </h1>
-      <Button size="lg" nativeButton={false} render={<Link href="/start" />}>
-        להתחיל — לוקח בערך דקה
-      </Button>
-    </main>
+    <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
+      <SmoothScroll />
+      <LandingHeader />
+      <main id="main" className="flex-1">
+        <Hero />
+        <DaySection />
+        <Professions />
+        <Trust />
+        <Pricing />
+        <Faq />
+        <FinalCta />
+      </main>
+      <LandingFooter />
+    </div>
   );
 }
