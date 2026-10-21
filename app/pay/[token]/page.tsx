@@ -46,7 +46,7 @@ async function PayCard({ params, searchParams }: { params: PageProps<"/pay/[toke
       <CardHeader>
         <CardTitle className="font-heading text-2xl">{sub && sub.status !== "trial" ? "עדכון אמצעי תשלום" : "בחירת מסלול"}</CardTitle>
         <CardDescription>
-          המחירים כוללים מע״מ. חיוב חודשי אוטומטי דרך HYP, חשבונית מס-קבלה במייל, ביטול בכל רגע מהאזור האישי או מהשיחה.
+          המחירים כוללים מע״מ. חיוב חודשי אוטומטי דרך HYP, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי או מהשיחה.
           <span className="block" dir="ltr">
             {user.email}
           </span>
