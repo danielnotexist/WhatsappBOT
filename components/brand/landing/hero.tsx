@@ -34,7 +34,7 @@ export function Hero() {
             id="hero-title"
             className="mt-4 text-[length:var(--hero)] leading-[1.02] font-bold tracking-[-0.018em]"
           >
-            <span className="block lg:whitespace-nowrap">הדברים שאמרת שתעשה.</span>
+            <span className="block lg:whitespace-nowrap">מה שהבטחת לעשות.</span>
             <span className="headline-light block">{BRAND.name} על זה.</span>
           </h1>
         </div>

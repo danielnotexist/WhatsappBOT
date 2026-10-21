@@ -101,7 +101,7 @@ describe("hero", () => {
     render(<Hero />);
     await act(async () => {});
     const h1 = screen.getByRole("heading", { level: 1 });
-    expect(h1).toHaveTextContent(`הדברים שאמרת שתעשה.${BRAND.name} על זה.`);
+    expect(h1).toHaveTextContent(`מה שהבטחת לעשות.${BRAND.name} על זה.`);
     expect(screen.getByRole("link", { name: "בואו נתחיל — לוקח דקה" })).toHaveAttribute(
       "href",
       "/start",
