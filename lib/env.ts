@@ -63,7 +63,7 @@ export const serverSchema = z.object({
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,
-  SONIOX_API_KEY: nonEmpty,
+  /** תמלול הודעות קוליות (ברירת המחדל, lib/stt) ותמונות. ספקי תמלול אחרים (Soniox/OpenAI) — אופציונליים, ב-lib/stt/env.ts */
   OPENROUTER_API_KEY: nonEmpty,
 
   // ---- HYP Pay (יעד שריג) ----

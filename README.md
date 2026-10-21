@@ -126,8 +126,8 @@ scripts/, supabase/, design/   נכתבים בנפרד; מוחרגים מ-lint/t
 6. **Google Cloud** — פרויקט, OAuth consent (External), scopes calendar + drive.file + gmail.send, Redirect URI
    `https://<domain>/api/auth/google/callback`, אימות sensitive scopes. → `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
 7. **HYP** — להפעיל טוקנים במסוף, "אימות על ידי חתימה", success/error URL (`https://<domain>/pay/return`), מסוף בדיקה. → `HYP_MASOF`, `HYP_KEY`, `HYP_PASSP`.
-8. **Anthropic, Soniox, OpenRouter, Upstash QStash, Resend** — ליצור חשבונות ומפתחות; ב-Resend לאמת את הדומיין.
-   → `ANTHROPIC_API_KEY`, `SONIOX_API_KEY`, `OPENROUTER_API_KEY`, `QSTASH_*`, `RESEND_API_KEY`.
+8. **Anthropic, OpenRouter, Upstash QStash, Resend** — ליצור חשבונות ומפתחות; ב-OpenRouter לטעון קרדיט (תמלול הודעות קוליות + תמונות); ב-Resend לאמת את הדומיין.
+   → `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `QSTASH_*`, `RESEND_API_KEY` (Soniox — אופציונלי, `docs/progress/stt-openrouter.md`).
 9. **עו"ד** — חוות דעת Meta §4.7 + מדיניות פרטיות/תנאים (טיוטה תיכתב בקוד).
 10. **עיצוב** — לבחור אחד משלושת כיווני העיצוב (נבנים בנפרד) ואת זוג הפונטים (`lib/fonts.ts`).
 

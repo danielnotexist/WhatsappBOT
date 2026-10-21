@@ -1,5 +1,6 @@
 import { copy } from "@/lib/copy/bot";
 import { copyM5 } from "@/lib/copy/bot-m5";
+import { oggOpusDurationMs } from "@/lib/stt/ogg";
 import { WaApiError } from "@/lib/wa/client";
 import type { InboundMessage } from "@/lib/wa/types";
 import type { BotContext } from "./context";
@@ -45,7 +46,7 @@ export async function transcribeVoiceNote(ctx: BotContext, userId: string, msg: 
   try {
     const t = await ctx.stt().transcribe({ bytes: audio.bytes, mimeType: audio.mimeType || msg.mimeType || "audio/ogg" }, { language: "he" });
     text = t.text.trim();
-    durationMs = t.durationMs;
+    durationMs = t.durationMs ?? oggOpusDurationMs(audio.bytes); // not every model reports the length
     confidence = t.confidence;
   } catch (e) {
     console.error("[voice] transcription failed:", (e as Error).message);

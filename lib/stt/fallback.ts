@@ -1,6 +1,6 @@
 import { SttError, type AudioInput, type SttProvider, type TranscribeOptions, type Transcript } from "./types";
 
-/** Tries each provider in order (Soniox → gpt-4o-transcribe); an empty transcript also falls through. */
+/** Tries each provider in order (e.g. deepgram/nova-3 → openai/gpt-transcribe); an empty transcript also falls through. */
 export class FallbackStt implements SttProvider {
   readonly name: string;
 

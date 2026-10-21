@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MockStt } from "@/lib/stt/mock";
+import { fakeOggOpus } from "@/lib/stt/test-fixtures";
 import { SttError } from "@/lib/stt/types";
 import { zonedToUtc } from "@/lib/time/zoned";
 import { WaApiError } from "@/lib/wa/client";
@@ -41,6 +42,21 @@ describe("voice notes", () => {
     stt!.enqueue({ text: "מה יש לי מחר", durationMs: 25_000 });
     await processInbound(h.ctx, voice());
     expect(h.wa.texts).toContain('הבנתי כך: "מה יש לי מחר"\nממשיכה לפי זה.');
+  });
+
+  it("measures the Ogg/Opus length itself when the model does not report it", async () => {
+    const echo = 'הבנתי כך: "מה יש לי מחר"\nממשיכה לפי זה.';
+    const long = await setup();
+    long.h.wa.media.set("media-1", { bytes: fakeOggOpus(25_000), mimeType: "audio/ogg; codecs=opus" });
+    long.stt!.enqueue({ text: "מה יש לי מחר", durationMs: null, confidence: null });
+    await processInbound(long.h.ctx, long.voice());
+    expect(long.h.wa.texts).toContain(echo);
+
+    const short = await setup();
+    short.h.wa.media.set("media-1", { bytes: fakeOggOpus(6_000), mimeType: "audio/ogg; codecs=opus" });
+    short.stt!.enqueue({ text: "מה יש לי מחר", durationMs: null, confidence: null });
+    await processInbound(short.h.ctx, short.voice());
+    expect(short.h.wa.texts).not.toContain(echo);
   });
 
   it("answers in Hebrew when transcription fails or is empty, without counting the message", async () => {

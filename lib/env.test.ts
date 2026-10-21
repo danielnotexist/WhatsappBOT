@@ -19,7 +19,6 @@ const validEnv: Record<string, string> = {
   GOOGLE_CLIENT_ID: "g-id",
   GOOGLE_CLIENT_SECRET: "g-secret",
   ANTHROPIC_API_KEY: "sk-ant",
-  SONIOX_API_KEY: "soniox",
   OPENROUTER_API_KEY: "or",
   HYP_MASOF: "0010000000",
   HYP_KEY: "hyp-key",
@@ -55,7 +54,6 @@ describe("lib/env", () => {
       "GOOGLE_CLIENT_ID",
       "GOOGLE_CLIENT_SECRET",
       "ANTHROPIC_API_KEY",
-      "SONIOX_API_KEY",
       "OPENROUTER_API_KEY",
       "HYP_MASOF",
       "HYP_KEY",
@@ -68,6 +66,8 @@ describe("lib/env", () => {
     ]) {
       expect(SERVER_ENV_KEYS).toContain(key);
     }
+    // transcription goes through OPENROUTER_API_KEY; Soniox / OpenAI are optional (lib/stt/env.ts)
+    expect(SERVER_ENV_KEYS).not.toContain("SONIOX_API_KEY");
   });
 
   it("reports missing variables by name only", () => {
