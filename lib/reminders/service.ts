@@ -17,9 +17,13 @@ export function reminderWhenLabel(r: ReminderRow, now: Date, tz: string): string
   return isRecurrenceRule(r.recurrence) ? describeRecurrence(r.recurrence) : formatWhenAbs(new Date(r.due_at), now, tz);
 }
 
-/** Queues the job that fires the reminder at its due_at (dedupe: one job per reminder occurrence). */
-export async function scheduleReminderJob(db: Db, reminder: ReminderRow): Promise<ReminderRow> {
-  const job = await db.createJob({ kind: "reminder", user_id: reminder.user_id, run_at: new Date(reminder.due_at), payload: { reminder_id: reminder.id, due_at: reminder.due_at }, dedupe_key: `reminder:${reminder.id}:${Date.parse(reminder.due_at)}`, max_attempts: 5 });
+/**
+ * Queues the job that fires the reminder at its due_at (dedupe: one job per reminder occurrence; `dedupe: false`
+ * re-arms after an early delivery, when the occurrence's key belongs to the job being finished).
+ */
+export async function scheduleReminderJob(db: Db, reminder: ReminderRow, opts: { dedupe?: boolean } = {}): Promise<ReminderRow> {
+  const dedupeKey = opts.dedupe === false ? null : `reminder:${reminder.id}:${Date.parse(reminder.due_at)}`;
+  const job = await db.createJob({ kind: "reminder", user_id: reminder.user_id, run_at: new Date(reminder.due_at), payload: { reminder_id: reminder.id, due_at: reminder.due_at }, dedupe_key: dedupeKey, max_attempts: 5 });
   if (!job) return reminder;
   return (await db.updateReminder(reminder.id, { job_id: job.id })) ?? reminder;
 }
@@ -36,8 +40,10 @@ export type CreateReminderResult =
  */
 export async function createReminder(db: Db, user: UserRow, input: { text: string; when: string }, now: Date): Promise<CreateReminderResult> {
   const tz = tzOf(user);
-  const parsed = parseHebrewWhen(input.when || input.text, { now, timeZone: tz });
-  const text = (input.text.trim() || parsed?.rest || "").replace(/\s+/g, " ").slice(0, MAX_TEXT);
+  const when = input.when.trim();
+  // no separate time phrase: look for it inside the text, and keep only the rest as the reminder
+  const parsed = parseHebrewWhen(when || input.text, { now, timeZone: tz });
+  const text = ((when ? input.text.trim() : parsed?.rest || input.text.trim()) || parsed?.rest || "").replace(/\s+/g, " ").slice(0, MAX_TEXT);
   if (!parsed) return { status: "need_time", reply: copyM5["act.reminder.set_ambiguous_time"](text || input.when.trim()) };
   if (!text) return { status: "error", error: "empty_text", reply: "מה להזכיר?" };
   if ((await db.listReminders(user.id, { statuses: ["scheduled"], limit: MAX_OPEN_REMINDERS })).length >= MAX_OPEN_REMINDERS) {
@@ -140,8 +146,8 @@ export async function runReminderJob(deps: ProactiveDeps, job: Pick<JobRow, "id"
   if (payloadDue !== null && payloadDue !== Date.parse(r.due_at)) return { status: "skipped", reason: "rescheduled" };
   if (r.last_fired_at && Date.parse(r.last_fired_at) >= Date.parse(r.due_at)) return { status: "skipped", reason: "already sent" };
   if (Date.parse(r.due_at) > now.getTime() + 60_000) {
-    // early delivery (clock skew / a job without due_at): make sure the right job exists, then let this one go
-    await scheduleReminderJob(deps.db, r);
+    // early delivery (clock skew / a job without due_at): queue a fresh job for due_at, then let this one finish
+    await scheduleReminderJob(deps.db, r, { dedupe: false });
     return { status: "skipped", reason: "not due yet" };
   }
   const user = await deps.db.getUser(r.user_id);

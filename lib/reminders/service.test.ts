@@ -50,10 +50,12 @@ describe("reminders — create / list / cancel", () => {
     expect(h.db.reminders[0]!.recurrence).toEqual({ freq: "daily", hour: 8, minute: 0 });
   });
 
-  it("takes the text from the phrase when the model left it empty", async () => {
+  it("takes the text from the phrase when the model left it empty, and the time from the text when `when` is empty", async () => {
     const { h, user } = await setup(il(2026, 10, 21, 10, 15));
     const r = await createReminder(h.db, user, { text: "", when: "תזכיר לי בעוד רבע שעה לצאת לפגישה" }, h.ctx.now());
     expect(r.status === "created" && r.reply).toBe("אזכיר: לצאת לפגישה\nהיום, 10:30");
+    const r2 = await createReminder(h.db, user, { text: "מחר ב-9 להתקשר לבנק", when: "" }, h.ctx.now());
+    expect(r2.status === "created" && r2.reply).toBe("אזכיר: להתקשר לבנק\nמחר, 9:00");
   });
 
   it("lists open reminders and cancels by text (one match), asks when ambiguous, and reports not found", async () => {
@@ -136,6 +138,18 @@ describe("reminders — the job", () => {
     expect(jobFor(h, r.reminder.id)).toMatchObject({ run_at: "2026-10-26T06:00:00.000Z", status: "queued" });
     // a redelivery of the old job is ignored
     expect(await runReminderJob(deps, first)).toEqual({ status: "skipped", reason: "rescheduled" });
+  });
+
+  it("an early delivery does not send and re-arms a fresh job for the due time", async () => {
+    const { h, user, deps } = await setup(il(2026, 10, 21, 10, 15));
+    const r = await createReminder(h.db, user, { text: "x", when: "מחר ב-9" }, h.ctx.now());
+    if (r.status !== "created") throw new Error("not created");
+    const original = jobFor(h, r.reminder.id);
+    expect(await runReminderJob(deps, original)).toEqual({ status: "skipped", reason: "not due yet" });
+    const rearmed = jobFor(h, r.reminder.id);
+    expect(rearmed.id).not.toBe(original.id);
+    expect(rearmed).toMatchObject({ status: "queued", run_at: "2026-10-22T06:00:00.000Z", dedupe_key: null });
+    expect(h.wa.sent).toHaveLength(0);
   });
 
   it("skips users without a linked phone and users who turned proactive messages off", async () => {
