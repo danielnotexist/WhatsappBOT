@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { Button } from "@/components/ui/button";
@@ -11,7 +13,7 @@ function DirectionProbe() {
 
 /** כיתות Tailwind פיזיות (שמאל/ימין) — אסורות בקומפוננטות RTL; חייבים start/end לוגיים. */
 const PHYSICAL_CLASS =
-  /(^|:)-?(ml|mr|pl|pr|left|right|text-left|text-right|rounded-l|rounded-r|border-l|border-r)-/;
+  /(^|:)-?(ml|mr|pl|pr|left|right|rounded-l|rounded-r|rounded-tl|rounded-tr|rounded-bl|rounded-br|border-l|border-r|scroll-ml|scroll-mr|scroll-pl|scroll-pr)-|(^|:)(text-left|text-right|float-left|float-right|clear-left|clear-right|border-l|border-r|rounded-l|rounded-r)$/;
 
 describe("Button (shadcn, rtl: true)", () => {
   afterEach(cleanup);
@@ -56,5 +58,38 @@ describe("Button (shadcn, rtl: true)", () => {
     expect(link.tagName).toBe("A");
     expect(link).toHaveAttribute("href", "/start");
     expect(link.className).toContain("inline-flex");
+  });
+});
+
+/** Every string literal in a source file, split into class-like tokens. */
+function classTokens(source: string): string[] {
+  const literals = [...source.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? "");
+  return literals.flatMap((l) => l.split(/[\s{}$]+/)).filter(Boolean);
+}
+
+describe("logical (RTL-safe) classes across the brand and auth components", () => {
+  const root = join(__dirname, "..");
+  const dirs = ["brand", "auth"];
+  const files = dirs.flatMap((d) => {
+    try {
+      return readdirSync(join(root, d))
+        .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
+        .map((f) => join(root, d, f));
+    } catch {
+      return [];
+    }
+  });
+
+  it("finds the brand components", () => {
+    expect(files.some((f) => f.endsWith("chat-demo.tsx"))).toBe(true);
+  });
+
+  it.each(files.map((f) => [f.slice(root.length + 1), f]))("%s uses no physical left/right utilities", (_name, file) => {
+    const offenders = classTokens(readFileSync(file, "utf8")).filter((t) => PHYSICAL_CLASS.test(t));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the scanner itself catches physical classes", () => {
+    expect(classTokens('className="ml-2 ps-4 hover:pr-1 text-right"').filter((t) => PHYSICAL_CLASS.test(t))).toEqual(["ml-2", "hover:pr-1", "text-right"]);
   });
 });

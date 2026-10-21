@@ -27,16 +27,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  colorScheme: "light dark",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
-  ],
+  // "לילה ירוק" is dark by default (marketing + auth); light surfaces opt in with `.surface-light`.
+  colorScheme: "dark",
+  themeColor: "#0F1C17",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="he" dir="rtl" className={`${fontVariables} h-full antialiased`}>
+    <html lang="he" dir="rtl" className={`${fontVariables} dark h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <DirectionProvider direction="rtl">
           {children}

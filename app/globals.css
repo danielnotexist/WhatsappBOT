@@ -2,15 +2,55 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * "לילה ירוק" — עלזה's design system (round plan §2). Values mirror lib/design/tokens.ts; a test keeps them in
+ * sync and checks WCAG AA contrast for every text/background pair. Dark is the default theme (marketing + auth);
+ * `.surface-light` flips the semantic tokens for the paper/dust/moss step cards and the light transition screen.
+ */
+
+/* shadcn's `dark:` utilities apply on the dark stage but never inside a light card */
+@custom-variant dark (&:where(.dark, .dark *):not(:where(.surface-light, .surface-light *)));
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  /* הפונטים מוגדרים ב-lib/fonts.ts (next/font) ומוזרקים כ-CSS variables ב-<html> */
+  /* ---- brand palette ---- */
+  --color-night: var(--alze-night);
+  --color-night-2: var(--alze-night2);
+  --color-line: var(--alze-line);
+  --color-cream: var(--alze-cream);
+  --color-cream-muted: var(--alze-cream-muted);
+  --color-honey: var(--alze-honey);
+  --color-sage: var(--alze-sage);
+  --color-ink: var(--alze-ink);
+  --color-ink-muted: var(--alze-ink-muted);
+  --color-paper: var(--alze-paper);
+  --color-dust: var(--alze-dust);
+  --color-moss: var(--alze-moss);
+
+  /* ---- type: lib/fonts.ts injects the families as CSS variables on <html> ---- */
   --font-sans: var(--font-body), Arial, Helvetica, sans-serif;
   --font-heading: var(--font-heading), Georgia, serif;
+  --font-hand: var(--font-hand), "Segoe Print", cursive;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* type scale — the classic 12·14·16·18·21·24·36·48·60·72 sequence, fluid at the top */
+  --text-hero: clamp(2.75rem, 1.85rem + 4.4vw, 5rem);
+  --text-hero--line-height: 1.02;
+  --text-hero--letter-spacing: -0.012em;
+  --text-title: clamp(2rem, 1.55rem + 1.9vw, 2.75rem);
+  --text-title--line-height: 1.08;
+  --text-title--letter-spacing: -0.008em;
+  --text-hand: clamp(1.5rem, 1.3rem + 0.9vw, 1.875rem);
+  --text-hand--line-height: 1.1;
+  --text-lede: 1.3125rem;
+  --text-lede--line-height: 1.5;
+
+  --radius-card: 1.75rem;
+  --radius-field: 0.875rem;
+  --shadow-stage: 0 40px 90px -40px rgb(0 0 0 / 0.75), 0 0 0 1px rgb(239 233 220 / 0.04);
+
+  /* ---- shadcn semantic tokens ---- */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,87 +90,156 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* brand palette (lib/design/tokens.ts) */
+  --alze-night: #0F1C17;
+  --alze-night2: #16261F;
+  --alze-line: #26382F;
+  --alze-cream: #EFE9DC;
+  --alze-cream-muted: #A3AE9F;
+  --alze-honey: #E7B65C;
+  --alze-sage: #9CC9A8;
+  --alze-ink: #13241C;
+  --alze-ink-muted: #2E3D35;
+  --alze-paper: #F2EADA;
+  --alze-dust: #D8A99C;
+  --alze-moss: #9DB8A0;
+  --alze-error-on-dark: #F2A08B;
+  --alze-error-on-light: #7A2414;
+
+  /* semantic (dark default) */
+  --background: var(--alze-night);
+  --foreground: var(--alze-cream);
+  --card: var(--alze-night2);
+  --card-foreground: var(--alze-cream);
+  --popover: var(--alze-night2);
+  --popover-foreground: var(--alze-cream);
+  --primary: var(--alze-honey);
+  --primary-foreground: var(--alze-night);
+  --secondary: var(--alze-line);
+  --secondary-foreground: var(--alze-cream);
+  --muted: var(--alze-line);
+  --muted-foreground: var(--alze-cream-muted);
+  --accent: var(--alze-line);
+  --accent-foreground: var(--alze-cream);
+  --destructive: var(--alze-error-on-dark);
+  --border: var(--alze-line);
+  --input: var(--alze-cream-muted);
+  --ring: var(--alze-honey);
+  --chart-1: var(--alze-honey);
+  --chart-2: var(--alze-sage);
+  --chart-3: var(--alze-dust);
+  --chart-4: var(--alze-moss);
+  --chart-5: var(--alze-cream-muted);
+  --radius: 0.875rem;
+  --sidebar: var(--alze-night2);
+  --sidebar-foreground: var(--alze-cream);
+  --sidebar-primary: var(--alze-honey);
+  --sidebar-primary-foreground: var(--alze-night);
+  --sidebar-accent: var(--alze-line);
+  --sidebar-accent-foreground: var(--alze-cream);
+  --sidebar-border: var(--alze-line);
+  --sidebar-ring: var(--alze-honey);
+
+  /* WhatsApp chrome inside the phone mockups (dark WhatsApp) */
+  --wa-bg: #0B141A;
+  --wa-in: #202C33;
+  --wa-out: #005C4B;
+  --wa-fg: #E9EDEF;
+  --wa-head: #1F2C34;
+  --wa-link: #53BDEB;
+  --wa-time: #8696A0;
+  --wa-chip: #182229;
+  --wa-green: #00A884;
+  --wa-red: #F15C6D;
+
+  color-scheme: dark;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+/* light surfaces: paper/dust/moss cards and the light transition screen */
+.surface-light {
+  --foreground: var(--alze-ink);
+  --card-foreground: var(--alze-ink);
+  --popover: var(--alze-paper);
+  --popover-foreground: var(--alze-ink);
+  --primary: var(--alze-ink);
+  --primary-foreground: var(--alze-cream);
+  --secondary: rgb(19 36 28 / 0.08);
+  --secondary-foreground: var(--alze-ink);
+  --muted: rgb(19 36 28 / 0.08);
+  --muted-foreground: var(--alze-ink-muted);
+  --accent: rgb(19 36 28 / 0.08);
+  --accent-foreground: var(--alze-ink);
+  --destructive: var(--alze-error-on-light);
+  --border: rgb(19 36 28 / 0.18);
+  --input: var(--alze-ink-muted);
+  --ring: var(--alze-ink);
+  color: var(--alze-ink);
+  color-scheme: light;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    font-size: 100%;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    font-kerning: normal;
+    text-rendering: optimizeLegibility;
   }
   h1,
   h2,
   h3 {
     @apply font-heading;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  :focus-visible {
+    outline: 3px solid var(--ring);
+    outline-offset: 3px;
+  }
+  ::selection {
+    background: var(--alze-honey);
+    color: var(--alze-night);
+  }
+}
+
+@layer components {
+  /* the dark stage: a faint key light from above + film grain, nothing else */
+  .stage {
+    background-color: var(--alze-night);
+    background-image:
+      radial-gradient(110% 55% at 50% -12%, rgb(156 201 168 / 0.09), transparent 62%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  /* the light word of a headline: weight contrast (700 → 300) + honey, our stand-in for italics */
+  .headline-light {
+    font-weight: 300;
+    color: var(--alze-honey);
+  }
+  .surface-light .headline-light {
+    color: inherit;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

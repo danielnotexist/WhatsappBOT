@@ -1,29 +1,33 @@
-import { Assistant, Frank_Ruhl_Libre } from "next/font/google";
+import { Assistant, Frank_Ruhl_Libre, Gveret_Levin } from "next/font/google";
 
 /**
- * קונפיגורציית פונטים — המקום היחיד שמחליפים בו את זוג הפונטים (PLAN §10).
+ * Fonts for "לילה ירוק" (round plan §2). next/font downloads the files at build time and serves them from our
+ * domain (self-host): no request to Google, no layout shift, hebrew + latin subsets only.
  *
- * next/font מוריד את קובצי הפונט בזמן build ומגיש אותם מהדומיין שלנו (self-host):
- * הדפדפן לא פונה ל-Google, אין layout shift, ו-subsets hebrew+latin בלבד.
+ *  - Frank Ruhl Libre 300 / 700 — headlines. The light word of a headline is set in 300 + honey (`.headline-light`):
+ *    Hebrew has no true italic, so weight contrast does that job.
+ *  - Gveret Levin 400 — one handwritten line above a headline ("קודם כל", "דבר אחרון", "נכנסת."). Verified in
+ *    next/font's Google font list (weights: 400; subsets: hebrew, latin).
+ *  - Assistant (variable 200–800) — body, buttons, forms. Digits of codes and timers use `tabular-nums`.
  *
- * הזוגות המועמדים (כותרות / גוף):
- *   1. Frank_Ruhl_Libre / Assistant        — "עורך-דין-י", אמין      ← הפעיל כרגע
- *   2. Suez_One / IBM_Plex_Sans_Hebrew     — חם + טכני
- *   3. Karantina (hero בלבד) / Heebo       — דרמטי
- *   4. Bona_Nova / Noto_Sans_Hebrew        — שקט ופרימיום
- *
- * להחלפה: משנים את שני ה-import-ים ואת שתי הקריאות למטה בלבד. next/font דורש קריאות
- * סטטיות עם ארגומנטים מילוליים (אי אפשר לבחור פונט דינמית בזמן ריצה), ולכן לא מגדירים כאן
- * את כל הזוגות יחד — זה היה מוריד ומטעין מראש 8 פונטים בכל דף.
- * ה-CSS variables (--font-heading / --font-body) נשארות זהות, כך ש-globals.css והקומפוננטות לא משתנים.
+ * The CSS variables (--font-heading / --font-hand / --font-body) are mapped to Tailwind's font-heading /
+ * font-hand / font-sans in app/globals.css.
  */
 
 export const headingFont = Frank_Ruhl_Libre({
   subsets: ["hebrew", "latin"],
-  // פונט variable (300–900): קובץ אחד לכל המשקלים; כותרות משתמשות ב-700–900.
+  weight: ["300", "700"],
   variable: "--font-heading",
   display: "swap",
   fallback: ["Georgia", "Times New Roman", "serif"],
+});
+
+export const handFont = Gveret_Levin({
+  subsets: ["hebrew", "latin"],
+  weight: "400",
+  variable: "--font-hand",
+  display: "swap",
+  fallback: ["Segoe Print", "cursive"],
 });
 
 export const bodyFont = Assistant({
@@ -33,11 +37,12 @@ export const bodyFont = Assistant({
   fallback: ["Arial", "Helvetica", "sans-serif"],
 });
 
-/** להצמדה ל-<html className> — מגדיר את ה-CSS variables לכל העץ. */
-export const fontVariables = `${headingFont.variable} ${bodyFont.variable}`;
+/** For <html className> — defines the CSS variables for the whole tree. */
+export const fontVariables = `${headingFont.variable} ${handFont.variable} ${bodyFont.variable}`;
 
-/** שמות הפונטים הפעילים (לתיעוד / דפי עיצוב). */
-export const activeFontPair = {
+/** The active families (for docs / design pages). */
+export const activeFonts = {
   heading: "Frank Ruhl Libre",
+  hand: "Gveret Levin",
   body: "Assistant",
 } as const;
