@@ -6,8 +6,8 @@
  *  - Colour: a bottle-green night (not black) with cream type; honey is the one warm accent (CTAs, the light word
  *    of a headline); sage/mint is the quiet secondary (handwritten tags, ticks). Signup steps are one card that
  *    changes paper: cream paper → dusty pink → sage → back to night for the confetti moment.
- *  - Type: Frank Ruhl Libre 700 for headlines with the key word in 300 + honey (Hebrew has no true italic);
- *    Gveret Levin for one handwritten line above a headline; Assistant for everything else; tabular digits.
+ *  - Type: Varela Round (one weight) everywhere — headlines, tag lines and body; the key word of a headline in
+ *    honey; tabular digits.
  *  - Layout: one centred card on a dark stage (full-screen on phones); intro and "ready" pair type with a phone.
  *  - Principles: one memorable thing per screen, no gradients-as-decoration, no icon-card grids, motion only to
  *    show what changed (the card morph) plus one entrance moment; reduced motion = no motion.

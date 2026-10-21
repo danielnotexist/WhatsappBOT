@@ -28,8 +28,8 @@
 
   /* ---- type: lib/fonts.ts injects the families as CSS variables on <html> ---- */
   --font-sans: var(--font-body), Arial, Helvetica, sans-serif;
-  --font-heading: var(--font-heading), Georgia, serif;
-  --font-hand: var(--font-hand), "Segoe Print", cursive;
+  --font-heading: var(--font-body), Arial, Helvetica, sans-serif;
+  --font-hand: var(--font-body), Arial, Helvetica, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* type scale — the classic 12·14·16·18·21·24·36·48·60·72 sequence, fluid at the top */
@@ -194,6 +194,8 @@
     font-size: 1.0625rem;
     line-height: 1.6;
     font-kerning: normal;
+    /* Varela Round has one weight (400): never fake bold/light */
+    font-synthesis-weight: none;
     text-rendering: optimizeLegibility;
   }
   h1,
@@ -223,7 +225,7 @@
       radial-gradient(110% 55% at 50% -12%, rgb(156 201 168 / 0.09), transparent 62%),
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .045 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
-  /* the light word of a headline: weight contrast (700 → 300) + honey, our stand-in for italics */
+  /* the light word of a headline: honey colour (Varela Round has a single weight) */
   .headline-light {
     font-weight: 300;
     color: var(--alze-honey);
