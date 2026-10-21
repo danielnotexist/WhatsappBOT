@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Cta } from "@/components/brand/cta";
 import { waMeUrl } from "@/lib/auth/link-token";
 import { DemoStrip } from "./DemoBar";
 import { DemoCodeNote } from "./DemoCodeNote";
+import { DemoCodeNoteLive, DemoFlag, resetDemoFlagForTests } from "./demo-flag";
 import { DemoWaDialog, demoWaMessage } from "./DemoWaDialog";
 import { DemoWaGate } from "./DemoWaGate";
 
@@ -33,6 +34,33 @@ describe("demo strip and code note", () => {
   it("the code card names the demo code", () => {
     render(<DemoCodeNote />);
     expect(screen.getByRole("note")).toHaveTextContent("בגרסת ההדגמה הקוד הוא 123456");
+  });
+});
+
+describe("DemoCodeNoteLive — the code card knows DEMO_MODE in its own commit", () => {
+  afterEach(() => resetDemoFlagForTests());
+
+  it("the build's value stands in until the running server has reported (a direct page load)", () => {
+    const off = render(<DemoCodeNoteLive atBuild={false} />);
+    expect(screen.queryByRole("note")).toBeNull();
+    off.unmount();
+    render(<DemoCodeNoteLive atBuild />);
+    expect(screen.getByRole("note")).toHaveTextContent("בגרסת ההדגמה הקוד הוא 123456");
+  });
+
+  it("the running server wins: built without DEMO_MODE, run with it → the note is there from the first render", () => {
+    render(<DemoFlag on />); // the DemoBar's request-time part, already on screen
+    render(<DemoCodeNoteLive atBuild={false} />); // a client-side navigation to the code card
+    expect(screen.getByRole("note")).toHaveTextContent("123456");
+  });
+
+  it("…and the other way round; a card already on screen follows the report", () => {
+    render(<DemoCodeNoteLive atBuild />);
+    expect(screen.getByRole("note")).toBeInTheDocument();
+    act(() => {
+      render(<DemoFlag on={false} />);
+    });
+    expect(screen.queryByRole("note")).toBeNull();
   });
 });
 

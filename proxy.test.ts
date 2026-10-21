@@ -1,5 +1,12 @@
+import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { CSP_REPORT_ONLY, SECURITY_HEADERS, config, proxy } from "./proxy";
+import { CSP_REPORT_ONLY, SECURITY_HEADERS, config, proxy as proxyFor } from "./proxy";
+
+/** A request as the browser makes it: a page load unless `mode` says otherwise. */
+function request(path = "/start", mode: string | null = "navigate") {
+  return new NextRequest(new URL(path, "http://localhost:3000"), { headers: mode ? { "sec-fetch-mode": mode } : {} });
+}
+const proxy = (path?: string, mode?: string | null) => proxyFor(request(path, mode));
 
 describe("proxy.ts security headers", () => {
   it("sets every security header on the pass-through response", () => {
@@ -38,6 +45,30 @@ describe("proxy.ts security headers", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("a page load of a code card without an email goes back to the matching email card (with the headers)", () => {
+    for (const [path, home] of [
+      ["/start/code", "/start/email"],
+      ["/login/code", "/login/email"],
+      ["/start/code?email=", "/start/email"],
+      ["/start/code?updates=1", "/start/email"],
+    ] as const) {
+      for (const mode of ["navigate", null]) {
+        const response = proxy(path, mode);
+        expect(response.status, `${path} ${mode}`).toBe(307);
+        expect(new URL(response.headers.get("location")!).pathname).toBe(home);
+        expect(response.headers.get("X-Frame-Options")).toBe("DENY");
+      }
+    }
+  });
+
+  it("never redirects a code card with an email, nor the router's own fetches (prefetch / client navigation)", () => {
+    expect(proxy("/start/code?email=dana%40levi-law.co.il").headers.get("x-middleware-next")).toBe("1");
+    expect(proxy("/login/code?email=dana%40levi-law.co.il&wait=12").headers.get("x-middleware-next")).toBe("1");
+    expect(proxy("/start/code", "cors").headers.get("x-middleware-next")).toBe("1");
+    expect(proxy("/login/code", "same-origin").headers.get("x-middleware-next")).toBe("1");
+    expect(proxy("/start/email").headers.get("x-middleware-next")).toBe("1");
   });
 
   it("skips static assets in the matcher", () => {

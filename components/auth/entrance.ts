@@ -7,8 +7,10 @@
  *  - the SAME screen mounting again while it is still on screen (a Suspense fallback giving way to the streamed
  *    content) → no second entrance: the new element carries on from where the first one is (or simply stays put
  *    when the entrance is over);
- *  - a screen that was hidden by the router (React <Activity>, browser back/forward) and is shown again after
- *    another screen → the entrance again, like any step change.
+ *  - a screen that was hidden by the router (React <Activity>, browser back/forward) and is shown again → the entrance
+ *    again, like any step change: after another step, or after a page with no step at all (/terms, /login) — then the
+ *    slot's last visit is still this screen, so "hidden for longer than RESHOW_GAP_MS" is what tells it apart from
+ *    React re-running the effects in the same commit (StrictMode).
  * Pure and module-level (one per page), so it can be tested without React. Times are in milliseconds, delays in s.
  */
 
@@ -17,6 +19,8 @@ export const ENTRANCE_DURATION = 0.42;
 /** px the slot rises while it fades in */
 export const ENTRANCE_RISE = 10;
 export const ENTRANCE_EASE = [0.22, 1, 0.36, 1] as const;
+/** ms — a slot hidden for longer than this was off screen; shorter is an effect re-run within one commit */
+export const RESHOW_GAP_MS = 32;
 
 /** What a slot does when it mounts: `delay` in seconds (negative = start part-way through), or null for no entrance. */
 export interface EntrancePlan {
@@ -31,6 +35,8 @@ interface Visit {
   startedAt: number;
   /** how many elements of this slot are mounted for this visit */
   mounted: number;
+  /** when its last element left (ms); -Infinity while it has not */
+  leftAt: number;
 }
 
 export interface EntranceGuard {
@@ -38,11 +44,11 @@ export interface EntranceGuard {
   plan(slot: string, screen: string, delay: number, now: number, animate: boolean): EntrancePlan;
   /**
    * When the element mounts (layout effect). `again` = this element was shown before (its effects re-run). Returns the
-   * visit to hand back to `leave`, and `replay` = it is being shown again after another screen: play the entrance.
+   * visit to hand back to `leave`, and `replay` = it is being shown again after being off screen: play the entrance.
    */
   enter(slot: string, screen: string, plan: EntrancePlan, now: number, again: boolean): { visit: Visit; replay: boolean };
   /** When the element unmounts or is hidden (layout-effect cleanup). */
-  leave(visit: Visit): void;
+  leave(visit: Visit, now: number): void;
 }
 
 export function createEntranceGuard(): EntranceGuard {
@@ -57,16 +63,18 @@ export function createEntranceGuard(): EntranceGuard {
     },
     enter(slot, screen, plan, now, again) {
       let visit = visits.get(slot);
-      const replay = again && visit?.screen !== screen;
+      // shown again: after another screen, or after this one was off screen (a page without steps in between)
+      const replay = again && (visit?.screen !== screen || (visit.mounted === 0 && now - visit.leftAt > RESHOW_GAP_MS));
       if (!visit || visit.screen !== screen || replay || (!again && plan.fresh)) {
-        visit = { screen, startedAt: replay || (!again && plan.delay !== null) ? now : -Infinity, mounted: 0 };
+        visit = { screen, startedAt: replay || (!again && plan.delay !== null) ? now : -Infinity, mounted: 0, leftAt: -Infinity };
         visits.set(slot, visit);
       }
       visit.mounted += 1;
       return { visit, replay };
     },
-    leave(visit) {
+    leave(visit, now) {
       visit.mounted = Math.max(0, visit.mounted - 1);
+      visit.leftAt = now;
     },
   };
 }

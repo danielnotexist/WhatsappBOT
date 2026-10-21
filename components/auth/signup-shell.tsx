@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
-import { StepDeck, StepPaper } from "@/components/brand/step-card";
+import { useRef, type ReactNode } from "react";
+import { StepDeck, StepPaper, useLateResizeMorph } from "@/components/brand/step-card";
 import { Wordmark } from "@/components/brand/wordmark";
 import { cardTones, type CardTone } from "@/lib/design/tokens";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,7 @@ const PAPER_AREA = "col-start-1 row-[1/3] lg:col-start-2 lg:row-[1/2]";
  *  - phones/tablets: one card — the aside on top of the paper, the body under it (full-screen sheet on phones);
  *  - wide screens: the question moves out onto the dark stage, and the paper holds only the fields.
  * The remaining signup papers wait behind the current one (StepDeck), peeking out above it.
+ * A size change that comes after the step (a part streamed into it, a notice) morphs too (useLateResizeMorph).
  */
 export function SignupShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? "/start";
@@ -64,6 +65,10 @@ export function ShellFrame({
 }) {
   const light = tone ? cardTones[tone].light : false;
   const ready = tone === "ready";
+  const grid = useRef<HTMLDivElement>(null);
+  const paper = useRef<HTMLDivElement>(null);
+  const deckRef = useRef<HTMLDivElement>(null);
+  useLateResizeMorph(grid, paper, deckRef);
   return (
     <div className="stage flex min-h-dvh flex-col">
       <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between px-4 sm:px-8">
@@ -83,6 +88,7 @@ export function ShellFrame({
       >
         {tone ? (
           <div
+            ref={grid}
             data-tone={tone}
             className={cn(
               "relative grid w-full grid-cols-1 grid-rows-[auto_1fr] sm:max-w-[31rem]",
@@ -93,8 +99,8 @@ export function ShellFrame({
               light && "surface-light",
             )}
           >
-            <StepDeck deck={deck} className={PAPER_AREA} />
-            <StepPaper tone={tone} className={PAPER_AREA} />
+            <StepDeck ref={deckRef} deck={deck} className={PAPER_AREA} />
+            <StepPaper ref={paper} tone={tone} className={PAPER_AREA} />
             {children}
           </div>
         ) : (

@@ -88,7 +88,7 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
   ```
   `DemoWaGate` הוא רכיב שרת שקורא את `DEMO_MODE` בזמן הבקשה (הדף כבר מחכה ל-`connection()`) ומעביר אותו כ-prop ל-`DemoWaDialog` (רכיב לקוח). מחוץ להדגמה הכפתור נשאר כמו שהוא. רכיב לקוח שרוצה את אותו חלון: `<DemoWaDialog href={waHref} enabled={isDemo}>` עם `isDemo` שהגיע מהשרת.
 - קוד ה-QR באותו מסך מקודד את אותו קישור wa.me — בהדגמה כדאי להסתיר אותו או לעטוף גם אותו, כי סריקה בטלפון פותחת וואטסאפ אמיתי (למספר הדמה).
-- מסך הקוד של הכניסה (`/login/code`) יכול להציג את אותה הערה: `{isDemo() ? <DemoCodeNote /> : null}` מעל `<CodeStep>` (כמו ב-`app/(auth)/start/code/page.tsx`).
+- הערת ההדגמה בכרטיסי הקוד (`/start/code`, `/login/code`): `demoNote={<DemoCodeNoteLive atBuild={isDemo()} />}` (`components/demo/demo-flag.tsx`). הערך של השרת הרץ מגיע מהפס העליון (`DemoBar` → `DemoFlag`) פעם אחת לכל טעינת דף, כך שההערה מצוירת יחד עם הכרטיס — גם כשה-build נעשה בלי `DEMO_MODE` (§4). לא לעטוף אותה ב-`<Suspense>` שנטען אחרי הכרטיס: תוכן שמגיע אחרי השלב מקפיץ אותו.
 - הגעה ל-`/pay` מהאזור האישי: `payLinkFor(appUrl, user.id)` (`lib/billing/pay-link.ts`).
 
 ## 8. המעבר למצב האמיתי

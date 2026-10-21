@@ -11,7 +11,8 @@ import { ENTRANCE_DURATION, ENTRANCE_EASE, ENTRANCE_RISE, entranceGuard } from "
 /**
  * Enter softly on client-side navigation only — the server HTML is visible at once, with or without JS. Once per
  * screen (./entrance.ts): a Suspense fallback that gives way to the streamed step does not start the entrance over,
- * and a step the router shows again after another one (back/forward) enters like any step change.
+ * and a step the router shows again (back/forward — after another step or after a page without one) enters like any
+ * step change.
  */
 function useEntrance(slot: "aside" | "body", delay: number) {
   const reduce = useReducedMotion();
@@ -36,7 +37,7 @@ function useEntrance(slot: "aside" | "body", delay: number) {
         fill: "backwards",
       });
     }
-    return () => entranceGuard.leave(visit);
+    return () => entranceGuard.leave(visit, performance.now());
   }, [slot, screen, plan, delay, on]);
 
   return {

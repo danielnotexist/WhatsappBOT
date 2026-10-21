@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useLayoutEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
 import { cn } from "@/lib/utils";
@@ -63,6 +63,7 @@ export function EmailStep({
   const [updates, setUpdates] = useState(initialUpdates);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const valid = looksLikeEmail(email);
 
   // the code card is the next screen: load it while the address is being finished, so it can open at once
@@ -72,6 +73,12 @@ export function EmailStep({
 
   // the router keeps this step (hidden) after "שליחת קוד"; coming back to it, the button must be awake again
   useLayoutEffect(() => () => setBusy(false), []);
+
+  // the field takes the focus whenever the card is shown — also when the router shows it again (back/forward reveals
+  // the hidden step through <Activity>, and `autoFocus` only acts on mount); never on a page's static fallback
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -114,6 +121,7 @@ export function EmailStep({
           </label>
           <div className="relative mt-2">
             <input
+              ref={inputRef}
               id={inputId}
               type="email"
               name="email"

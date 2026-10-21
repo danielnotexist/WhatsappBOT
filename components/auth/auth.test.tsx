@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { Activity, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodeStep, CodeStepFromUrl, digitsOnly, formatCountdown, waitFromParam } from "./code-step";
 import { ConnectStep, adminMailto } from "./connect-step";
 import { EmailStep, EmailStepFromUrl, looksLikeEmail } from "./email-step";
+import { ReadyLinkPending } from "./ready-step";
 import { deckForPath, toneForPath } from "./signup-shell";
 import { Toggle } from "./toggle";
 
@@ -187,6 +189,56 @@ describe("CodeStep", () => {
     render(<CodeStepFromUrl mode="login" />);
     expect(replace).toHaveBeenCalledWith("/login/email");
     expect(prefetch).toHaveBeenCalledWith("/account");
+  });
+});
+
+describe("focus — the field of the card on screen, also when the router shows it again", () => {
+  const shown = (mode: "visible" | "hidden", card: ReactNode) => <Activity mode={mode}>{card}</Activity>;
+
+  it("the code card focuses its cells; the page's static fallback (autoFocus={false}) does not", () => {
+    const fallback = render(<CodeStep email="" autoFocus={false} />);
+    expect(document.body).toHaveFocus();
+    fallback.unmount();
+    render(<CodeStep email="dana@levi-law.co.il" />);
+    expect(screen.getByRole("textbox", { name: "קוד בן 6 ספרות" })).toHaveFocus();
+  });
+
+  it("back/forward to the code card (revealed by <Activity>, no remount) puts the focus back in the cells", () => {
+    const card = <CodeStep email="dana@levi-law.co.il" />;
+    const { rerender } = render(shown("visible", card));
+    const cells = screen.getByRole("textbox", { name: "קוד בן 6 ספרות" });
+    cells.blur();
+    rerender(shown("hidden", card));
+    rerender(shown("visible", card));
+    expect(cells).toHaveFocus();
+  });
+
+  it("the email card focuses its field — on mount and when shown again — and its fallback does not", () => {
+    const fallback = render(<EmailStep autoFocus={false} />);
+    expect(document.body).toHaveFocus();
+    fallback.unmount();
+    const card = <EmailStep mode="login" />;
+    const { rerender } = render(shown("visible", card));
+    const field = screen.getByLabelText("כתובת מייל");
+    expect(field).toHaveFocus();
+    field.blur();
+    rerender(shown("hidden", card));
+    rerender(shown("visible", card));
+    expect(field).toHaveFocus();
+  });
+});
+
+describe("ReadyLinkPending — the ready card while its token is issued", () => {
+  it("never a wa.me link, a QR or a token; a real disabled button and a status line", () => {
+    const { container } = render(<ReadyLinkPending />);
+    expect(container.querySelector('a[href*="wa.me"]')).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.querySelector("figure, [role=img]")).toBeNull(); // the QR is a figure with role=img
+    expect(container.textContent).not.toMatch(/[A-Z0-9]{4}-[A-Z0-9]{4}/);
+    const button = screen.getByRole("button", { name: "חיבור לוואטסאפ" });
+    expect(button).toBeDisabled();
+    expect(button.className).toContain("disabled:bg-honey/30");
+    expect(screen.getByRole("status")).toHaveTextContent("מכינים את קישור החיבור האישי");
   });
 });
 

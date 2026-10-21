@@ -127,6 +127,12 @@ export function CodeStep({
     router.prefetch(authPaths[mode].next);
   }, [mode, router]);
 
+  // the cells take the focus whenever the card is shown — also when the router shows it again (back/forward reveals the
+  // hidden step through <Activity>, and `autoFocus` only acts on mount); never on a page's static fallback
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus({ preventScroll: true });
+  }, [autoFocus]);
+
   useEffect(() => {
     if (remaining <= 0) return;
     const t = window.setInterval(() => setNow(Date.now()), 250);

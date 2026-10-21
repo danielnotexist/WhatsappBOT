@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { DEMO_COPY, isDemo } from "@/lib/demo";
 
 /**
@@ -41,8 +41,28 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
     : {}),
 };
 
-export function proxy() {
-  const response = NextResponse.next();
+/**
+ * The code cards are static pages that read the address from the URL on the client; with no `?email=` there is nothing
+ * to verify, so a page load goes back to the matching email card here — the server's HTML is right with or without JS
+ * (the card does the same on the client, as a fallback).
+ */
+const CODE_CARD_HOME: Readonly<Record<string, string>> = { "/start/code": "/start/email", "/login/code": "/login/email" };
+
+/**
+ * Only a page load (a document navigation, or a client that does not say) is sent back. The router's own requests —
+ * prefetches of the code card ahead of the address, client navigations — are fetches (`Sec-Fetch-Mode: cors`): a
+ * redirect there would teach the router that the code card leads to the email card.
+ */
+export function codeCardWithoutEmail(request: NextRequest): string | null {
+  const home = CODE_CARD_HOME[request.nextUrl.pathname];
+  if (!home || request.nextUrl.searchParams.get("email")) return null;
+  const mode = request.headers.get("sec-fetch-mode");
+  return mode === null || mode === "navigate" ? home : null;
+}
+
+export function proxy(request: NextRequest) {
+  const home = codeCardWithoutEmail(request);
+  const response = home ? NextResponse.redirect(new URL(home, request.url)) : NextResponse.next();
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(name, value);
   }

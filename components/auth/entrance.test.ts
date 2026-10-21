@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTRANCE_DURATION, createEntranceGuard } from "./entrance";
+import { ENTRANCE_DURATION, RESHOW_GAP_MS, createEntranceGuard } from "./entrance";
 
 const CODE = "/start/code";
 const EMAIL = "/start/email";
@@ -28,7 +28,7 @@ describe("step entrance — once per screen", () => {
     expect(early.fresh).toBe(false);
     expect(early.delay).toBeCloseTo(0.1 - 0.25); // negative: start 150ms into the fade, where the fallback is
     // the commit: the fallback leaves, the content enters the same visit
-    guard.leave(fallback.visit);
+    guard.leave(fallback.visit, 1250);
     const content = guard.enter("aside", CODE, early, 1250, false);
     expect(content.replay).toBe(false);
     expect(content.visit).toBe(fallback.visit);
@@ -39,7 +39,7 @@ describe("step entrance — once per screen", () => {
   it("leaving a screen and coming back to it (a new visit) plays the entrance again", () => {
     const guard = createEntranceGuard();
     const first = mount(guard, "body", EMAIL, 0, 0.16);
-    guard.leave(first.visit);
+    guard.leave(first.visit, 1000);
     expect(guard.plan("body", EMAIL, 0.16, 60_000, true)).toEqual({ fresh: true, delay: 0.16 });
   });
 
@@ -48,7 +48,7 @@ describe("step entrance — once per screen", () => {
     const hydrated = mount(guard, "aside", CODE, 0, 0.1, false);
     expect(hydrated.plan).toEqual({ fresh: true, delay: null });
     expect(guard.plan("aside", CODE, 0.1, 10, true)).toEqual({ fresh: false, delay: null });
-    guard.leave(hydrated.visit);
+    guard.leave(hydrated.visit, 15);
     expect(guard.plan("aside", EMAIL, 0.1, 20, false)).toEqual({ fresh: true, delay: null });
   });
 
@@ -56,18 +56,38 @@ describe("step entrance — once per screen", () => {
     const guard = createEntranceGuard();
     const email = mount(guard, "aside", EMAIL, 0);
     // React (StrictMode) runs the mount effects twice: leave + enter again, same screen → nothing to replay
-    guard.leave(email.visit);
+    guard.leave(email.visit, 1);
     const again = guard.enter("aside", EMAIL, email.plan, 1, true);
     expect(again.replay).toBe(false);
     // "שליחת קוד": the email step is hidden (Activity), the code step enters
-    guard.leave(again.visit);
+    guard.leave(again.visit, 500);
     const code = mount(guard, "aside", CODE, 500);
     // browser back: the code step is hidden, the same email step is shown again → its entrance plays
-    guard.leave(code.visit);
+    guard.leave(code.visit, 8000);
     const back = guard.enter("aside", EMAIL, email.plan, 9000, true);
     expect(back.replay).toBe(true);
     expect(back.visit.screen).toBe(EMAIL);
     // and from then on it is the current visit
     expect(guard.plan("aside", EMAIL, 0.1, 9100, true).fresh).toBe(false);
+  });
+
+  it("a step shown again after a page without steps (/terms, then back) replays; the strict-mode re-run still does not", () => {
+    const guard = createEntranceGuard();
+    const email = mount(guard, "body", EMAIL, 0, 0.16);
+    // strict mode: hidden and shown again within the same commit → nothing to replay
+    guard.leave(email.visit, 600);
+    const strict = guard.enter("body", EMAIL, email.plan, 600, true);
+    expect(strict.replay).toBe(false);
+    expect(strict.visit).toBe(email.visit);
+    // "התנאים": the whole signup is hidden (no step mounts on /terms), so the slot's last visit is still this screen
+    guard.leave(strict.visit, 1000);
+    // browser back a few seconds later: shown again → the entrance, as a new visit
+    const back = guard.enter("body", EMAIL, email.plan, 4000, true);
+    expect(back.replay).toBe(true);
+    expect(back.visit).not.toBe(email.visit);
+    expect(back.visit.startedAt).toBe(4000);
+    // a gap of one frame or less is still the same commit
+    guard.leave(back.visit, 5000);
+    expect(guard.enter("body", EMAIL, email.plan, 5000 + RESHOW_GAP_MS, true).replay).toBe(false);
   });
 });

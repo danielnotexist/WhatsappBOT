@@ -103,16 +103,20 @@ export function ReadyLink({ waHref, token, connected }: { waHref: string; token:
 
 /**
  * <ReadyLink> while the token is being issued: the same layout, the button and the QR as quiet placeholders — never a
- * link without its token (and never a wrong wa.me link).
+ * link without its token (and never a wrong wa.me link). The button is a real disabled button in the tone's disabled
+ * look, so it neither looks nor reads as ready; a status line says what is happening.
  */
 export function ReadyLinkPending() {
   return (
     <>
       <div className="mt-8 flex flex-col gap-3 sm:max-w-sm" aria-busy="true">
-        <span aria-disabled="true" className={ctaClass({ tone: "honey", block: true, className: "pointer-events-none" })}>
+        <p role="status" className="sr-only">
+          מכינים את קישור החיבור האישי…
+        </p>
+        <button type="button" disabled className={ctaClass({ tone: "honey", block: true })}>
           <WhatsappGlyph className="size-5 flex-none" />
           חיבור לוואטסאפ
-        </span>
+        </button>
         <p className="text-[0.875rem] leading-relaxed text-cream-muted">
           נפתחת שיחה עם {BRAND.name} עם הודעה מוכנה. הקוד{" "}
           <bdi dir="ltr" className="font-semibold text-cream/35 tabular">
