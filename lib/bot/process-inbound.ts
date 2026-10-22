@@ -50,7 +50,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 
   const isButton = msg.type === "button" || msg.type === "list" || msg.type === "template_button";
   await ctx.wa.markRead(msg.waMessageId, { typing: true }).catch(() => undefined);
-  // 🔎 on the message while it is handled, "רק שנייה…" if nothing was sent after a few seconds, ✅ once done
+  // 👀 on the message while it is handled, "רק שנייה…" if nothing was sent after a few seconds, ✅ once done
   const progress = startProgress(ctx, to, msg.waMessageId, isButton);
   try {
     return await afterStored(progress.ctx, msg, { user, to, stored, isButton, spendTurn });
@@ -63,9 +63,9 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 export const PROGRESS_NOTE_AFTER_MS = 4_000;
 
 /**
- * The progress marks on an inbound message: a 🔎 reaction right away (not on button presses, which have no bubble of
+ * The progress marks on an inbound message: a 👀 reaction right away (not on button presses, which have no bubble of
  * their own to react to in a useful way), a short "רק שנייה…" when no reply went out within PROGRESS_NOTE_AFTER_MS
- * (not stored: it is not part of the conversation), and ✅ replacing the 🔎 when the message is handled. The returned
+ * (not stored: it is not part of the conversation), and ✅ replacing the 👀 when the message is handled. The returned
  * ctx notices every send, so a fast answer never gets the note.
  */
 function startProgress(ctx: BotContext, to: string, waMessageId: string, isButton: boolean) {
@@ -87,7 +87,7 @@ function startProgress(ctx: BotContext, to: string, waMessageId: string, isButto
     markRead: (...a) => wa.markRead(...a),
     downloadMedia: (...a) => wa.downloadMedia(...a),
   };
-  if (!isButton) void wa.sendReaction(to, waMessageId, "🔎").catch(() => undefined);
+  if (!isButton) void wa.sendReaction(to, waMessageId, "👀").catch(() => undefined);
   const timer = setTimeout(() => {
     if (!replied) void wa.sendText(to, liveCopy["progress.wait"]()).catch(() => undefined);
   }, PROGRESS_NOTE_AFTER_MS);

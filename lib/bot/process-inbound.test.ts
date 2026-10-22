@@ -44,14 +44,14 @@ describe("processInbound", () => {
     }
   });
 
-  it("dedupes redeliveries, reacts 🔎 then ✅, marks read with typing and stores both directions", async () => {
+  it("dedupes redeliveries, reacts 👀 then ✅, marks read with typing and stores both directions", async () => {
     const h = makeHarness();
     const user = await readyUser(h);
     const m = h.inbound("תודה");
     expect((await processInbound(h.ctx, m)).note).toBe("replied");
     expect((await processInbound(h.ctx, m)).note).toBe("duplicate");
     expect(h.wa.sent.map((s) => s.kind)).toEqual(["read", "reaction", "text", "reaction"]);
-    expect(h.wa.sent[1]!.emoji).toBe("🔎");
+    expect(h.wa.sent[1]!.emoji).toBe("👀");
     expect(h.wa.sent[3]!.emoji).toBe("✅");
     const rows = await h.db.recentMessages(user.id, 10);
     expect(rows.map((r) => r.direction)).toEqual(["in", "out"]);
