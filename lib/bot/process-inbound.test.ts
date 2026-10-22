@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { consumeLoginToken } from "@/lib/auth/login-token";
 import { LOGIN_RE } from "./login-link";
-import { processInbound } from "./process-inbound";
+import { PROGRESS_NOTE_AFTER_MS, processInbound } from "./process-inbound";
 import { makeHarness } from "./test-harness";
 
 async function readyUser(h: ReturnType<typeof makeHarness>) {
@@ -12,14 +12,47 @@ async function readyUser(h: ReturnType<typeof makeHarness>) {
 }
 
 describe("processInbound", () => {
-  it("dedupes redeliveries, reacts ✅, marks read with typing and stores both directions", async () => {
+  it("sends one unstored \"רק שנייה…\" when no reply went out in time, and none when the answer is fast", async () => {
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      const user = await readyUser(h);
+      let finish!: () => void;
+      const slow = new Promise<void>((r) => (finish = r));
+      // the answer is slow: the connections lookup before the model waits
+      const listConnections = h.db.listConnections.bind(h.db);
+      vi.spyOn(h.db, "listConnections").mockImplementation(async (id) => {
+        await slow;
+        return listConnections(id);
+      });
+      const run = processInbound(h.ctx, h.inbound("מה יש לי מחר?"));
+      await vi.advanceTimersByTimeAsync(PROGRESS_NOTE_AFTER_MS + 10);
+      expect(h.wa.texts).toContain("רק שנייה…");
+      finish();
+      await run;
+      expect(h.wa.texts.filter((t) => t === "רק שנייה…")).toHaveLength(1);
+      expect((await h.db.recentMessages(user.id, 10)).map((r) => r.text)).not.toContain("רק שנייה…");
+      expect(h.wa.sent.at(-1)!.emoji).toBe("✅");
+
+      const fast = makeHarness();
+      await readyUser(fast);
+      await processInbound(fast.ctx, fast.inbound("תודה"));
+      await vi.advanceTimersByTimeAsync(PROGRESS_NOTE_AFTER_MS + 10);
+      expect(fast.wa.texts).not.toContain("רק שנייה…");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dedupes redeliveries, reacts 🔎 then ✅, marks read with typing and stores both directions", async () => {
     const h = makeHarness();
     const user = await readyUser(h);
     const m = h.inbound("תודה");
     expect((await processInbound(h.ctx, m)).note).toBe("replied");
     expect((await processInbound(h.ctx, m)).note).toBe("duplicate");
-    expect(h.wa.sent.map((s) => s.kind)).toEqual(["read", "reaction", "text"]);
-    expect(h.wa.sent[1]!.emoji).toBe("✅");
+    expect(h.wa.sent.map((s) => s.kind)).toEqual(["read", "reaction", "text", "reaction"]);
+    expect(h.wa.sent[1]!.emoji).toBe("🔎");
+    expect(h.wa.sent[3]!.emoji).toBe("✅");
     const rows = await h.db.recentMessages(user.id, 10);
     expect(rows.map((r) => r.direction)).toEqual(["in", "out"]);
     expect(rows[1]!.model_used).toBe("mock-router");

@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     if (!given || !safeEqual(given, internalSecret())) return new Response("invalid internal secret", { status: 401 });
   }
   const workerUrl = new URL("/api/jobs/run", process.env.APP_URL || request.url).toString();
-  const result = await dispatchDueJobs(getDb(), getQueue(), workerUrl);
+  const queue = getQueue();
+  const result = await dispatchDueJobs(getDb(), queue, workerUrl);
+  await queue.drain?.();
   return Response.json({ ok: true, ...result }, { status: 200 });
 }

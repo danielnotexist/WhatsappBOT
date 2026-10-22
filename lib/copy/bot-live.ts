@@ -10,6 +10,8 @@ export const liveCopy = {
   "budget.daily_cap": () => "הגענו לתקרת השימוש של היום. אפשר להמשיך מחר.",
   /** this user's daily message cap in the demo (DEMO_USER_DAILY_MESSAGES) */
   "budget.user_cap_demo": (limit: number) => `הגענו ל-${limit} הודעות היום, המכסה של גרסת הבדיקה. אפשר להמשיך מחר.`,
+  /** sent once when no reply went out within a few seconds of a WhatsApp message (lib/bot/process-inbound.ts) */
+  "progress.wait": () => "רק שנייה…",
 } as const;
 
 /** The reply for a blocked call. */

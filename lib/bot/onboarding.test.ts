@@ -29,18 +29,18 @@ describe("onboarding", () => {
     expect((await h.db.getUser(user.id))!.name).toBe("דנה");
 
     await processInbound(h.ctx, h.inbound("משרד עו״ד לוי"));
-    expect(h.wa.sent.at(-1)!.kind).toBe("list");
-    expect(h.wa.sent.at(-1)!.sections![0]!.rows.map((r) => r.id)).toEqual(["pain_email", "pain_calendar", "pain_followup", "pain_files"]);
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.kind).toBe("list");
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.sections![0]!.rows.map((r) => r.id)).toEqual(["pain_email", "pain_calendar", "pain_followup", "pain_files"]);
 
     await processInbound(h.ctx, h.listReply("pain_email", "מיילים שמחכים לתשובה"));
     expect(h.wa.texts.at(-2)).toContain("נתחיל מהתיבה");
-    expect(h.wa.sent.at(-1)!.kind).toBe("list");
-    expect(h.wa.sent.at(-1)!.sections![0]!.rows.map((r) => r.title)).toEqual(["07:00", "07:30", "08:00", "08:30", "לא עכשיו"]);
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.kind).toBe("list");
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.sections![0]!.rows.map((r) => r.title)).toEqual(["07:00", "07:30", "08:00", "08:30", "לא עכשיו"]);
 
     await processInbound(h.ctx, h.listReply("mt_0800", "08:00"));
     expect(h.wa.texts.at(-2)).toContain("סיכום בוקר ב-08:00");
     expect((await h.db.getUser(user.id))!.morning_time).toBe("08:00");
-    expect(h.wa.sent.at(-1)!.buttons!.map((b) => b.id)).toEqual(["onb:connect:microsoft", "onb:connect:google", "onb:connect:later"]);
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.buttons!.map((b) => b.id)).toEqual(["onb:connect:microsoft", "onb:connect:google", "onb:connect:later"]);
 
     await processInbound(h.ctx, h.button("onb:connect:later", "אחר כך"));
     expect(h.wa.texts.at(-2)).toContain("בלי חיבור אני יכולה לעזור");

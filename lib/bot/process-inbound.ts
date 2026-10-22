@@ -7,8 +7,8 @@ import { payLinkFor } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
-import { budgetReply } from "@/lib/copy/bot-live";
-import type { MessageType } from "@/lib/db/types";
+import { budgetReply, liveCopy } from "@/lib/copy/bot-live";
+import type { MessageRow, MessageType, UserRow } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
 import { basicLimitReached, handleBillingPress, handleBillingText, pausedAccount } from "./billing";
@@ -50,7 +50,61 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 
   const isButton = msg.type === "button" || msg.type === "list" || msg.type === "template_button";
   await ctx.wa.markRead(msg.waMessageId, { typing: true }).catch(() => undefined);
-  if (!isButton) await ctx.wa.sendReaction(to, msg.waMessageId, "✅").catch(() => undefined);
+  // 🔎 on the message while it is handled, "רק שנייה…" if nothing was sent after a few seconds, ✅ once done
+  const progress = startProgress(ctx, to, msg.waMessageId, isButton);
+  try {
+    return await afterStored(progress.ctx, msg, { user, to, stored, isButton, spendTurn });
+  } finally {
+    await progress.done();
+  }
+}
+
+/** How long a message may go without any reply before "רק שנייה…" is sent. */
+export const PROGRESS_NOTE_AFTER_MS = 4_000;
+
+/**
+ * The progress marks on an inbound message: a 🔎 reaction right away (not on button presses, which have no bubble of
+ * their own to react to in a useful way), a short "רק שנייה…" when no reply went out within PROGRESS_NOTE_AFTER_MS
+ * (not stored: it is not part of the conversation), and ✅ replacing the 🔎 when the message is handled. The returned
+ * ctx notices every send, so a fast answer never gets the note.
+ */
+function startProgress(ctx: BotContext, to: string, waMessageId: string, isButton: boolean) {
+  let replied = false;
+  const sent = <T>(p: Promise<T>): Promise<T> => {
+    replied = true;
+    return p;
+  };
+  const wa = ctx.wa;
+  const tracked: BotContext["wa"] = {
+    ...wa,
+    sendText: (...a) => sent(wa.sendText(...a)),
+    sendButtons: (...a) => sent(wa.sendButtons(...a)),
+    sendList: (...a) => sent(wa.sendList(...a)),
+    sendImage: (...a) => sent(wa.sendImage(...a)),
+    sendDocument: (...a) => sent(wa.sendDocument(...a)),
+    sendTemplate: (...a) => sent(wa.sendTemplate(...a)),
+    sendReaction: (...a) => wa.sendReaction(...a),
+    markRead: (...a) => wa.markRead(...a),
+    downloadMedia: (...a) => wa.downloadMedia(...a),
+  };
+  if (!isButton) void wa.sendReaction(to, waMessageId, "🔎").catch(() => undefined);
+  const timer = setTimeout(() => {
+    if (!replied) void wa.sendText(to, liveCopy["progress.wait"]()).catch(() => undefined);
+  }, PROGRESS_NOTE_AFTER_MS);
+  return {
+    ctx: { ...ctx, wa: tracked },
+    async done() {
+      clearTimeout(timer);
+      if (!isButton) await wa.sendReaction(to, waMessageId, "✅").catch(() => undefined);
+    },
+  };
+}
+
+async function afterStored(
+  ctx: BotContext,
+  msg: InboundMessage,
+  { user, to, stored, isButton, spendTurn }: { user: UserRow; to: string; stored: MessageRow; isButton: boolean; spendTurn: SpendTurn | null },
+): Promise<{ handled: boolean; note?: string }> {
 
   const say = async (text: string) => {
     await ctx.wa.sendText(to, text);

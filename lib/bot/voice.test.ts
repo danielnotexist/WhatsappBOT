@@ -25,7 +25,7 @@ describe("voice notes", () => {
     const { h, user, voice, stt } = await setup();
     const r = await processInbound(h.ctx, voice());
     expect(r.note).toBe("replied");
-    expect(h.wa.sent.map((s) => s.kind)).toEqual(["read", "reaction", "text", "text"]);
+    expect(h.wa.sent.map((s) => s.kind)).toEqual(["read", "reaction", "text", "text", "reaction"]);
     expect(h.wa.sent[2]!.body).toBe("מקשיבה…");
     // MockStt says "תזכיר לי מחר ב-9 להתקשר לבנק" → the assistant sets the reminder
     expect(h.wa.texts.at(-1)).toBe("אזכיר: להתקשר לבנק\nמחר, 9:00");

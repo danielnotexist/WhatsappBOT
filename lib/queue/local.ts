@@ -10,7 +10,8 @@ export function internalSecret(): string {
 
 /**
  * Dev fallback when QSTASH_TOKEN is not set: POSTs the job straight to the worker URL with an internal secret,
- * fire-and-forget (no retries, no dedupe). The webhook route still answers 200 immediately.
+ * without retries or dedupe. `enqueue` returns right away; the caller awaits `drain()` (after the response) so a
+ * serverless invocation is not frozen before the worker got the job.
  */
 export class LocalQueue implements Queue {
   readonly kind = "local" as const;
@@ -36,5 +37,13 @@ export class LocalQueue implements Queue {
     const p = run().catch((e) => console.error(`[queue:local] delivery failed for job ${id}:`, (e as Error).message));
     this.pending.push(p);
     return { id };
+  }
+
+  async drain(): Promise<void> {
+    while (this.pending.length) {
+      const batch = this.pending;
+      this.pending = [];
+      await Promise.allSettled(batch);
+    }
   }
 }

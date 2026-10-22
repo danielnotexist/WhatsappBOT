@@ -12,4 +12,9 @@ export interface QueueJob {
 export interface Queue {
   readonly kind: "qstash" | "local";
   enqueue(job: QueueJob): Promise<{ id: string }>;
+  /**
+   * Waits until every job enqueued so far was delivered (local queue only — QStash delivers on its own). Callers on
+   * serverless await it before the invocation ends; otherwise the platform may freeze the function mid-delivery.
+   */
+  drain?(): Promise<void>;
 }

@@ -5,6 +5,9 @@ import { getQueue } from "@/lib/queue";
 import { META_SIGNATURE_HEADER, verifyMetaSignature, verifyMetaWebhookChallenge } from "@/lib/wa/signature";
 import { parseWebhook } from "@/lib/wa/webhook";
 
+/** The local queue (demo, no QStash) delivers to the worker inside `after()` and waits for it. */
+export const maxDuration = 300;
+
 /** GET: Meta's one-time subscription handshake (hub.verify_token must equal WA_VERIFY_TOKEN). */
 export async function GET(request: Request) {
   let verifyToken: string;
@@ -63,6 +66,7 @@ export async function POST(request: Request) {
         console.error(`[wa:webhook] enqueue failed (${dedupeId}):`, (e as Error).message);
       }
     }
+    await queue.drain?.();
   });
 
   return Response.json({ ok: true, queued: jobs.length }, { status: 200 });

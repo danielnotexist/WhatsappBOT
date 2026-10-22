@@ -594,3 +594,9 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 **בדיקות:** `lib/ai/budget.test.ts` (סירוב בפריסה על זיכרון, הערכות, שמירה במקביל, החזרה בשגיאת ספק, העברת תיקון שנכשל, AbortSignal), `lib/ai/anthropic.test.ts` (signal), `lib/stt/webm.test.ts`, `lib/bot/onboarding-answers.test.ts`, `lib/db/supabase-ai-spend.test.ts`, `app/api/demo/chat/demo-chat-route.test.ts` (התרחיש מהסקירה: הצעה במקום שם, `awaiting`, אורך אחרי רענון, סוגים, 512KB, WebM ארוך, העלאה בלי Content-Length), SQL `ai_spend.test.sql` + בדיקת שתי שמירות במקביל ב-`run-local.sh`.
 
 **דרוש מדניאל:** להריץ ב-Supabase גם את `supabase/migrations/0010_ai_spend_reserve.sql` (אחרי 0009) לפני `LIVE_AI=1`.
+
+## וואטסאפ חי - תיקונים מהבדיקה הראשונה עם דניאל
+- **הודעות שלא קיבלו תשובה אחרי הקישור:** בלי QStash, התור המקומי שלח את העבודה ל-worker בתוך `after()` בלי לחכות לה, ו-Vercel הקפיא את הפונקציה באמצע. נוסף `drain()` ל-`LocalQueue` (ול-`Queue` כאופציונלי), וה-webhook וה-`/api/jobs/tick` מחכים לו. ל-webhook נוסף `maxDuration = 300`.
+- **סימני התקדמות (בקשת דניאל):** 🔎 על ההודעה מיד, "רק שנייה…" אם אחרי 4 שניות עוד לא נשלחה תשובה (פעם אחת, לא נשמר בהיסטוריה), ו-✅ במקום ה-🔎 בסיום. `lib/bot/process-inbound.ts` (`startProgress`), הטקסט ב-`lib/copy/bot-live.ts` (`progress.wait`).
+- **QR וכפתור הוואטסאפ ב-`/start/ready`:** עם `LIVE_WA=1` הם פותחים את וואטסאפ באמת, ולא את חלון ההסבר של ההדגמה.
+- בדיקות: `lib/queue/local.test.ts`, "רק שנייה…" ב-`lib/bot/process-inbound.test.ts`, ועדכון הסדר ב-onboarding / voice.
