@@ -61,6 +61,9 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
     }
   };
   const tools: Tool[] = [];
+  /** Who a change or a cancellation of an event reaches (its attendees but the user), for an agent limited to a list. */
+  const attendeesOf = async (id: string): Promise<string[] | { error: string }> =>
+    (await guard(async (g) => (await g.getEvent(id, deps.timeZone)).attendees.filter((a) => !a.self).map((a) => a.email.trim().toLowerCase()).filter(Boolean))) as string[] | { error: string };
 
   if (hasScope(granted, GOOGLE_SCOPES.calendarEvents)) {
     tools.push(
@@ -110,7 +113,10 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         readOnly: false,
         input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-gcal_list_events"), subject: str("כותרת חדשה או ריק"), date: str("תאריך חדש YYYY-MM-DD או ריק"), start: str("שעת התחלה חדשה HH:MM או ריק"), end: str("שעת סיום חדשה HH:MM או ריק"), location: str("מקום חדש או ריק") }, required: ["id", "subject", "date", "start", "end", "location"], additionalProperties: false },
         run: async (input, ctx) => {
-          const pending = await ctx.createPending("update_event", { provider: "google", id: String(input.id ?? ""), subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? "") });
+          const id = String(input.id ?? "");
+          const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
+          if (attendees && !Array.isArray(attendees)) return attendees;
+          const pending = await ctx.createPending("update_event", { provider: "google", id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
           return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
         },
       },
@@ -120,7 +126,10 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         readOnly: false,
         input_schema: { type: "object", properties: { id: str("מזהה האירוע"), subject: str("כותרת האירוע (לתצוגה)") }, required: ["id", "subject"], additionalProperties: false },
         run: async (input, ctx) => {
-          const pending = await ctx.createPending("delete_event", { provider: "google", id: String(input.id ?? ""), subject: String(input.subject ?? "") });
+          const id = String(input.id ?? "");
+          const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
+          if (attendees && !Array.isArray(attendees)) return attendees;
+          const pending = await ctx.createPending("delete_event", { provider: "google", id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
           return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
         },
       },

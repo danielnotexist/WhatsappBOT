@@ -1,5 +1,8 @@
-import { PLANS, TRIAL_MESSAGES, isPaidPlan } from "@/lib/billing/plans";
-import type { ConnectionRow, SubscriptionRow, UsageRow, WaIdentityRow } from "@/lib/db/types";
+import { capsLine } from "@/lib/agents/capabilities";
+import type { AgentStatus, ResolvedAgent } from "@/lib/agents/policy";
+import { BUILTIN_AGENTS } from "@/lib/agents/templates";
+import { PLANS, TRIAL_MESSAGES, customAgentLimit, paidPlanOf, type EffectivePlan } from "@/lib/billing/plans";
+import type { AgentRole, BuiltinRole, ConnectionRow, SubscriptionRow, UsageRow, WaIdentityRow } from "@/lib/db/types";
 
 /**
  * Pure helpers for the personal area (/account): what to say and show for a given account state.
@@ -77,13 +80,8 @@ export interface UsageView {
   resetsOn: string | null;
 }
 
-/** Whether the subscription currently grants a paid plan (cancelled plans run until the end of the paid period). */
-export function paidPlanOf(sub: SubscriptionRow | null, now: Date): "basic" | "pro" | null {
-  if (!sub || !isPaidPlan(sub.plan)) return null;
-  if (sub.status === "active" || sub.status === "past_due") return sub.plan;
-  if (sub.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime()) return sub.plan;
-  return null;
-}
+/** Whether the subscription currently grants a paid plan — moved to lib/billing/plans.ts (shared with the agents). */
+export { paidPlanOf };
 
 /**
  * The meter's numbers. The usage table keeps one row per period (trial: one period from signup; paid: the calendar
@@ -119,4 +117,82 @@ export function statusLine(opts: { phoneLinked: boolean; microsoft: ConnectionSt
 /** 3000 → "3,000" */
 export function formatCount(n: number): string {
   return new Intl.NumberFormat("he-IL").format(n);
+}
+
+// ---------------------------------------------------------------- agents (docs/design/agents.md §10)
+
+export interface AgentRowView {
+  key: string;
+  kind: "builtin" | "custom";
+  role: AgentRole;
+  name: string;
+  /** "מובנה" / "על בסיס: מזכירה" / "סוכן משלך" */
+  origin: string;
+  capsLine: string;
+  status: AgentStatus;
+  statusLabel: string;
+  /** the edit form opens: every custom agent, built-ins on pro */
+  editable: boolean;
+  deletable: boolean;
+  toggle: "enable" | "disable" | null;
+  /** one quiet line under the row when there is no form (trial: how to try it; basic: the plan that has it) */
+  hint: string | null;
+}
+
+export interface AgentsView {
+  quotaLine: string;
+  rows: AgentRowView[];
+  /** a new custom agent fits the plan */
+  canCreate: boolean;
+  /** the call to action toward a plan that has more (null on pro) */
+  upgrade: { label: string } | null;
+}
+
+const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {
+  active: "פעיל",
+  disabled: "מושבת",
+  locked: "נעול: מעבר למכסת המסלול",
+  not_in_plan: "כלול במסלול פרו",
+};
+
+const TRY_IT: Record<BuiltinRole, string> = {
+  secretary: "@מזכירה מה יש לי מחר?",
+  intern: "@מתמחה מה כתוב בהסכם של כהן?",
+  bookkeeper: "@מנהלת חשבונות אילו חשבוניות הגיעו השבוע?",
+};
+
+/** What the "הסוכנים שלי" section shows for the user's agents on their plan. Pure — unit-tested. */
+export function agentsView(agents: readonly ResolvedAgent[], plan: EffectivePlan): AgentsView {
+  const used = agents.filter((a) => a.kind === "custom").length;
+  const limit = customAgentLimit(plan);
+  const quotaLine =
+    plan === "trial"
+      ? "בתקופת הניסיון אפשר לנסות את שלושת הסוכנים המובנים. סוכן משלך נפתח עם מנוי."
+      : plan === "basic"
+        ? `סוכנים משלך: ${used} מתוך ${limit}. הסוכנים המובנים כלולים במסלול פרו.`
+        : `סוכנים משלך: ${used} מתוך ${limit}, בנוסף לשלושת הסוכנים המובנים.`;
+  const rows = agents.map((a): AgentRowView => {
+    const builtin = a.kind === "builtin";
+    const editable = builtin ? plan === "pro" : true;
+    return {
+      key: a.key,
+      kind: a.kind,
+      role: a.role,
+      name: a.name,
+      origin: builtin ? "מובנה" : a.template ? `על בסיס: ${BUILTIN_AGENTS[a.template].name}` : "סוכן משלך",
+      capsLine: capsLine(a.capabilities),
+      status: a.status,
+      statusLabel: AGENT_STATUS_LABEL[a.status],
+      editable,
+      deletable: !builtin,
+      toggle: !editable || a.status === "not_in_plan" ? null : a.status === "disabled" ? "enable" : a.status === "locked" ? null : "disable",
+      hint: builtin && plan === "trial" ? `לנסות בוואטסאפ: ״${TRY_IT[a.role as BuiltinRole]}״` : null,
+    };
+  });
+  return {
+    quotaLine,
+    rows,
+    canCreate: used < limit,
+    upgrade: plan === "trial" ? { label: "להפעלת מנוי" } : plan === "basic" ? { label: "לשדרוג לפרו" } : null,
+  };
 }

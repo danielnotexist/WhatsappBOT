@@ -19,10 +19,17 @@ export async function providerForAction(db: Db, action: Pick<PendingActionRow, "
   return "microsoft";
 }
 
-export function routeExecutorsByProvider(byProvider: Record<ConnectionProvider, Record<RoutedKind, ActionExecutor>>, providerFor: (action: PendingActionRow) => Promise<ConnectionProvider>): Record<RoutedKind, ActionExecutor> {
+/**
+ * `forward_mail` always goes to Microsoft: forwarding needs the original message, and Gmail reading waits for CASA
+ * (PLAN §2/§8) — the tool does not exist for Google, so no Google draft of this kind can be created.
+ */
+export function routeExecutorsByProvider(
+  byProvider: { microsoft: Record<RoutedKind | "forward_mail", ActionExecutor>; google: Record<RoutedKind, ActionExecutor> },
+  providerFor: (action: PendingActionRow) => Promise<ConnectionProvider>,
+): Record<RoutedKind | "forward_mail", ActionExecutor> {
   const route =
     (kind: RoutedKind): ActionExecutor =>
     async (action, ctx) =>
       byProvider[await providerFor(action)][kind](action, ctx);
-  return { send_mail: route("send_mail"), create_event: route("create_event"), update_event: route("update_event"), delete_event: route("delete_event") };
+  return { send_mail: route("send_mail"), create_event: route("create_event"), update_event: route("update_event"), delete_event: route("delete_event"), forward_mail: byProvider.microsoft.forward_mail };
 }

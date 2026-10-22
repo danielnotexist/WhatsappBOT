@@ -434,3 +434,21 @@ DB_NAME=whatsappbot_gmail_test supabase/tests/run-local.sh   # google_user_cap.t
 **במיזוג (22.10):** שולב אחרי ענף התמלול, בלי התנגשויות בקוד. אחרי המיזוג: 668 יחידה, build, SQL מקומי (0001–0008).
 
 **דרוש מדניאל:** שורות 6–7 בטבלה "דרוש מדניאל" למעלה. **לשילוב עם ענף הסוכנים:** להוסיף את ארבעת כלי `gmail_*` ל-`CAPABILITIES['mail.read']` (`docs/progress/gmail-read.md` → "פתוח / לשילוב").
+
+### 2026-10-22 — סוכנים: מובנים ומותאמים (שולב מענף נפרד)
+
+> פירוט מלא: `docs/progress/agents.md`; העיצוב: `docs/design/agents.md`. נבנה במקביל לתמלול, ל-Gmail ול-HYP ומוזג אחרי התמלול וה-Gmail.
+
+**מה נעשה (בענף)**
+- 99 ₪ = סוכן אחד משלך · 299 ₪ = שלושת המובנים (מזכירה, מתמחה, מנהלת חשבונות) ועד 3 סוכנים משלך. בניסיון: המובנים כמו שהם.
+- מיגרציה **0006_agents.sql**: אילוצים, `agent_custom_limit`, הטריגרים `enforce_agent_rules` ו-`enforce_agent_daily_cap`, ייחוס (`agent_key`/`agent_name`), `messages.hidden_from_model`, `pending_action_kind += forward_mail`. ‏`run-local.sh` מריץ גם בדיקת מקביליות בשני סשנים.
+- `lib/agents/` (יכולות → כלים לפי ספק, תבניות, policy, ניתוב `@שם`, prompt, שומר נמענים ותקרה יומית, service, פקודות וואטסאפ), כלי `forward_email` (Microsoft 365), סקשן "הסוכנים שלי" באזור האישי.
+
+**במיזוג**
+- התנגשות אחת ב-`lib/db/memory.ts` (`deleteUser`): נשמרו גם ניתוק הפנקס של Google (`user_id = null`) וגם מחיקת הסוכנים.
+- **Gmail × סוכנים:** היכולת `mail.read` ממפה עכשיו גם את `gmail_search_emails`, `gmail_get_email`, `gmail_get_thread`, `gmail_awaiting_reply` (כמו שביקש ענף ה-Gmail), והבדיקה "every tool is classified" בונה את כלי Google עם `gmail.readonly` ועם `gmailReadEnabled: true`, כך שכלי Gmail חדש שלא סווג מפיל אותה. בדיקה חדשה: סוכן עם `mail.read` מקבל את ארבעת הכלים, בלי `gmail_draft_email`. הטבלה ב-`docs/design/agents.md` §3 עודכנה.
+- מספרי המיגרציות: 0006 (סוכנים), 0008 (Gmail); 0007 שמורה ל-HYP שמוזג הבא.
+
+**בדיקות:** 770 יחידה, lint, typecheck, build, SQL מקומי (0001–0008, כולל מקביליות).
+
+**דרוש מדניאל:** להריץ את 0006 לפני הפריסה (הקוד קורא את העמודות החדשות); אישור הדביקות של 10 דקות ובחירת הסוכן ע"י ה-router (`docs/progress/agents.md`).

@@ -120,8 +120,9 @@ insert into public.audit_log (user_id, action, target) values
   ('11111111-1111-4111-8111-111111111111', 'send_mail', 'x@a.example'),
   ('22222222-2222-4222-8222-222222222222', 'send_mail', 'y@b.example');
 
+-- B is on the basic plan (subscription above): one custom agent is within its quota (0006 enforce_agent_rules)
 insert into public.agents (user_id, name, role) values
-  ('22222222-2222-4222-8222-222222222222', 'סוכן B', 'secretary');
+  ('22222222-2222-4222-8222-222222222222', 'סוכן B', 'custom');
 
 insert into public.link_tokens (user_id, token, expires_at) values
   ('11111111-1111-4111-8111-111111111111', 'RLSA-0001', now() + interval '15 minutes');
@@ -258,13 +259,17 @@ select pg_temp.expect_denied('A: set reminder status=sent violates WITH CHECK',
 select pg_temp.expect_denied('A: update reminder text column denied',
   $$update public.reminders set text = 'x'$$);
 
--- agents: CRUD על שלי בלבד
-select pg_temp.check('A: insert own agent works',
-  pg_temp.affected($$insert into public.agents (user_id, name) values ('11111111-1111-4111-8111-111111111111', 'סוכן A')$$) = 1);
-select pg_temp.expect_denied('A: insert agent for B violates WITH CHECK',
+-- agents (0006): קריאה בלבד — יצירה/עריכה/מחיקה רק דרך השרת (שכבת השירות + enforce_agent_rules)
+select pg_temp.expect_denied('A: insert own agent denied (server only since 0006)',
+  $$insert into public.agents (user_id, name) values ('11111111-1111-4111-8111-111111111111', 'סוכן A')$$);
+select pg_temp.expect_denied('A: insert agent for B denied',
   $$insert into public.agents (user_id, name) values ('22222222-2222-4222-8222-222222222222', 'חדירה')$$);
-select pg_temp.check('A: delete of B agent affects 0 rows',
-  pg_temp.affected($$delete from public.agents where user_id = '22222222-2222-4222-8222-222222222222'$$) = 0);
+select pg_temp.expect_denied('A: update agents denied',
+  $$update public.agents set enabled = false$$);
+select pg_temp.expect_denied('A: delete agents denied (own or B''s)',
+  $$delete from public.agents where user_id = '22222222-2222-4222-8222-222222222222'$$);
+select pg_temp.expect_denied('A: agent_custom_limit denied',
+  $$select public.agent_custom_limit('pro')$$);
 
 -- =============================================================================
 -- 2. לקוח B (אותו role, sub = B): לא רואה כלום של A
@@ -284,9 +289,13 @@ select pg_temp.check('B: users — does not see A (even by id)',
   (select count(*) from public.users where id = '11111111-1111-4111-8111-111111111111') = 0);
 select pg_temp.check('B: conversation_state — not A',
   (select count(*) from public.conversation_state where user_id = '11111111-1111-4111-8111-111111111111') = 0);
-select pg_temp.check('B: agents — sees own + not A''s new agent',
+select pg_temp.check('B: agents — sees exactly own 1 row',
   (select count(*) from public.agents) = 1
   and (select user_id from public.agents) = '22222222-2222-4222-8222-222222222222');
+select pg_temp.expect_denied('B: cannot rename own agent directly (server only)',
+  $$update public.agents set name = 'שם אחר'$$);
+select pg_temp.expect_denied('B: cannot delete own agent directly (server only)',
+  'delete from public.agents');
 select pg_temp.check('B: payments — own 1 (safe columns)',
   (select count(*) from public.payments) = 1
   and (select amount_ils from public.payments) = 99);
@@ -360,7 +369,15 @@ select pg_temp.check('authenticated has no INSERT/DELETE on server-managed table
       and privilege_type in ('INSERT', 'DELETE')
       and table_name in ('messages', 'audit_log', 'payments', 'subscriptions', 'usage', 'jobs',
                          'link_tokens', 'auth_otps', 'connections', 'pending_actions', 'wa_identities',
-                         'graph_subscriptions', 'wa_templates', 'wa_link_attempts', 'conversation_state', 'users')));
+                         'graph_subscriptions', 'wa_templates', 'wa_link_attempts', 'conversation_state', 'users',
+                         'agents')));
+select pg_temp.check('authenticated has no UPDATE on agents (0006)',
+  not exists (
+    select 1 from information_schema.role_table_grants
+    where grantee = 'authenticated' and table_schema = 'public' and table_name = 'agents'
+      and privilege_type in ('INSERT', 'UPDATE', 'DELETE')));
+select pg_temp.check('agents keeps only the select policy',
+  (select array_agg(policyname::text order by policyname) from pg_policies where schemaname = 'public' and tablename = 'agents') = array['agents_select_own']);
 
 rollback;
 

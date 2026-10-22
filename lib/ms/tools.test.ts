@@ -54,6 +54,40 @@ describe("Graph tools in the assistant", () => {
     void conn;
   });
 
+  it("forward_email only creates a forward_mail draft; the approved draft goes out through POST …/forward", async () => {
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    const fixture = createGraphFixture();
+    const graph = new GraphClient({ getAccessToken: async () => "tok", fetchImpl: fixture.fetchImpl });
+    h.ctx.extraTools = async () => graphTools({ graph: async () => graph, timeZone: "Asia/Jerusalem" });
+    registerExecutor("forward_mail", graphExecutors(async () => ({ graph, timeZone: "Asia/Jerusalem" })).forward_mail);
+    h.ai.enqueue(
+      { text: '{"intent":"email","complexity":"tool","needs_tools":true,"reply":null}' },
+      { toolCalls: [{ id: "f1", name: "forward_email", input: { message_id: "AAMkAGm1", to_email: "office@barak-cpa.example", comment: "לטיפולך" } }], stopReason: "tool_use" },
+      { text: "הכנתי העברה." },
+    );
+    await processInbound(h.ctx, h.inbound("תעבירי את ההצעה של שפירא לרו״ח"));
+    const draft = h.wa.sent.filter((s) => s.kind === "buttons").at(-1)!;
+    expect(draft.body).toContain("*העברת מייל*");
+    expect(draft.body).toContain("נושא: הצעת פשרה, תיק 4471");
+    expect(draft.body).toContain("קבצים: הצעת פשרה 4471.pdf");
+    expect(draft.body).toContain("אל: office@barak-cpa.example");
+    expect(draft.buttons!.map((b) => b.title)).toEqual(["העבר", "ערוך", "בטל"]);
+    expect(fixture.state.calls.some((c) => c.url.includes("/forward"))).toBe(false); // nothing left before the press
+    const id = draft.buttons![0]!.id.split(":")[2]!;
+    expect((await h.db.getPendingAction(id))!.kind).toBe("forward_mail");
+    await processInbound(h.ctx, h.button(`pa:approve:${id}`, "העבר"));
+    expect(h.wa.texts.at(-1)).toBe("הועבר אל office@barak-cpa.example.");
+    expect(fixture.state.sent.at(-1)).toMatchObject({ forward: "AAMkAGm1", comment: "לטיפולך", toRecipients: [{ emailAddress: { address: "office@barak-cpa.example" } }] });
+
+    // a missing recipient never becomes a draft
+    const tool = graphTools({ graph: async () => graph, timeZone: "Asia/Jerusalem" }).find((t) => t.name === "forward_email")!;
+    const out = await tool.run({ message_id: "AAMkAGm1", to_email: "", comment: "" }, { db: h.db, userId: user.id, now: new Date(), createPending: async () => { throw new Error("must not draft"); } });
+    expect(out).toMatchObject({ status: "error", error: "invalid_recipient" });
+  });
+
   it("reads Office files through the PDF rendition and reports expired connections without throwing", async () => {
     const db = (await import("@/lib/db/memory")).MemoryDb;
     const mem = new db();

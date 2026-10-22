@@ -63,7 +63,7 @@
 6. לעקוב: Console → Audience → OAuth user cap; ההתראות שלנו ב-80/95.
 
 ## פתוח / לשילוב
-- **ענף הסוכנים (`worktree-wf_14ee0984-e52-2`, `lib/agents/capabilities.ts`):** היכולת `mail.read` ממפה רק את `search_emails`, `get_email` ו-`gmail_read_status`, ו-`toolsForAgent` עובד כרשימה מותרת. אחרי המיזוג צריך להוסיף ל-`CAPABILITIES['mail.read']` את `gmail_search_emails`, `gmail_get_email`, `gmail_get_thread` ו-`gmail_awaiting_reply`, ולהרחיב את הבדיקה "every tool is classified" כך שתבנה את `googleTools` עם `gmail.readonly` (ועם `gmailReadEnabled: true`). אחרת סוכן עם `mail.read` לא יקבל אף כלי מייל של Gmail.
+- **(בוצע במיזוג, 22.10)** **ענף הסוכנים (`worktree-wf_14ee0984-e52-2`, `lib/agents/capabilities.ts`):** היכולת `mail.read` ממפה רק את `search_emails`, `get_email` ו-`gmail_read_status`, ו-`toolsForAgent` עובד כרשימה מותרת. אחרי המיזוג צריך להוסיף ל-`CAPABILITIES['mail.read']` את `gmail_search_emails`, `gmail_get_email`, `gmail_get_thread` ו-`gmail_awaiting_reply`, ולהרחיב את הבדיקה "every tool is classified" כך שתבנה את `googleTools` עם `gmail.readonly` (ועם `gmailReadEnabled: true`). אחרת סוכן עם `mail.read` לא יקבל אף כלי מייל של Gmail.
 - **PLAN (מסמך מאושר — לא נגעתי):** סיכון 5 בטבלת הסיכונים ושורה 56 ("שלב 1 בלי קריאת Gmail; CASA בשלב 6") לא משקפים את ההחלטה מ-21.10. ההחלטה נרשמה ב-`docs/PROGRESS.md` ("החלטות שהתקבלו אחרי התוכנית"). את עדכון הנוסח ב-PLAN דניאל מאשר.
 - **מסך האתר `/connect/google`** (`components/auth/connect-transition.tsx` — מחוץ לתחום שלי): להציג את `gcopy["g.unverified_heads_up"]()` מתחת ל"מעבירים אותך ל-Google…" כשהמסך הבא יהיה "לא מאומת".
 - **Microsoft `get_email`** (`lib/ms/tools.ts`) עדיין לא עוטף את גוף המייל ב-`<data>` — אפשר להשתמש ב-`wrapUntrusted` גם שם; לא נגעתי כדי לא להתנגש בזרימת הסוכנים (forward_email).

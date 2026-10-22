@@ -114,7 +114,7 @@
 
 | יכולת | תווית בעברית | כלים בסיסיים | Microsoft 365 | Google | סוג |
 |---|---|---|---|---|---|
-| `mail.read` | קריאת מייל | – | `search_emails`, `get_email` | `gmail_read_status` | קריאה |
+| `mail.read` | קריאת מייל | – | `search_emails`, `get_email` | `gmail_search_emails`, `gmail_get_email`, `gmail_get_thread`, `gmail_awaiting_reply`, `gmail_read_status` | קריאה |
 | `mail.draft` | טיוטות מייל | `draft_email` | – | `gmail_draft_email` | יוצאת (אישור) |
 | `mail.forward` | העברת מיילים | – | `forward_email` (חדש) | – (אין קריאת Gmail עד CASA) | יוצאת (אישור) |
 | `calendar.read` | קריאת יומן | – | `list_events` | `gcal_list_events`, `gcal_free_slots` | קריאה |

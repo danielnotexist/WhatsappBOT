@@ -1,7 +1,11 @@
 import type { Db, MessageRow, UserRow } from "@/lib/db/types";
 import type { AiProvider, ChatMessage } from "./types";
 
-/** PLAN §2.2: the model sees the rolling summary + facts + the last N messages only. */
+/**
+ * PLAN §2.2: the model sees the rolling summary + facts + the last N messages only. Agent management in WhatsApp
+ * (step 5b — the create / edit flows, where a user dictates an agent's instructions) is stored but never read here:
+ * neither the history nor the summary sees it (docs/design/agents.md I5).
+ */
 export const MEMORY = { recentMessages: 10, summarizeEvery: 20, summaryMaxChars: 1200 } as const;
 
 export interface MemoryContext {
@@ -11,7 +15,7 @@ export interface MemoryContext {
 }
 
 export async function loadMemory(db: Db, userId: string): Promise<MemoryContext> {
-  const [state, recent] = await Promise.all([db.getConversationState(userId), db.recentMessages(userId, MEMORY.recentMessages)]);
+  const [state, recent] = await Promise.all([db.getConversationState(userId), db.recentMessages(userId, MEMORY.recentMessages, { forModel: true })]);
   return { summary: state?.summary ?? null, facts: state?.facts ?? [], history: toHistory(recent) };
 }
 
@@ -39,7 +43,7 @@ export const SUMMARY_PROMPT = `סכם את השיחה הבאה בין בעל ע�
  */
 export async function maybeSummarize(db: Db, ai: AiProvider, user: UserRow, now: Date = new Date()): Promise<boolean> {
   const state = await db.getConversationState(user.id);
-  const recent = await db.recentMessages(user.id, MEMORY.summarizeEvery * 2);
+  const recent = await db.recentMessages(user.id, MEMORY.summarizeEvery * 2, { forModel: true });
   const lastIdx = state?.last_summarized_msg_id ? recent.findIndex((m) => m.id === state.last_summarized_msg_id) : -1;
   const fresh = recent.slice(lastIdx + 1);
   if (fresh.length < MEMORY.summarizeEvery) return false;

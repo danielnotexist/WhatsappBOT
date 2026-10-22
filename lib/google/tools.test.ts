@@ -141,6 +141,29 @@ describe("Google tools in the assistant", () => {
     expect(await expired.find((t) => t.name === "gcal_list_events")!.run({ from_date: "2026-10-21", to_date: "2026-10-21", query: "" }, ctx)).toEqual({ error: "connection_expired" });
   });
 
+  it("a change or a cancellation looks up who it reaches only when the agent is limited to a list (without the user)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const fixture = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "t", fetchImpl: fixture.fetchImpl });
+    const tools = googleTools({ google: async () => google, timeZone: TZ, scopes: [], accountEmail: "dana.levi@gmail.com" });
+    const drafts: Record<string, unknown>[] = [];
+    const ctx = (checksRecipients: boolean): ToolContext => ({ db, userId: user.id, now: new Date("2026-10-21T06:00:00Z"), checksRecipients, createPending: async (kind, payload) => (drafts.push({ kind, ...payload }), { id: `pa${drafts.length}` }) as PendingActionRow });
+    const run = (name: string, input: Record<string, unknown>, checks: boolean) => tools.find((t) => t.name === name)!.run(input, ctx(checks));
+    const move = { id: "gev2", subject: "", date: "2026-10-22", start: "13:00", end: "13:30", location: "" };
+
+    await run("gcal_update_event", move, false);
+    expect(drafts.at(-1)).not.toHaveProperty("current_attendees");
+    expect(fixture.state.calls).toHaveLength(0); // the main assistant: no extra call
+    await run("gcal_update_event", move, true);
+    expect(drafts.at(-1)).toMatchObject({ kind: "update_event", provider: "google", id: "gev2", current_attendees: ["avraham@example.co.il"] });
+    await run("gcal_delete_event", { id: "gev1", subject: "דיון" }, true);
+    expect(drafts.at(-1)).toMatchObject({ kind: "delete_event", current_attendees: [] });
+    const n = drafts.length;
+    expect(await run("gcal_delete_event", { id: "never-existed", subject: "x" }, true)).toEqual({ error: "not_found" });
+    expect(drafts).toHaveLength(n); // no draft when the event cannot be read
+  });
+
   it("exposes only the tools whose scopes were granted", () => {
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
     const names = (scopes: string[]) => googleTools({ google: async () => { throw new Error("unused"); }, timeZone: TZ, scopes, accountEmail: null }).map((t) => t.name);
@@ -175,7 +198,7 @@ describe("Google executors — failures become Hebrew messages with the right li
   const h = makeHarness();
   let user: { id: string };
   let conn: ConnectionRow;
-  const action = (kind: PendingActionRow["kind"], payload: Record<string, unknown>): PendingActionRow => ({ id: "a1", user_id: user.id, kind, payload, status: "approved", expires_at: "", approved_msg_id: null, executed_at: null, error: null, created_at: "" });
+  const action = (kind: PendingActionRow["kind"], payload: Record<string, unknown>): PendingActionRow => ({ id: "a1", user_id: user.id, kind, payload, status: "approved", expires_at: "", approved_msg_id: null, executed_at: null, error: null, agent_key: null, agent_name: null, created_at: "" });
   beforeEach(async () => {
     user = await h.db.createUser(`u${Math.random()}@example.com`);
     conn = h.db.seedConnection(user.id, "google", "dana.levi@gmail.com");

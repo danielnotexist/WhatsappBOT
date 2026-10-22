@@ -31,6 +31,11 @@ export const FIXTURE_MESSAGES = [
   },
 ];
 
+/** GET /me/messages/{id}/attachments?$select=name,size,contentType (metadata only) */
+export const FIXTURE_ATTACHMENTS: Record<string, { name: string; size: number; contentType: string }[]> = {
+  AAMkAGm1: [{ name: "הצעת פשרה 4471.pdf", size: 120_000, contentType: "application/pdf" }],
+};
+
 export const FIXTURE_EVENTS = [
   {
     id: "AAMkAGe1",
@@ -109,14 +114,19 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
       const q = (url.searchParams.get("$search") ?? "").replace(/"/g, "").toLowerCase();
       return json({ value: FIXTURE_MESSAGES.filter((m) => JSON.stringify(m).toLowerCase().includes(q)).map(listShape) });
     }
-    const msg = p.match(/^\/me\/messages\/([^/]+)(\/reply)?$/);
+    const msg = p.match(/^\/me\/messages\/([^/]+)(\/reply|\/forward|\/attachments)?$/);
     if (msg) {
       const m = FIXTURE_MESSAGES.find((x) => x.id === decodeURIComponent(msg[1]!));
       if (!m) return json({ error: { code: "ErrorItemNotFound", message: "not found" } }, 404);
-      if (msg[2]) {
+      if (msg[2] === "/reply") {
         state.sent.push({ reply: m.id, ...body });
         return new Response(null, { status: 202 });
       }
+      if (msg[2] === "/forward") {
+        state.sent.push({ forward: m.id, ...body });
+        return new Response(null, { status: 202 });
+      }
+      if (msg[2] === "/attachments") return json({ value: FIXTURE_ATTACHMENTS[m.id] ?? [] });
       return json(m);
     }
     if (p === "/me/sendMail") {
@@ -138,6 +148,7 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
         state.events = state.events.filter((x) => x.id !== id);
         return new Response(null, { status: 202 });
       }
+      if (method === "GET") return json(e);
       if (method === "PATCH") {
         Object.assign(e, { ...(body.subject !== undefined ? { subject: body.subject } : {}), ...(body.start ? { start: body.start } : {}), ...(body.end ? { end: body.end } : {}), ...(body.location ? { location: body.location } : {}) });
         return json(e);

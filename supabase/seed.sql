@@ -120,11 +120,14 @@ values
   ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'charge',            'demo-hyp-0000001',      'תשלום ראשון — מסלול בסיסי', null, 'ok', now() - interval '10 days'),
   ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'create_reminder',   'bbbbbbbb-0000-4000-8000-000000000040', 'בקשת המשתמש', 'wamid.demo.B.3', 'ok', now() - interval '90 minutes');
 
--- ---------- agents (שלב 2 — דוגמה אצל B) ----------
-insert into public.agents (user_id, name, role, instructions, tools, permissions, enabled)
+-- ---------- agents (0006 — B בסיסי: סוכן מותאם אחד, על בסיס התבנית של מנהלת החשבונות) ----------
+-- "מנהלת חשבונות" והכינוי "הנהלת חשבונות" שמורים לסוכן המובנה, לכן השם "חשבוניות".
+insert into public.agents (user_id, name, role, template, instructions, tools, permissions, enabled)
 values
-  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'מנהלת חשבונות', 'bookkeeper', 'עקבי אחרי חשבוניות שלא שולמו ושלחי תזכורת עדינה אחרי 14 יום.',
-   array['mail.search', 'mail.draft'], '{"max_mails_per_day": 10}'::jsonb, true);
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'חשבוניות', 'custom', 'bookkeeper',
+   'לאתר במייל חשבוניות, קבלות ודרישות תשלום, ולהכין העברה לרו״ח ברק. כל העברה — טיוטה לאישור.',
+   array['mail.read', 'mail.draft', 'mail.forward'],
+   '{"recipients": ["office@barak-cpa.example"], "max_outbound_per_day": 10}'::jsonb, true);
 
 -- ---------- wa_templates (PLAN §5) ----------
 insert into public.wa_templates (name, language, category, status, body)

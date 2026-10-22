@@ -1,16 +1,56 @@
+import type { SubscriptionRow } from "@/lib/db/types";
+
 /** Pricing decided after the plan (PROGRESS.md): 99 ₪ / 750 messages, 299 ₪ / fair use 3,000. Prices include VAT. */
 export type PaidPlan = "basic" | "pro";
+/** The plan in force right now (mirrors SQL `user_plan`): a paid plan, or the trial. */
+export type EffectivePlan = "trial" | PaidPlan;
 
-export const PLANS: Record<PaidPlan, { priceIls: number; messages: number; nameHe: string }> = {
-  basic: { priceIls: 99, messages: 750, nameHe: "בסיסי" },
-  pro: { priceIls: 299, messages: 3000, nameHe: "פרו" },
+export interface PlanSpec {
+  priceIls: number;
+  messages: number;
+  nameHe: string;
+  /** custom agents the user may create (SQL `agent_custom_limit` — docs/design/agents.md §2.2) */
+  customAgents: number;
+  /** the three built-in agents (מזכירה / מתמחה / מנהלת חשבונות), editable and switchable */
+  builtinAgents: boolean;
+}
+
+export const PLANS: Record<PaidPlan, PlanSpec> = {
+  basic: { priceIls: 99, messages: 750, nameHe: "בסיסי", customAgents: 1, builtinAgents: false },
+  pro: { priceIls: 299, messages: 3000, nameHe: "פרו", customAgents: 3, builtinAgents: true },
 };
 
 export const TRIAL_MESSAGES = 10;
+/** Trial: the built-ins as they are (no editing), no custom agents (docs/design/agents.md §0.3). */
+export const TRIAL_CUSTOM_AGENTS = 0;
+export const TRIAL_BUILTIN_AGENTS = true;
 export const VAT_RATE = 0.18;
 
 export function isPaidPlan(p: unknown): p is PaidPlan {
   return p === "basic" || p === "pro";
+}
+
+/** Whether the subscription currently grants a paid plan (cancelled plans run until the end of the paid period). */
+export function paidPlanOf(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> | null, now: Date): PaidPlan | null {
+  if (!sub || !isPaidPlan(sub.plan)) return null;
+  if (sub.status === "active" || sub.status === "past_due") return sub.plan;
+  if (sub.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime()) return sub.plan;
+  return null;
+}
+
+/** The plan in force — the TypeScript twin of SQL `public.user_plan` (0003). */
+export function effectivePlan(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> | null, now: Date): EffectivePlan {
+  return paidPlanOf(sub, now) ?? "trial";
+}
+
+/** Custom agents allowed on a plan: 0 / 1 / 3 (= SQL `agent_custom_limit`). */
+export function customAgentLimit(plan: EffectivePlan): number {
+  return plan === "trial" ? TRIAL_CUSTOM_AGENTS : PLANS[plan].customAgents;
+}
+
+/** Whether the built-in agents are available on a plan (trial: as they are; basic: no; pro: yes, editable). */
+export function builtinAgentsIncluded(plan: EffectivePlan): boolean {
+  return plan === "trial" ? TRIAL_BUILTIN_AGENTS : PLANS[plan].builtinAgents;
 }
 
 /** Retry schedule for a failed monthly charge: days 1, 3, 5 after the due date (PLAN §4). */
