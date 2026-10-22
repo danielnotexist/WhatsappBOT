@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type {
   AuditEntry,
+  BillingApprovalKind,
+  BillingApprovalRow,
+  BillingApprovalStatus,
+  NewBillingApproval,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -54,6 +58,7 @@ export class MemoryDb implements Db {
   payments: PaymentRow[] = [];
   jobs: JobRow[] = [];
   reminders: ReminderRow[] = [];
+  billingApprovals: BillingApprovalRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -145,6 +150,7 @@ export class MemoryDb implements Db {
     this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
     this.reminders = this.reminders.filter((r) => r.user_id !== id);
     this.jobs = this.jobs.filter((j) => j.user_id !== id);
+    this.billingApprovals = this.billingApprovals.filter((a) => a.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -449,6 +455,8 @@ export class MemoryDb implements Db {
 
   async insertPayment(row: Omit<PaymentRow, "id" | "created_at">): Promise<PaymentRow | null> {
     if (this.payments.some((p) => p.hyp_trans_id === row.hyp_trans_id)) return null;
+    // payments_one_success_per_approval (0007)
+    if (row.approval_id && row.ccode === "0" && this.payments.some((p) => p.approval_id === row.approval_id && p.ccode === "0")) return null;
     const full: PaymentRow = { ...row, id: randomUUID(), created_at: iso(this.now()) };
     this.payments.push(full);
     return full;
@@ -539,6 +547,105 @@ export class MemoryDb implements Db {
 
   async addAudit(entry: AuditEntry): Promise<void> {
     this.audit.push({ ...entry, created_at: iso() });
+  }
+
+  // ---- billing approvals (mirrors 0007_billing_whatsapp.sql) ----
+  async createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow> {
+    if (row.plan !== "basic" && row.plan !== "pro") throw new Error("billing_approvals_paid_plan");
+    if (["upgrade", "retry", "renew"].includes(row.kind) && !(row.amount_ils > 0)) throw new Error("billing_approvals_charge_amount");
+    const now = this.now();
+    const full: BillingApprovalRow = {
+      id: randomUUID(),
+      user_id: row.user_id,
+      kind: row.kind,
+      plan: row.plan,
+      amount_ils: row.amount_ils,
+      details: row.details ?? {},
+      phone_e164: row.phone_e164,
+      status: "pending",
+      expires_at: iso(new Date(now.getTime() + 10 * 60_000)),
+      approved_msg_id: null,
+      approved_at: null,
+      hyp_trans_id: null,
+      ccode: null,
+      error: null,
+      created_at: iso(now),
+    };
+    this.billingApprovals.push(full);
+    return { ...full };
+  }
+
+  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null> {
+    if (this.hasOpenCharge(row.user_id)) return null;
+    const now = this.now();
+    const full: BillingApprovalRow = {
+      id: randomUUID(),
+      user_id: row.user_id,
+      kind: "renewal",
+      plan: row.plan,
+      amount_ils: row.amount_ils,
+      details: row.details ?? {},
+      phone_e164: null,
+      status: "processing",
+      expires_at: iso(new Date(now.getTime() + 10 * 60_000)),
+      approved_msg_id: null,
+      approved_at: null,
+      hyp_trans_id: null,
+      ccode: null,
+      error: null,
+      created_at: iso(now),
+    };
+    this.billingApprovals.push(full);
+    return { ...full };
+  }
+
+  /** billing_approvals_one_open_charge_per_user */
+  private hasOpenCharge(userId: string, exceptId?: string): boolean {
+    const charge: BillingApprovalKind[] = ["upgrade", "retry", "renew", "renewal"];
+    return this.billingApprovals.some((a) => a.user_id === userId && a.id !== exceptId && charge.includes(a.kind) && (a.status === "processing" || a.status === "unknown"));
+  }
+
+  async getBillingApproval(id: string): Promise<BillingApprovalRow | null> {
+    const row = this.billingApprovals.find((a) => a.id === id);
+    return row ? { ...row } : null;
+  }
+
+  async claimBillingApproval(id: string, claim: { userId: string; phoneE164: string; waMessageId: string }): Promise<BillingApprovalRow | null> {
+    const row = this.billingApprovals.find((a) => a.id === id);
+    if (!row || row.user_id !== claim.userId || row.phone_e164 !== claim.phoneE164 || row.status !== "pending") return null;
+    if (Date.parse(row.expires_at) <= this.now().getTime()) return null;
+    // the number is still the account's active linked number
+    if (!this.waIdentities.some((w) => w.user_id === claim.userId && w.phone_e164 === claim.phoneE164 && w.status === "active")) return null;
+    if (this.billingApprovals.some((a) => a.approved_msg_id === claim.waMessageId)) return null;
+    if (["upgrade", "retry", "renew"].includes(row.kind) && this.hasOpenCharge(row.user_id, row.id)) return null;
+    Object.assign(row, { status: "processing", approved_msg_id: claim.waMessageId, approved_at: iso(this.now()) });
+    return { ...row };
+  }
+
+  async updateBillingApproval(id: string, patch: Partial<Pick<BillingApprovalRow, "status" | "hyp_trans_id" | "ccode" | "error" | "details">>, fromStatus?: BillingApprovalStatus[]): Promise<BillingApprovalRow | null> {
+    const row = this.billingApprovals.find((a) => a.id === id);
+    if (!row || (fromStatus && !fromStatus.includes(row.status))) return null;
+    Object.assign(row, patch);
+    return { ...row };
+  }
+
+  async listBillingApprovals(userId: string, opts: { statuses?: BillingApprovalStatus[]; kinds?: BillingApprovalKind[]; limit?: number } = {}): Promise<BillingApprovalRow[]> {
+    return this.billingApprovals
+      .filter((a) => a.user_id === userId && (!opts.statuses || opts.statuses.includes(a.status)) && (!opts.kinds || opts.kinds.includes(a.kind)))
+      .slice()
+      .reverse()
+      .slice(0, opts.limit ?? 50)
+      .map((a) => ({ ...a }));
+  }
+
+  /** Mirrors public.raise_plan_limit() (the memory usage period is the UTC calendar month, like countTrialMessage). */
+  async raiseUsageLimit(userId: string, newLimit: number): Promise<number | null> {
+    const period = iso(this.now()).slice(0, 7) + "-01";
+    const row = this.usage.find((u) => u.user_id === userId && u.period_start === period);
+    if (!row || row.plan_limit >= newLimit) return null;
+    row.free_remaining += newLimit - row.plan_limit;
+    row.plan_limit = newLimit;
+    return row.free_remaining;
   }
 
   // ---- test helpers ----

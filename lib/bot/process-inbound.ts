@@ -7,6 +7,7 @@ import { copy } from "@/lib/copy/bot";
 import type { MessageType } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
+import { basicLimitReached, handleBillingPress, handleBillingText, pausedAccount } from "./billing";
 import { connectLinkFor, type BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
 import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
@@ -60,6 +61,9 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     return { handled: true, note: "reminder button" };
   }
 
+  // 2b. billing buttons (one-tap upgrade / retry / renew, cancel, card update) — work even while paused
+  if (await handleBillingPress(ctx, user, msg)) return { handled: true, note: "billing button" };
+
   // 2. approval buttons
   if (msg.type === "button" && msg.reply?.id.startsWith("pa:")) {
     await handlePendingButton(ctx, user.id, to, msg.reply.id, msg.waMessageId);
@@ -68,6 +72,9 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 
   // 3. "כניסה" → one-time sign-in link for the site (before onboarding and billing: it must always work)
   if (await handleLoginKeyword(ctx, user.id, msg, say)) return { handled: true, note: "login link" };
+
+  // 3a. billing commands ("קבלה", "שדרוג", "ביטול מנוי", "עדכון כרטיס"…) — not counted, work even while paused
+  if (await handleBillingText(ctx, user, msg)) return { handled: true, note: "billing command" };
 
   // 3b. onboarding questions
   if (onboardingOf(user) && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };
@@ -84,20 +91,14 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   const sub = await ctx.db.getSubscription(user.id);
   const payLink = payLinkFor(ctx.appUrl, user.id);
   if (sub?.status === "past_due") {
-    const lastBlock = typeof user.profile.past_due_notified_at === "string" ? Date.parse(user.profile.past_due_notified_at) : 0;
-    if (ctx.now().getTime() - lastBlock > 24 * 3_600_000) {
-      await ctx.db.mergeUserProfile(user.id, { past_due_notified_at: ctx.now().toISOString(), pending_input: text });
-      await say(copy["bill.past_due_blocked_reply"](payLink));
-    }
+    await pausedAccount(ctx, user, to, text);
     return { handled: true, note: "past_due" };
   }
   const remaining = await ctx.db.countTrialMessage(user.id);
   if (remaining < 0) {
     const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
     if (paidPlan === "basic") {
-      const now = ctx.now();
-      const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-      await say(copy["bill.plan_limit_reached"](`${reset.getUTCDate()}.${reset.getUTCMonth() + 1}`, payLink));
+      await basicLimitReached(ctx, user, to, text);
     } else if (paidPlan === "pro") {
       await say(copy["err.rate_limit"]());
     } else {

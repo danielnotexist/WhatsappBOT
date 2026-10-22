@@ -51,6 +51,41 @@ export function morningSummaryTemplate(p: { dayLabel: string; meetings: string[]
   };
 }
 
+/**
+ * `payment_failed`: {{1}} amount, {{2}} next automatic try. Quick reply [ניסיון חוזר] carries the 10-minute retry
+ * approval (`bill:ok:<id>` — a later press gets a fresh offer); URL [עדכון כרטיס] → /pay/card/<token>.
+ */
+export function paymentFailedTemplate(p: { amount: string; nextTry: string; approvalId: string | null; cardToken: string }): TemplateSend {
+  return {
+    name: "payment_failed",
+    params: [templateParam(p.amount, 20), templateParam(p.nextTry, 40)],
+    buttons: [...(p.approvalId ? [{ index: 0, subType: "quick_reply" as const, text: `bill:ok:${p.approvalId}` }] : []), { index: 1, subType: "url", text: p.cardToken }],
+  };
+}
+
+/** `card_update_needed`: {{1}} amount, {{2}} the day the account would pause; URL [עדכון כרטיס]. */
+export function cardUpdateNeededTemplate(p: { amount: string; until: string; cardToken: string }): TemplateSend {
+  return { name: "card_update_needed", params: [templateParam(p.amount, 20), templateParam(p.until, 40)], buttons: [{ index: 0, subType: "url", text: p.cardToken }] };
+}
+
+/** `account_paused`: {{1}} amount. Quick reply [ניסיון חוזר] (retry approval), URL [עדכון כרטיס]. */
+export function accountPausedTemplate(p: { amount: string; approvalId: string | null; cardToken: string }): TemplateSend {
+  return {
+    name: "account_paused",
+    params: [templateParam(p.amount, 20)],
+    buttons: [...(p.approvalId ? [{ index: 0, subType: "quick_reply" as const, text: `bill:ok:${p.approvalId}` }] : []), { index: 1, subType: "url", text: p.cardToken }],
+  };
+}
+
+/** `payment_receipt`: {{1}} amount, {{2}} plan, {{3}} next charge; URL [לקבלה] → /invoice/<token> (the receipt PDF). */
+export function paymentReceiptTemplate(p: { amount: string; plan: string; nextCharge: string; invoiceToken: string }): TemplateSend {
+  return {
+    name: "payment_receipt",
+    params: [templateParam(p.amount, 20), templateParam(p.plan, 20), templateParam(p.nextCharge, 40)],
+    buttons: [{ index: 0, subType: "url", text: p.invoiceToken }],
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // definitions (registration) — the JSON of docs/copy/wa-templates.md; a test keeps them in sync
 // ---------------------------------------------------------------------------------------------
@@ -65,8 +100,15 @@ export interface TemplateDefinition {
 const body = (text: string, example: string[]) => ({ type: "BODY", text, example: { body_text: [example] } });
 const quick = (...titles: string[]) => ({ type: "BUTTONS", buttons: titles.map((text) => ({ type: "QUICK_REPLY", text })) });
 const urlButton = (text: string, url: string, example: string) => ({ type: "BUTTONS", buttons: [{ type: "URL", text, url, example: [example] }] });
+const quickAndUrl = (quickText: string, urlText: string, url: string, example: string) => ({
+  type: "BUTTONS",
+  buttons: [
+    { type: "QUICK_REPLY", text: quickText },
+    { type: "URL", text: urlText, url, example: [example] },
+  ],
+});
 
-/** All 7 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
+/** All 10 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
 export function templateDefinitions(appUrl: string, productName: string = PRODUCT_NAME): TemplateDefinition[] {
   const base = appUrl.replace(/\/+$/, "");
   const def = (name: string, ...components: Record<string, unknown>[]): TemplateDefinition => ({ name, language: TEMPLATE_LANGUAGE, category: "UTILITY", components });
@@ -82,8 +124,27 @@ export function templateDefinitions(appUrl: string, productName: string = PRODUC
       body(`שלום {{1}}, 10 ההודעות של תקופת הניסיון נוצלו — תודה שניסית את ${productName}.\nכדי להמשיך מאותו מקום: מסלול בסיסי 99 ₪ לחודש (עד 750 הודעות) או פרו 299 ₪ (עד 3,000, סוכנים ואוטומציות). המחירים כוללים מע״מ, ביטול בכל רגע.\nההודעה האחרונה שלך שמורה ותטופל מיד אחרי התשלום.`, ["דנה"]),
       urlButton("לתשלום", `${base}/pay/{{1}}`, `${base}/pay/u_7f3a9c`),
     ),
-    def("payment_success", body("התשלום התקבל והחשבון פעיל. מסלול {{1}}, {{2}} ₪ לחודש. החיוב הבא: {{3}}.\nחשבונית מס-קבלה נשלחה למייל. ממשיכים מאותו מקום — אפשר לכתוב כאן.", ["בסיסי", "99", "20.11.2026"])),
-    def("payment_failed", body("החיוב החודשי ({{1}} ₪) לא עבר. ננסה שוב ב-{{2}}.\nכדי לא להפסיק את השירות, אפשר לעדכן את אמצעי התשלום כבר עכשיו.", ["99", "יום ה׳ 23.10"]), urlButton("לעדכון אמצעי תשלום", `${base}/pay/{{1}}`, `${base}/pay/u_7f3a9c`)),
+    def("payment_success", body("התשלום התקבל והחשבון פעיל. מסלול {{1}}, {{2}} ₪ לחודש. החיוב הבא: {{3}}.\nהקבלה נשלחה למייל. ממשיכים מאותו מקום — אפשר לכתוב כאן.", ["בסיסי", "99", "20.11.2026"])),
+    def(
+      "payment_failed",
+      body("החיוב החודשי ({{1}} ₪) לא עבר. ננסה שוב ב-{{2}}.\nאפשר לנסות שוב כבר עכשיו או לעדכן כרטיס. אחרי שבוע בלי תשלום השירות מושהה, וכל ההגדרות נשמרות.", ["99", "יום ה׳ 23.10"]),
+      quickAndUrl("ניסיון חוזר", "עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "card_update_needed",
+      body("החיוב החודשי ({{1}} ₪) לא עבר: הכרטיס השמור לא אושר לחיוב, ולכן לא ננסה אותו שוב.\nהשירות ממשיך עד {{2}}. אחרי עדכון הכרטיס אפשר לחייב בלחיצה בשיחה.", ["99", "יום ב׳ 26.10"]),
+      urlButton("עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "account_paused",
+      body(`החיוב החודשי ({{1}} ₪) לא עבר גם בניסיון האחרון, ולכן החשבון ב${productName} מושהה.\nכל ההגדרות, החיבורים והתזכורות שמורים — ברגע שהתשלום יוסדר, ממשיכים מאותו מקום.`, ["99"]),
+      quickAndUrl("ניסיון חוזר", "עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "payment_receipt",
+      body("החיוב החודשי עבר: {{1}} ₪, מסלול {{2}}. החיוב הבא: {{3}}.\nהקבלה זמינה בכפתור, ונשלחה גם למייל.", ["99", "בסיסי", "20.12.2026"]),
+      urlButton("לקבלה", `${base}/invoice/{{1}}`, `${base}/invoice/i_7f3a9c`),
+    ),
     def(
       "reconnect_needed",
       body("החיבור ל-{{1}} פג תוקף (זה קורה בדרך כלל אחרי החלפת סיסמה), ולכן סיכומי הבוקר והמייל מושהים.\nחידוש לוקח חצי דקה. הקישור עובד פעם אחת, ל-30 הדקות הקרובות.", ["Microsoft 365"]),

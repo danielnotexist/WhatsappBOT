@@ -1,18 +1,19 @@
-import type { Db, UserRow } from "@/lib/db/types";
-import type { HypGateway } from "@/lib/hyp/client";
-import type { WaSender } from "@/lib/wa/sender";
 import { copy } from "@/lib/copy/bot";
+import { billButtons, billCopy } from "@/lib/copy/bot-billing";
+import type { UserRow } from "@/lib/db/types";
+import { tokenLast4 } from "@/lib/hyp/codes";
+import { formatHeshDesc } from "@/lib/hyp/sign";
+import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate } from "@/lib/wa/templates";
+import type { BillingContext } from "./context";
+import { cardLinkFor, createCardLinkToken } from "./links";
+import { formatIls, vatOf } from "./money";
+import { activePhone, deliver, isWindowOpen, sendInvoice } from "./notify";
 import { payLinkFor } from "./pay-link";
 import { PLANS, isPaidPlan, type PaidPlan } from "./plans";
-import { activateSubscription, chargeSubscription, type ChargeOutcome } from "./subscription";
+import { activateSubscription, chargeSubscription, saveCardToken, type ChargeOutcome } from "./subscription";
+import { createRetryApproval, dayLabel } from "./whatsapp";
 
-export interface BillingContext {
-  db: Db;
-  hyp: HypGateway;
-  wa: WaSender;
-  appUrl: string;
-  now: () => Date;
-}
+export type { BillingContext } from "./context";
 
 /** Builds the HYP payment page for a user + plan (PLAN §4 SIGN params). `Order` carries user id + plan back to us. */
 export async function startPayment(ctx: BillingContext, user: UserRow, plan: PaidPlan): Promise<string> {
@@ -32,14 +33,39 @@ export async function startPayment(ctx: BillingContext, user: UserRow, plan: Pai
     email: user.email,
     ClientName: first || undefined,
     ClientLName: rest.join(" ") || undefined,
-    heshDesc: `[0~מנוי ${PLANS[plan].nameHe} — חודש~1~${price}]`,
+    heshDesc: formatHeshDesc([{ description: `מנוי ${PLANS[plan].nameHe} — חודש`, quantity: 1, price }]),
     Pritim: true,
   });
 }
 
+/**
+ * The card-update page (from the [עדכון כרטיס] link): HYP J2 = card verification without a charge (success CCode=600),
+ * `Order = <user>:card`; the redirect replaces the saved token (getToken with allowFalse=True). No invoice.
+ */
+export async function startCardUpdate(ctx: BillingContext, user: UserRow): Promise<string> {
+  const [first, ...rest] = (user.name ?? "").trim().split(/\s+/);
+  return ctx.hyp.createPaymentPage({
+    Amount: 1,
+    Coin: 1,
+    J5: "J2",
+    Order: `${user.id}:card`,
+    Info: "עדכון כרטיס — אימות בלבד, ללא חיוב",
+    Sign: true,
+    MoreData: true,
+    SendHesh: false,
+    Tash: 1,
+    UTF8: true,
+    UTF8out: true,
+    PageLang: "HEB",
+    email: user.email,
+    ClientName: first || undefined,
+    ClientLName: rest.join(" ") || undefined,
+  });
+}
+
 export type PaymentReturn =
-  | { ok: true; userId: string; plan: PaidPlan; transId: string; firstTime: boolean }
-  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed"; userId?: string; message: string };
+  | { ok: true; userId: string; plan: PaidPlan; transId: string; firstTime: boolean; mode: "payment" | "card" }
+  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription"; userId?: string; message: string; mode?: "payment" | "card" };
 
 /**
  * The HYP success/error redirect (PLAN §4): VERIFY the whole query → parse Order → getToken → activate → notify in WhatsApp.
@@ -47,16 +73,17 @@ export type PaymentReturn =
  */
 export async function completePayment(ctx: BillingContext, redirectQuery: string): Promise<PaymentReturn> {
   const params = Object.fromEntries(new URLSearchParams(redirectQuery));
-  const orderMatch = (params.Order ?? "").match(/^([0-9a-f-]{36}):(basic|pro)$/);
+  const orderMatch = (params.Order ?? "").match(/^([0-9a-f-]{36}):(basic|pro|card)$/);
   if (!orderMatch) return { ok: false, reason: "bad_order", message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין." };
   const userId = orderMatch[1]!;
-  const plan = orderMatch[2] as PaidPlan;
   const user = await ctx.db.getUser(userId);
   if (!user) return { ok: false, reason: "no_user", userId, message: "החשבון לא נמצא." };
+  if (orderMatch[2] === "card") return completeCardUpdate(ctx, user, redirectQuery, params);
+  const plan = orderMatch[2] as PaidPlan;
 
   const verified = await ctx.hyp.verifyRedirect(redirectQuery);
-  if (!verified.ok) {
-    const declined = params.CCode && params.CCode !== "0";
+  if (!verified.ok || params.CCode !== "0") {
+    const declined = verified.ok || (params.CCode && params.CCode !== "0");
     const payLink = payLinkFor(ctx.appUrl, user.id);
     if (declined) await notify(ctx, user, copy["bill.payment_failed_initial"](payLink), { name: "trial_ended_payment", params: [user.name ?? ""], link: payLink });
     await ctx.db.addAudit({ user_id: user.id, action: "payment.return", target: params.Id ?? "", result: declined ? `declined:${params.CCode}` : "invalid_signature" });
@@ -74,30 +101,104 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
     return { ok: false, reason: "token_failed", userId, message: "התשלום התקבל אבל שמירת אמצעי התשלום לחיובים הבאים נכשלה. נטפל בזה ידנית." };
   }
   const invoiceUrl = await ctx.hyp.invoiceUrl(transId).catch(() => null);
-  const { firstTime } = await activateSubscription(ctx.db, user, { plan, transId, amountIls: Number(params.Amount ?? PLANS[plan].priceIls), acode: params.ACode ?? null, token: token.token, tokef: token.tokef, invoiceUrl, raw: params }, ctx.now());
+  const amountIls = Number(params.Amount ?? PLANS[plan].priceIls);
+  const { firstTime, subscription, duplicate } = await activateSubscription(ctx.db, user, { plan, transId, amountIls, acode: params.ACode ?? null, token: token.token, tokef: token.tokef, invoiceUrl, raw: params }, ctx.now());
+  if (duplicate) return { ok: true, userId, plan, transId, firstTime, mode: "payment" }; // already handled (and announced)
 
   const pendingInput = typeof user.profile.pending_input === "string" ? user.profile.pending_input : null;
-  const text = pendingInput ? copy["bill.payment_success"](PLANS[plan].nameHe, "חשבונית נשלחה למייל.") : copy["bill.payment_success_no_pending"](PLANS[plan].nameHe, "חשבונית נשלחה למייל.");
-  await notify(ctx, user, text, { name: "payment_success", params: [PLANS[plan].nameHe, String(PLANS[plan].priceIls), "בעוד חודש"] });
-  return { ok: true, userId, plan, transId, firstTime };
+  const text = pendingInput ? copy["bill.payment_success"](PLANS[plan].nameHe, "הקבלה נשלחה למייל.") : copy["bill.payment_success_no_pending"](PLANS[plan].nameHe, "הקבלה נשלחה למייל.");
+  const where = await notify(ctx, user, text, { name: "payment_success", params: [PLANS[plan].nameHe, String(PLANS[plan].priceIls), "בעוד חודש"] });
+  // the receipt in chat (inside the window: a document; the template above already says it was emailed)
+  if (where?.windowOpen) await sendInvoice(ctx, user, { transId, amountIls, date: ctx.now(), plan, nextChargeAt: subscription.next_charge_at ? new Date(subscription.next_charge_at) : undefined }, where);
+  return { ok: true, userId, plan, transId, firstTime, mode: "payment" };
 }
 
-/** The monthly charge job for one user, with the WhatsApp messages of PLAN §4 (days 1/3/5). */
+/**
+ * Card update (J2): VERIFY → CCode 600 (or 0) → getToken(allowFalse) → replace the token. Never charges: when a renewal
+ * is overdue, WhatsApp gets the one-tap retry offer (amount + [חיוב עכשיו]) — the charge needs the press.
+ */
+async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQuery: string, params: Record<string, string>): Promise<PaymentReturn> {
+  const sub = await ctx.db.getSubscription(user.id);
+  if (!sub || !isPaidPlan(sub.plan)) return { ok: false, reason: "no_subscription", userId: user.id, message: "אין מנוי פעיל לעדכון כרטיס.", mode: "card" };
+  const verified = await ctx.hyp.verifyRedirect(redirectQuery);
+  const transId = params.Id ?? "";
+  if (!verified.ok || !(params.CCode === "600" || params.CCode === "0")) {
+    await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: verified.ok ? `declined:${params.CCode}` : "invalid_signature" });
+    await deliver(ctx, user, { text: billCopy["bill.card_update_failed"](cardLinkFor(ctx.appUrl, user.id)) });
+    return verified.ok
+      ? { ok: false, reason: "declined", userId: user.id, message: "הכרטיס לא אומת. אפשר לנסות שוב, גם עם כרטיס אחר.", mode: "card" }
+      : { ok: false, reason: "invalid_signature", userId: user.id, message: "אימות הכרטיס נכשל. הכרטיס הקודם נשאר.", mode: "card" };
+  }
+  let token: { token: string; tokef: string };
+  try {
+    token = await ctx.hyp.getToken(transId, { allowFalse: true });
+  } catch (e) {
+    await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: `token_failed: ${(e as Error).message}` });
+    return { ok: false, reason: "token_failed", userId: user.id, message: "הכרטיס אומת אבל שמירתו נכשלה. הכרטיס הקודם נשאר — נטפל בזה.", mode: "card" };
+  }
+  await saveCardToken(ctx.db, user.id, token.token, token.tokef);
+  await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: "ok" });
+
+  const text = billCopy["bill.card_updated"](tokenLast4(token.token) ?? "????");
+  const phone = await activePhone(ctx, user.id);
+  const windowOpen = phone ? await isWindowOpen(ctx, user.id) : false;
+  const overdue = sub.status === "past_due" || (sub.status === "active" && sub.charge_failures > 0);
+  const approval = phone && windowOpen && overdue ? await createRetryApproval(ctx, user, phone) : null;
+  if (approval) {
+    const offer = billCopy["bill.retry_offer"]({ amount: formatIls(approval.amount_ils), vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? "") });
+    await deliver(ctx, user, { text: `${text}\n\n${offer}`, buttons: billButtons.offer(approval.id, "חיוב עכשיו") }, { phone: phone!, windowOpen });
+  } else {
+    await deliver(ctx, user, { text });
+  }
+  return { ok: true, userId: user.id, plan: sub.plan as PaidPlan, transId, firstTime: false, mode: "card" };
+}
+
+/**
+ * The monthly charge job for one user, with the WhatsApp messages (owner decision 21.10.2026): the receipt after a
+ * successful charge; nudges with [ניסיון חוזר] [עדכון כרטיס] after the day 1 / 3 / 5 failures; a card-update request
+ * after a "card" failure; the pause notice after day 7. Outside the 24-hour window → the matching template.
+ */
 export async function runChargeJob(ctx: BillingContext, userId: string): Promise<ChargeOutcome> {
   const user = await ctx.db.getUser(userId);
   if (!user) return { kind: "skipped", reason: "no user" };
   const outcome = await chargeSubscription(ctx.db, ctx.hyp, user, ctx.now());
-  const updateLink = payLinkFor(ctx.appUrl, user.id);
-  if (outcome.kind === "retry") {
-    const text = outcome.failures === 1 ? copy["bill.past_due_day1"](String(outcome.amountIls), updateLink) : copy["bill.past_due_day3"](updateLink);
-    await notify(ctx, user, text, { name: "payment_failed", params: [String(outcome.amountIls), formatDateHe(outcome.retryAt)], link: updateLink });
-  } else if (outcome.kind === "past_due") {
-    await notify(ctx, user, copy["bill.past_due_day5"](updateLink), { name: "payment_failed", params: [String(outcome.amountIls), "אחרי עדכון הכרטיס"], link: updateLink });
+  const cardToken = () => createCardLinkToken(user.id);
+
+  if (outcome.kind === "charged") {
+    const where = await deliver(ctx, user, { text: billCopy["bill.renewal_charged"]({ plan: PLANS[outcome.plan].nameHe, amount: formatIls(outcome.amountIls), nextDate: dayLabel(outcome.nextChargeAt) }) });
+    // in the window: the text above + the document; outside: the payment_receipt template (link behind a button)
+    await sendInvoice(ctx, user, { transId: outcome.transId, amountIls: outcome.amountIls, date: ctx.now(), plan: outcome.plan, nextChargeAt: outcome.nextChargeAt }, where ?? undefined);
+  } else if (outcome.kind === "retry") {
+    const amount = formatIls(outcome.amountIls);
+    const nextTry = dayLabel(outcome.retryAt);
+    const text =
+      outcome.failures === 1
+        ? billCopy["bill.renewal_failed_day1"]({ amount, nextTry })
+        : outcome.failures === 2
+          ? billCopy["bill.renewal_failed_day3"]({ amount, nextTry })
+          : billCopy["bill.renewal_failed_day5"]({ amount, lastTry: nextTry });
+    await nudge(ctx, user, text, (approvalId) => paymentFailedTemplate({ amount, nextTry, approvalId, cardToken: cardToken() }));
+  } else if (outcome.kind === "card_invalid") {
+    const amount = formatIls(outcome.amountIls);
+    const until = dayLabel(outcome.pauseAt);
+    await deliver(ctx, user, { text: billCopy["bill.renewal_card_invalid"]({ amount, until, code: outcome.ccode }), buttons: billButtons.card, template: cardUpdateNeededTemplate({ amount, until, cardToken: cardToken() }) });
+  } else if (outcome.kind === "paused") {
+    const amount = formatIls(outcome.amountIls);
+    await nudge(ctx, user, billCopy["bill.renewal_paused"](amount), (approvalId) => accountPausedTemplate({ amount, approvalId, cardToken: cardToken() }));
   }
   return outcome;
 }
 
-/** Monthly limit reached on the basic plan (PLAN §4) — rendered by the inbound pipeline. */
+/** A renewal nudge: a fresh 10-minute retry approval behind [ניסיון חוזר] (in-window button or template quick reply). */
+async function nudge(ctx: BillingContext, user: UserRow, text: string, template: (approvalId: string | null) => ReturnType<typeof paymentFailedTemplate>): Promise<void> {
+  const phone = await activePhone(ctx, user.id);
+  if (!phone) return;
+  const windowOpen = await isWindowOpen(ctx, user.id);
+  const approval = await createRetryApproval(ctx, user, phone);
+  await deliver(ctx, user, { text, buttons: approval ? billButtons.retryOrCard(approval.id) : billButtons.card, template: template(approval?.id ?? null) }, { phone, windowOpen });
+}
+
+/** Monthly limit reached on the basic plan (PLAN §4) — the text version (the pipeline sends the one-tap offer). */
 export function planLimitMessage(ctx: BillingContext, user: UserRow, plan: string): string {
   const now = ctx.now();
   const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
@@ -111,24 +212,10 @@ export function formatDateHe(d: Date): string {
 }
 
 /**
- * Sends to the user's linked WhatsApp number: free text inside the 24-hour window (last inbound message),
- * otherwise the approved UTILITY template (docs/copy/wa-templates.md). Never throws.
+ * Text inside the 24-hour window, otherwise the approved UTILITY template (docs/copy/wa-templates.md). Never throws.
+ * `link` — a /pay/<token> URL whose token becomes the template's URL-button suffix.
  */
-async function notify(ctx: BillingContext, user: UserRow, text: string, template: { name: string; params: string[]; link?: string }): Promise<void> {
-  try {
-    const phone = (await ctx.db.listWaIdentities(user.id)).find((w) => w.status === "active")?.phone_e164;
-    if (!phone) return;
-    const recent = await ctx.db.recentMessages(user.id, 20);
-    const lastInbound = [...recent].reverse().find((m) => m.direction === "in");
-    const windowOpen = lastInbound ? ctx.now().getTime() - Date.parse(lastInbound.created_at) < 24 * 3_600_000 : false;
-    if (windowOpen) {
-      await ctx.wa.sendText(phone, text);
-    } else {
-      const buttons = template.link ? [{ index: 0, subType: "url" as const, text: template.link.split("/").pop() ?? "" }] : [];
-      await ctx.wa.sendTemplate(phone, template.name, template.params.map((t) => ({ type: "text" as const, text: t })), buttons);
-    }
-    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: windowOpen ? "text" : "template", text });
-  } catch (e) {
-    console.error("[billing] notify failed:", (e as Error).message);
-  }
+async function notify(ctx: BillingContext, user: UserRow, text: string, template: { name: string; params: string[]; link?: string }) {
+  const buttons = template.link ? [{ index: 0, subType: "url" as const, text: template.link.split("/").pop() ?? "" }] : [];
+  return deliver(ctx, user, { text, template: { name: template.name, params: template.params, buttons } });
 }

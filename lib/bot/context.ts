@@ -2,6 +2,7 @@ import type { AiProvider } from "@/lib/ai/types";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import type { Tool } from "@/lib/ai/tools";
 import type { SttProvider } from "@/lib/stt/types";
+import type { HypGateway } from "@/lib/hyp/client";
 import type { WaSender } from "@/lib/wa/sender";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 
@@ -17,6 +18,8 @@ export interface BotContext {
   extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
   /** speech-to-text for voice notes (lazy: a missing key only fails voice notes); absent → audio is declined */
   stt?: () => SttProvider;
+  /** HYP gateway for one-tap charges from WhatsApp (lazy: a missing HYP_* only fails the press that charges) */
+  hyp?: () => HypGateway;
 }
 
 export const LINK = {
