@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoHasSupabase, isDemo } from "@/lib/demo";
+import { demoHasSupabase, isDemo, liveWaFlag } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -144,6 +144,21 @@ export function aiMocked(source: Record<string, string | undefined> = process.en
 /** Speech-to-text (lib/stt) uses its mock by default: same rule as the model — real in the demo only with LIVE_AI=1. */
 export function sttMocked(source: Record<string, string | undefined> = process.env): boolean {
   return integrationsMocked(source) && !liveAiInDemo(source);
+}
+
+/**
+ * מצב "וואטסאפ חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_WA=1`. Messages come from Meta's webhook and the replies go out
+ * through the real Cloud API (lib/demo.ts then allows WA_ACCESS_TOKEN); mail, HYP, Microsoft, Google and the queue stay
+ * mocked. The website chat keeps its own recording sender, and sends to its virtual +999 numbers never reach Meta
+ * (lib/wa/index.ts).
+ */
+export function liveWaInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveWaFlag(source) && isDemo(source);
+}
+
+/** The WhatsApp sender (lib/wa) records instead of sending: same rule as the model — real in the demo only with LIVE_WA=1. */
+export function waMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveWaInDemo(source);
 }
 
 /**

@@ -20,7 +20,8 @@
  * MS_CLIENT_SECRET, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, QSTASH_TOKEN — and without a stable TOKEN_ENC_KEY (sessions
  * must verify on every instance). Checked at boot (instrumentation.ts) and on every `isDemo()`. The AI keys
  * (ANTHROPIC_API_KEY, OPENROUTER_API_KEY) are allowed: they only answer the requests we make, nothing reaches a person,
- * and without LIVE_AI=1 they are not used at all.
+ * and without LIVE_AI=1 they are not used at all. With `LIVE_WA=1` WA_ACCESS_TOKEN is allowed too: WhatsApp is real
+ * (Meta's test number, which only reaches the recipients registered in Meta), everything else stays refused.
  *
  * Dependency-free on purpose: lib/env.ts and proxy.ts import it.
  */
@@ -44,6 +45,12 @@ export const DEMO_FORBIDDEN_KEYS = [
 /** The raw switch: DEMO_MODE=1 (or "true"). Does not validate — use `isDemo()`. */
 export function demoFlag(source: EnvSource = process.env): boolean {
   const value = source.DEMO_MODE?.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
+/** The raw LIVE_WA switch (1 / true): inside the demo, WhatsApp is real (lib/env.ts `liveWaInDemo()`). */
+export function liveWaFlag(source: EnvSource = process.env): boolean {
+  const value = source.LIVE_WA?.trim().toLowerCase();
   return value === "1" || value === "true";
 }
 
@@ -90,7 +97,8 @@ function isBase64Key32(value: string | undefined): boolean {
 /** What stops the demo from starting (names only). Empty lists when DEMO_MODE is off. */
 export function demoProblems(source: EnvSource = process.env): { forbidden: string[]; missing: string[] } {
   if (!demoFlag(source)) return { forbidden: [], missing: [] };
-  const forbidden = DEMO_FORBIDDEN_KEYS.filter((key) => Boolean(source[key]?.trim()));
+  const allowed: readonly string[] = liveWaFlag(source) ? ["WA_ACCESS_TOKEN"] : [];
+  const forbidden = DEMO_FORBIDDEN_KEYS.filter((key) => !allowed.includes(key) && Boolean(source[key]?.trim()));
   const missing = isBase64Key32(source.TOKEN_ENC_KEY) ? [] : ["TOKEN_ENC_KEY"];
   return { forbidden, missing };
 }

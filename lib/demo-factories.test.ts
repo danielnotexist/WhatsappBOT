@@ -18,9 +18,10 @@ import { LocalQueue } from "@/lib/queue/local";
 import { getSttProvider } from "@/lib/stt";
 import { MockStt } from "@/lib/stt/mock";
 import { FallbackStt } from "@/lib/stt/fallback";
-import { EnvError, aiMocked, liveAiInDemo, sttMocked } from "@/lib/env";
+import { EnvError, aiMocked, liveAiInDemo, liveWaInDemo, sttMocked, waMocked } from "@/lib/env";
 import { getWaSender } from "@/lib/wa";
 import { DEV_PUBLIC_NUMBER, publicWaNumber } from "@/lib/wa/public-number";
+import { WaClient } from "@/lib/wa/client";
 import { RecordingWaSender } from "@/lib/wa/sender";
 
 const { createClient } = vi.hoisted(() => ({ createClient: vi.fn(() => ({ from: () => ({}) })) }));
@@ -141,6 +142,35 @@ describe("DEMO_MODE=1 forces every integration factory to its mock", () => {
     expect(liveAiInDemo()).toBe(false);
     expect(getAiProvider()).toBeInstanceOf(MockProvider);
     expect(getSttProvider()).toBeInstanceOf(MockStt);
+  });
+
+  it("LIVE_WA=1 in the demo: WA_ACCESS_TOKEN is allowed and WhatsApp is real, except the chat's virtual +999 numbers", async () => {
+    stubDemo({ LIVE_WA: "1", WA_ACCESS_TOKEN: "EAAG-real" });
+    expect(liveWaInDemo()).toBe(true);
+    expect(waMocked()).toBe(false);
+    const sendText = vi.spyOn(WaClient.prototype, "sendText").mockResolvedValue({ messageId: "wamid.real", waId: null });
+    const wa = getWaSender();
+    expect(wa).not.toBeInstanceOf(RecordingWaSender);
+    await wa.sendText("972501234567", "שלום");
+    expect(sendText).toHaveBeenCalledTimes(1);
+    await wa.sendText("+999123456789012", "תזכורת");
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(getMailer()).toBeInstanceOf(ConsoleMailer);
+    expect(getHyp()).toBeInstanceOf(MockHypGateway);
+    expect(getQueue()).toBeInstanceOf(LocalQueue);
+    expect(getAiProvider()).toBeInstanceOf(MockProvider);
+    sendText.mockRestore();
+  });
+
+  it("LIVE_WA=1 still refuses the other outbound keys; LIVE_WA without DEMO_MODE changes nothing", () => {
+    stubDemo({ LIVE_WA: "1", WA_ACCESS_TOKEN: "EAAG-real", RESEND_API_KEY: "re-real" });
+    expect(() => getWaSender()).toThrow(/RESEND_API_KEY/);
+    vi.unstubAllEnvs();
+    reset();
+    vi.stubEnv("DATA_MODE", "memory");
+    vi.stubEnv("LIVE_WA", "1");
+    expect(liveWaInDemo()).toBe(false);
+    expect(getWaSender()).toBeInstanceOf(RecordingWaSender);
   });
 
   it("without DEMO_MODE the same keys mean the real clients (the switch is the demo, not the keys)", () => {

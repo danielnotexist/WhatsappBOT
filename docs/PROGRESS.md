@@ -564,3 +564,11 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 **בדיקות:** יחידה חדשות — `lib/ai/budget.test.ts` (גבולות, עלויות, חסימה לפני קריאה, אמצע תור, מכסה למשתמש, מעבר יום בישראל, הקלטות, כשל סגור), `lib/db/supabase-ai-spend.test.ts`, `lib/copy/bot-live.test.ts`, `lib/demo-chat/format.test.ts`, `app/api/demo/chat/demo-chat-route.test.ts` (404/401, Origin, 429, ולידציה, קישור והיכרות, טקסט → כפתור → טיוטה → בטל עם היסטוריה זהה, כפתור של משתמש אחר / מזויף → 403 בלי עיבוד, הקלטה דרך מסלול הקול, גבולות הקלטה, תקרה עם `LIVE_AI` בלי קריאה למודל), `lib/demo-factories.test.ts` (הדגל מפעיל רק AI ותמלול), `proxy.test.ts` (404 ומיקרופון), SQL `supabase/tests/ai_spend.test.sql`. e2e:demo חדש: `/demo/chat` — 404 בלי כניסה, מהאזור האישי, ההיכרות, לחיצה על "נתחיל לעבוד", טיוטה מהודעה מוקלדת, "בטל", היסטוריה אחרי רענון, ומסך מלא ברוחב 390.
 
 **דרוש מדניאל:** שורות 9–10 בטבלה למעלה. אחרי הפריסה: `/account` → "לבדוק את עלזה בצ'אט".
+
+## וואטסאפ חי בהדגמה (`LIVE_WA=1`)
+> משימה: לחבר את מספר הבדיקה של Meta לאתר החי (`docs/meta-setup.md`).
+- `lib/demo.ts`: `liveWaFlag()`. עם `LIVE_WA=1` ההדגמה מתירה את `WA_ACCESS_TOKEN` בלבד; שאר המפתחות ששולחים דברים באמת (מייל, HYP, Microsoft, Google, QStash) עדיין נדחים.
+- `lib/env.ts`: `liveWaInDemo()` ו-`waMocked()`. `lib/wa/index.ts` שואל את `waMocked()`: בהדגמה עם `LIVE_WA` השליחה אמיתית דרך ה-Cloud API, חוץ ממספרים וירטואליים של הצ'אט באתר (`+999…`), שנרשמים ולא נשלחים ל-Meta. הצ'אט באתר ממשיך עם ה-sender המקליט שלו.
+- ה-webhook (`/api/wa/webhook`) דורש `WA_VERIFY_TOKEN` ו-`META_APP_SECRET` (חתימה), התור נשאר מקומי (`LocalQueue`) וה-worker מאומת בסוד הפנימי.
+- בדיקות: `lib/demo-factories.test.ts` — הדגל מתיר רק את טוקן הוואטסאפ, שליחה למספר וירטואלי לא מגיעה ל-Meta, ו-`LIVE_WA` מחוץ להדגמה לא משנה כלום.
+- **דרוש מדניאל:** להעביר את Deployment Protection ל-Standard (`docs/meta-setup.md` §8), ואז להגדיר את ה-webhook ב-Meta (§6).
