@@ -29,9 +29,10 @@ const reset = () => SINGLETONS.forEach((n) => setGlobalSingleton(n, undefined));
 /** Keys the demo may sit next to (it never uses them) — none of them can send anything on its own. */
 const HARMLESS_KEYS = {
   ANTHROPIC_API_KEY: "sk-ant-real",
+  OPENROUTER_API_KEY: "sk-or-real",
   SONIOX_API_KEY: "soniox-real",
   OPENAI_API_KEY: "sk-openai-real",
-  STT_PROVIDER: "soniox",
+  STT_PROVIDER: "openrouter",
   MS_CLIENT_ID: "real-ms-client",
   GOOGLE_CLIENT_ID: "real-google-client",
   WA_PHONE_NUMBER_ID: "123",

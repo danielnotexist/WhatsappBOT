@@ -1,4 +1,7 @@
-/** Speech-to-text for WhatsApp voice notes (PLAN §6: Soniox primary, gpt-4o-transcribe fallback). */
+/**
+ * Speech-to-text for WhatsApp voice notes. Default: OpenRouter (deepgram/nova-3 → openai/gpt-transcribe, lib/stt/openrouter.ts);
+ * optional: Soniox / OpenAI direct (PLAN §6's original pick); mock in DATA_MODE=memory and the demo. See lib/stt/env.ts.
+ */
 
 export interface AudioInput {
   bytes: Uint8Array;
@@ -21,6 +24,8 @@ export interface Transcript {
   durationMs: number | null;
   /** mean token confidence 0–1, when the provider reports it */
   confidence: number | null;
+  /** what the call cost in USD, when the provider reports it (OpenRouter `usage.cost`) */
+  costUsd?: number | null;
 }
 
 export interface SttProvider {

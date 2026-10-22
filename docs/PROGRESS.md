@@ -395,3 +395,18 @@ DATA_MODE=memory pnpm dev   # "לחבר את גוגל" בשיחה → /api/auth/
 - פעם או פעמיים נראתה עצירה של הדפדפן ל-250–300ms (בלי JS ארוך), גם ברפרנס עצמו. היא לא חזרה ב-30 מעברי קוד↔מייל ברצף, ולכן זו סביבת ה-headless ולא הקוד.
 
 **בדיקות:** 580 יחידה, e2e 15/15, e2e:demo 3/3, build. הבדיקה "Microsoft path" נכשלה פעמיים באקראי: פעם אחת בריצה מלאה (`Invalid URL` בבקשה המדומה ל-login.microsoftonline.com) ופעם אחת בריצה ראשונה מול שרת dev קר (הכתובת נשארה ‎/start/connect). אחר כך היא עברה בשתי ריצות מלאות וב-8 חזרות ברצף. כדאי לעקוב.
+
+### 2026-10-22 — תמלול הודעות קוליות דרך OpenRouter (שולב מענף נפרד)
+
+> פירוט מלא: `docs/progress/stt-openrouter.md`. נבנה במקביל לסבבי המעברים ומוזג אחריהם, בלי התנגשויות.
+
+**מה נעשה**
+- `lib/stt/openrouter.ts` (חדש): קריאה סינכרונית אחת ל-`/audio/transcriptions` עם Ogg/Opus כמו שהוא, `language: "he"` ו-`provider: { data_collection: "deny" }`. ראשי `deepgram/nova-3`, גיבוי `openai/gpt-transcribe` (`FallbackStt`, גם על תמלול ריק). Timeout של 45 שנ׳ לכל מודל, סיווג שגיאות (402/400/413 סופיות; 408/429/5xx retryable).
+- `lib/stt/env.ts`: ‏`STT_PROVIDER` = ‏`openrouter` (ברירת מחדל כשיש `OPENROUTER_API_KEY`) | ‏`soniox` | ‏`openai` | ‏`mock`. ‏`STT_MODEL` ו-`STT_FALLBACK_MODEL` חדשים. ‏`SONIOX_API_KEY` אופציונלי. בהדגמה תמיד mock.
+- `lib/stt/ogg.ts`: אורך הקלטה מכותרות ה-Ogg, כדי ש"הבנתי כך" יישלח על הקלטה ארוכה גם בלי משך מהמודל.
+- העלות של כל תמלול נשמרת ב-`messages.cost_usd`, והמסלול ב-`model_used` (`setMessageTranscript`).
+- טיוטות המשפט (`docs/legal/privacy-policy-he.md`, `dpa-checklist-he.md`) עודכנו לספקי המשנה החדשים.
+
+**בדיקות:** 593 יחידה, lint, typecheck, build.
+
+**דרוש מדניאל:** ‏`OPENROUTER_API_KEY` וקרדיט ב-OpenRouter; בדיקה בטלפון (הקלטה קצרה וארוכה); אישור עו"ד לספקי המשנה לפני מצב אמיתי. החלטה פתוחה: התמלול רץ לפני בדיקות `past_due`/מכסה (פירוט בקובץ הענף).

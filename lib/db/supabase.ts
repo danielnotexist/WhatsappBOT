@@ -201,8 +201,9 @@ export class SupabaseDb implements Db {
     return count ?? 0;
   }
 
-  async setMessageTranscript(id: string, transcript: string): Promise<void> {
-    const { error } = await this.client.from("messages").update({ transcript }).eq("id", id);
+  async setMessageTranscript(id: string, transcript: string, stt?: { model?: string | null; costUsd?: number | null }): Promise<void> {
+    const patch = { transcript, ...(stt?.model ? { model_used: stt.model } : {}), ...(typeof stt?.costUsd === "number" ? { cost_usd: stt.costUsd } : {}) };
+    const { error } = await this.client.from("messages").update(patch).eq("id", id);
     if (error) this.fail("setMessageTranscript", error);
   }
 

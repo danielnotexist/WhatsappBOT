@@ -285,9 +285,12 @@ export class MemoryDb implements Db {
     return this.messages.filter((m) => m.user_id === userId && m.created_at >= iso(since)).length;
   }
 
-  async setMessageTranscript(id: string, transcript: string): Promise<void> {
+  async setMessageTranscript(id: string, transcript: string, stt?: { model?: string | null; costUsd?: number | null }): Promise<void> {
     const row = this.messages.find((m) => m.id === id);
-    if (row) row.transcript = transcript;
+    if (!row) return;
+    row.transcript = transcript;
+    if (stt?.model) row.model_used = stt.model;
+    if (typeof stt?.costUsd === "number") row.cost_usd = stt.costUsd;
   }
 
   async getConversationState(userId: string): Promise<ConversationStateRow | null> {

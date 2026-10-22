@@ -35,7 +35,7 @@
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | מהפרויקט ב-Supabase (Project Settings → API) | **מומלץ**: נתונים שנשמרים בין instances. המיגרציות 0001–0005 כבר רצו שם. `SUPABASE_SERVICE_ROLE_KEY` — Sensitive, שרת בלבד, אף פעם לא `NEXT_PUBLIC_`. |
 | `WA_PUBLIC_NUMBER` | אופציונלי | המספר שמופיע בקישור wa.me ובקוד ה-QR. בלי זה — מספר דמה (`972500000000`). |
 
-**לא להגדיר** בהדגמה: אף אחד מהמפתחות ברשימת הסירוב ב-§1. מפתחות כמו `ANTHROPIC_API_KEY`, `SONIOX_API_KEY`, `MS_CLIENT_ID`, `GOOGLE_CLIENT_ID` מותרים אבל לא בשימוש (הכול מדומה) — עדיף לא להוסיף אותם עד המעבר למצב האמיתי.
+**לא להגדיר** בהדגמה: אף אחד מהמפתחות ברשימת הסירוב ב-§1. מפתחות כמו `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `MS_CLIENT_ID`, `GOOGLE_CLIENT_ID` מותרים אבל לא בשימוש (הכול מדומה) — עדיף לא להוסיף אותם עד המעבר למצב האמיתי.
 
 שינוי במשתנים נכנס לתוקף רק ב-deployment הבא (Redeploy).
 
@@ -99,7 +99,7 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
    delete from public.auth_otps;
    ```
    או פרויקט Supabase נפרד ל-production (מומלץ), ואז להריץ עליו את `supabase/migrations/*`.
-2. ב-Vercel: למחוק את `DEMO_MODE` (או `0`), ולהוסיף את כל המשתנים לפי `.env.example`: `WA_*` + `META_APP_SECRET`, `MS_*`, `GOOGLE_*`, `ANTHROPIC_API_KEY`, `SONIOX_API_KEY`, `OPENROUTER_API_KEY`, `HYP_*`, `QSTASH_*`, `RESEND_API_KEY`. את `TOKEN_ENC_KEY` להשאיר (או לייצר חדש אם הנתונים נוקו — לא שניהם באמצע).
+2. ב-Vercel: למחוק את `DEMO_MODE` (או `0`), ולהוסיף את כל המשתנים לפי `.env.example`: `WA_*` + `META_APP_SECRET`, `MS_*`, `GOOGLE_*`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY` (גם לתמלול), `HYP_*`, `QSTASH_*`, `RESEND_API_KEY`. את `TOKEN_ENC_KEY` להשאיר (או לייצר חדש אם הנתונים נוקו — לא שניהם באמצע).
 3. Redeploy. `/api/health` → `"mode": "supabase"`, `"checks": { "env": "ok" }`. אם חסר משהו — הודעה בעברית עם שמות המשתנים.
 4. כתובות חזרה אצל הספקים: Meta webhook (`/api/wa/webhook`), HYP (`/api/pay/return`), Microsoft (`/api/auth/microsoft/callback`), Google (`/api/auth/google/callback`, `docs/google-setup.md`).
 5. הפס, הערת הקוד, החלון ו-noindex נעלמים לבד. Deployment Protection — להחליט מחדש (אתר שיווקי ציבורי צריך כתובת ציבורית).
