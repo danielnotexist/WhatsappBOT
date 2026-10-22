@@ -303,8 +303,8 @@ export interface Db {
   insertMessage(row: NewMessage): Promise<MessageRow | null>;
   recentMessages(userId: string, limit: number): Promise<MessageRow[]>;
   countMessagesSince(userId: string, since: Date): Promise<number>;
-  /** voice notes: stores the STT transcript on the inbound audio message */
-  setMessageTranscript(id: string, transcript: string): Promise<void>;
+  /** voice notes: stores the STT transcript on the inbound audio message, with the STT route and its cost when known */
+  setMessageTranscript(id: string, transcript: string, stt?: { model?: string | null; costUsd?: number | null }): Promise<void>;
 
   // conversation_state
   getConversationState(userId: string): Promise<ConversationStateRow | null>;

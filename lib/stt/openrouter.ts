@@ -6,7 +6,8 @@ import { SttError, type AudioInput, type SttProvider, type TranscribeOptions, ty
  * Docs checked 21.10.2026 (openrouter.ai/docs/api/api-reference/stt/create-transcription, guides/overview/multimodal/stt):
  *   POST https://openrouter.ai/api/v1/audio/transcriptions
  *   Authorization: Bearer <OPENROUTER_API_KEY>, Content-Type: application/json
- *   { model, input_audio: { data: <raw base64 — not a data: URI>, format }, language?: ISO-639-1 }
+ *   { model, input_audio: { data: <raw base64 — not a data: URI>, format }, language?: ISO-639-1,
+ *     provider?: { data_collection?: "allow" | "deny", zdr?: boolean } }
  *   200 → { text, usage?: { seconds?, cost?, input_tokens?, output_tokens?, total_tokens? } }
  *         (`seconds` comes from duration-priced models such as deepgram/nova-3; `cost` is USD)
  *   err → { error: { code, message, metadata? } } — 400 bad input, 401 key, 402 no credits, 413 too large,
@@ -17,9 +18,16 @@ import { SttError, type AudioInput, type SttProvider, type TranscribeOptions, ty
  * e.g. openai/gpt-4o-transcribe, reject it with 400), so there is no word confidence. `context` hints are not sent:
  * `keyterms` is provider-specific and an unsupported audio option fails the request.
  * Upstream providers time out at ~60 s; inline base64 above 25 MB is accepted only for OpenAI/Groq models.
+ *
+ * Data policy (docs/legal/privacy-policy-he.md §6 lists OpenRouter, Deepgram and OpenAI for this): every request sends
+ * `provider: { data_collection: "deny" }` — OpenRouter's default is "allow" (providers that may store the audio and train
+ * on it); "deny" routes only to providers that do not collect it, and fails rather than fall back to one that does.
+ * deepgram/nova-3's endpoint is on OpenRouter's public Zero Data Retention list (GET /api/v1/endpoints/zdr, 22.10.2026),
+ * so it routes under "deny". `zdr: true` is not sent: OpenAI's endpoint (the fallback) is not on that list.
+ * OpenRouter itself keeps no prompt content unless logging is turned on in the account (docs/guides/privacy/data-collection).
  */
 export const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
-/** Best Hebrew WhatsApp WER among the OpenRouter STT models (ivrit.ai leaderboard, eval-whatsapp: 12.0%). */
+/** Best Hebrew WhatsApp WER among the OpenRouter STT models that ivrit.ai measured (leaderboard, eval-whatsapp: 12.0%). */
 export const OPENROUTER_STT_MODEL = "deepgram/nova-3";
 /** The fallback when the primary fails or returns nothing. */
 export const OPENROUTER_STT_FALLBACK_MODEL = "openai/gpt-transcribe";
@@ -41,18 +49,21 @@ interface OpenRouterSttResponse {
   error?: { code?: number | string; message?: string } | null;
 }
 
-/** `input_audio.format` from the WhatsApp mime type — the container as it is, never a guess at transcoding. */
+/**
+ * `input_audio.format` from the WhatsApp mime type — the container as it is, never a guess at transcoding. Containers
+ * are matched before codecs, so "audio/webm; codecs=opus" is webm; a bare "audio/opus" is an Ogg/Opus voice note.
+ */
 export function openRouterAudioFormat(mimeType: string): string {
   const m = mimeType.toLowerCase();
-  if (m.includes("ogg") || m.includes("opus")) return "ogg";
-  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("webm")) return "webm";
   if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
   if (m.includes("aac")) return "aac";
   if (m.includes("wav")) return "wav";
-  if (m.includes("webm")) return "webm";
   if (m.includes("flac")) return "flac";
   if (m.includes("amr")) return "amr"; // not in OpenRouter's list; passed through for providers that decode it
-  return "ogg"; // WhatsApp voice notes
+  return "ogg"; // audio/opus and WhatsApp voice notes
 }
 
 export class OpenRouterStt implements SttProvider {
@@ -71,9 +82,11 @@ export class OpenRouterStt implements SttProvider {
       model: this.model,
       input_audio: { data: Buffer.from(audio.bytes).toString("base64"), format: openRouterAudioFormat(audio.mimeType) },
       language: o.language ?? "he",
+      provider: { data_collection: "deny" }, // see the data policy note above
     };
     const timeoutMs = this.opts.timeoutMs ?? OPENROUTER_STT_TIMEOUT_MS;
     let res: Response;
+    let raw: string;
     try {
       res = await this.fetchImpl(`${(this.opts.baseUrl ?? OPENROUTER_BASE).replace(/\/+$/, "")}/audio/transcriptions`, {
         method: "POST",
@@ -81,12 +94,13 @@ export class OpenRouterStt implements SttProvider {
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });
+      // inside the same guard: the timeout (or a dropped connection) can also hit while the body is still arriving
+      raw = await res.text();
     } catch (e) {
       const err = e as Error;
       const timedOut = err.name === "TimeoutError" || err.name === "AbortError";
       throw new SttError(timedOut ? `OpenRouter ${this.model}: timed out after ${Math.round(timeoutMs / 1000)}s` : `OpenRouter ${this.model}: network error (${err.message})`, true, this.name);
     }
-    const raw = await res.text();
     let json: OpenRouterSttResponse | null = null;
     try {
       json = raw ? (JSON.parse(raw) as OpenRouterSttResponse) : null;

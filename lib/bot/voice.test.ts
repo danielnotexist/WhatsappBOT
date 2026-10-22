@@ -44,7 +44,15 @@ describe("voice notes", () => {
     expect(h.wa.texts).toContain('הבנתי כך: "מה יש לי מחר"\nממשיכה לפי זה.');
   });
 
-  it("measures the Ogg/Opus length itself when the model does not report it", async () => {
+  it("stores the STT route and its cost on the inbound audio row", async () => {
+    const { h, user, voice, stt } = await setup();
+    stt!.enqueue({ text: "מה יש לי מחר", provider: "openrouter:deepgram/nova-3", model: "deepgram/nova-3", confidence: null, costUsd: 0.000301 });
+    await processInbound(h.ctx, voice());
+    const inbound = (await h.db.recentMessages(user.id, 10)).find((m) => m.direction === "in")!;
+    expect(inbound).toMatchObject({ transcript: "מה יש לי מחר", model_used: "openrouter:deepgram/nova-3", cost_usd: 0.000301 });
+  });
+
+  it("measures the Ogg/Opus length itself when the model does not report it (no confidence → echo by length only)", async () => {
     const echo = 'הבנתי כך: "מה יש לי מחר"\nממשיכה לפי זה.';
     const long = await setup();
     long.h.wa.media.set("media-1", { bytes: fakeOggOpus(25_000), mimeType: "audio/ogg; codecs=opus" });

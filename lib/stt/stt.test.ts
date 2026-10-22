@@ -137,9 +137,25 @@ describe("fallback and env", () => {
     expect((await emptyFirst.transcribe(OGG)).text).toBe("טקסט");
   });
 
+  it("adds up the cost of every answered call — an empty transcript is billed too", async () => {
+    const billedTwice = new FallbackStt([new MockStt().enqueue({ text: " ", costUsd: 0.0003 }), new MockStt().enqueue({ text: "שלום", costUsd: 0.0004 })]);
+    expect((await billedTwice.transcribe(OGG)).costUsd).toBeCloseTo(0.0007, 10);
+    const failedThenOk = new FallbackStt([new MockStt().enqueue(new SttError("503", true, "a")), new MockStt().enqueue({ text: "שלום", costUsd: 0.0004 })]);
+    expect((await failedThenOk.transcribe(OGG)).costUsd).toBe(0.0004);
+    const bothEmpty = new FallbackStt([new MockStt().enqueue({ text: "", costUsd: 0.0001 }), new MockStt().enqueue({ text: "", costUsd: 0.0002 })]);
+    expect((await bothEmpty.transcribe(OGG)).costUsd).toBeCloseTo(0.0003, 10);
+    // no cost reported anywhere → stays unset
+    expect((await new FallbackStt([new MockStt("שלום")]).transcribe(OGG)).costUsd).toBeUndefined();
+  });
+
   it("builds the provider from env: OpenRouter by default, Soniox / OpenAI on request, mock in memory and demo", () => {
     expect(sttFromEnv({ DATA_MODE: "memory", NODE_ENV: "test" })).toBeInstanceOf(MockStt);
     expect(sttFromEnv({ DATA_MODE: "memory", NODE_ENV: "test", OPENROUTER_API_KEY: "or" })).toBeInstanceOf(MockStt);
+    // memory mode only changes the default: an explicit STT_PROVIDER is the real (paid) provider, also there (.env.example)
+    expect(sttFromEnv({ DATA_MODE: "memory", NODE_ENV: "development", STT_PROVIDER: "openrouter", OPENROUTER_API_KEY: "or" }).name).toBe(
+      "openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe",
+    );
+    expect(sttFromEnv({ DATA_MODE: "memory", NODE_ENV: "development", STT_PROVIDER: "mock", OPENROUTER_API_KEY: "or" })).toBeInstanceOf(MockStt);
     expect(sttFromEnv({ DEMO_MODE: "1", TOKEN_ENC_KEY: Buffer.alloc(32, 1).toString("base64"), STT_PROVIDER: "openrouter", OPENROUTER_API_KEY: "or" })).toBeInstanceOf(MockStt);
     expect(sttFromEnv({ OPENROUTER_API_KEY: "or" }).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
     expect(sttFromEnv({ OPENROUTER_API_KEY: "or", SONIOX_API_KEY: "k" }).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
@@ -190,7 +206,8 @@ describe("OpenRouter speech-to-text adapter", () => {
     expect(call.headers["Content-Type"]).toBe("application/json");
     expect(call.headers["X-Title"]).toBe("Alze");
     expect(call.signal).toBeInstanceOf(AbortSignal);
-    expect(call.json).toEqual({ model: "deepgram/nova-3", input_audio: { data: Buffer.from(OGG.bytes).toString("base64"), format: "ogg" }, language: "he" });
+    // data_collection "deny": only providers that do not keep or train on the audio (docs/legal/privacy-policy-he.md §6)
+    expect(call.json).toEqual({ model: "deepgram/nova-3", input_audio: { data: Buffer.from(OGG.bytes).toString("base64"), format: "ogg" }, language: "he", provider: { data_collection: "deny" } });
     expect((call.json as { input_audio: { data: string } }).input_audio.data).not.toMatch(/^data:/);
   });
 
@@ -198,7 +215,7 @@ describe("OpenRouter speech-to-text adapter", () => {
     const { fetchImpl, calls } = fakeFetch({ [ROUTE]: () => json({ text: "מה יש לי מחר?", usage: { input_tokens: 80, output_tokens: 12, total_tokens: 92 } }) });
     const t = await new OpenRouterStt({ apiKey: "k", model: "openai/gpt-transcribe", fetchImpl, baseUrl: "https://openrouter.ai/api/v1/" }).transcribe({ bytes: OGG.bytes, mimeType: "audio/mp4" });
     expect(t).toMatchObject({ text: "מה יש לי מחר?", provider: "openrouter:openai/gpt-transcribe", model: "openai/gpt-transcribe", durationMs: null, costUsd: null });
-    expect(calls[0]!.json).toMatchObject({ model: "openai/gpt-transcribe", input_audio: { format: "m4a" }, language: "he" });
+    expect(calls[0]!.json).toMatchObject({ model: "openai/gpt-transcribe", input_audio: { format: "m4a" }, language: "he", provider: { data_collection: "deny" } });
   });
 
   it("classifies errors: credits / bad input are final, rate limits and upstream failures retryable", async () => {
@@ -209,7 +226,8 @@ describe("OpenRouter speech-to-text adapter", () => {
     expect(credits.message).toContain("Insufficient credits");
     expect(await fail(() => json({ error: { code: 400, message: "Invalid base64" } }, 400))).toMatchObject({ retryable: false, status: 400 });
     expect(await fail(() => json({ error: { code: 413, message: "Payload Too Large" } }, 413))).toMatchObject({ retryable: false, status: 413 });
-    for (const status of [429, 502, 503, 504, 524, 529]) {
+    expect(await fail(() => json({ error: { code: 401, message: "No auth credentials found" } }, 401))).toMatchObject({ retryable: false, status: 401 });
+    for (const status of [408, 429, 502, 503, 504, 524, 529]) {
       expect(await fail(() => json({ error: { code: status, message: "upstream" } }, status))).toMatchObject({ retryable: true, status });
     }
     expect(await fail(() => new Response("<html>bad gateway</html>", { status: 502 }))).toMatchObject({ retryable: true, message: expect.stringContaining("bad gateway") });
@@ -228,6 +246,29 @@ describe("OpenRouter speech-to-text adapter", () => {
     }) as typeof fetch;
     const err = await new OpenRouterStt({ apiKey: "k", fetchImpl: slow, timeoutMs: 30_000 }).transcribe(OGG).catch((e) => e);
     expect(err).toMatchObject({ retryable: true, message: "OpenRouter deepgram/nova-3: timed out after 30s" });
+  });
+
+  it("treats a timeout or a dropped connection while the body is still arriving the same way", async () => {
+    // headers arrived (200), then the body stream fails part-way
+    const partial = (failure: Error) =>
+      (async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(c) {
+              c.enqueue(new TextEncoder().encode('{"te'));
+              c.error(failure);
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )) as typeof fetch;
+    const timedOut = await new OpenRouterStt({ apiKey: "k", fetchImpl: partial(new DOMException("The operation was aborted due to timeout", "TimeoutError")), timeoutMs: 45_000 })
+      .transcribe(OGG)
+      .catch((e) => e);
+    expect(timedOut).toBeInstanceOf(SttError);
+    expect(timedOut).toMatchObject({ retryable: true, provider: "openrouter:deepgram/nova-3", message: "OpenRouter deepgram/nova-3: timed out after 45s" });
+    const reset = await new OpenRouterStt({ apiKey: "k", fetchImpl: partial(new TypeError("terminated")) }).transcribe(OGG).catch((e) => e);
+    expect(reset).toBeInstanceOf(SttError);
+    expect(reset).toMatchObject({ retryable: true, message: expect.stringContaining("deepgram/nova-3: network error") });
   });
 
   it("falls back to the second model on failure or an empty transcript (env wiring, mocked fetch)", async () => {
@@ -252,6 +293,10 @@ describe("OpenRouter speech-to-text adapter", () => {
     expect(openRouterAudioFormat("audio/aac")).toBe("aac");
     expect(openRouterAudioFormat("audio/wav")).toBe("wav");
     expect(openRouterAudioFormat("audio/webm")).toBe("webm");
+    // the container wins over the codec
+    expect(openRouterAudioFormat("audio/webm; codecs=opus")).toBe("webm");
+    expect(openRouterAudioFormat("audio/mp4; codecs=mp4a.40.2")).toBe("m4a");
+    expect(openRouterAudioFormat("audio/flac")).toBe("flac");
     expect(openRouterAudioFormat("audio/amr")).toBe("amr");
     expect(openRouterAudioFormat("")).toBe("ogg");
   });

@@ -7,7 +7,7 @@ import type { BotContext } from "./context";
 
 /** err.media_too_large: up to 20MB */
 export const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
-/** proc.transcript_echo: only for long (> 20 s) or low-confidence recordings */
+/** proc.transcript_echo: only for long (> 20 s) or low-confidence recordings (confidence only when the provider reports it — Soniox) */
 export const ECHO_MIN_DURATION_MS = 20_000;
 export const ECHO_MAX_CONFIDENCE = 0.75;
 
@@ -43,18 +43,20 @@ export async function transcribeVoiceNote(ctx: BotContext, userId: string, msg: 
   let text: string;
   let durationMs: number | null = null;
   let confidence: number | null = null;
+  let stt: { model: string; costUsd: number | null };
   try {
     const t = await ctx.stt().transcribe({ bytes: audio.bytes, mimeType: audio.mimeType || msg.mimeType || "audio/ogg" }, { language: "he" });
     text = t.text.trim();
     durationMs = t.durationMs ?? oggOpusDurationMs(audio.bytes); // not every model reports the length
-    confidence = t.confidence;
+    confidence = t.confidence; // null through OpenRouter: there the echo is by length only
+    stt = { model: t.provider, costUsd: t.costUsd ?? null };
   } catch (e) {
     console.error("[voice] transcription failed:", (e as Error).message);
     return fail("transcription failed");
   }
   if (!text) return fail("empty transcript");
 
-  await ctx.db.setMessageTranscript(storedMessageId, text);
+  await ctx.db.setMessageTranscript(storedMessageId, text, stt); // STT spend per message (messages.cost_usd)
   if ((durationMs ?? 0) > ECHO_MIN_DURATION_MS || (confidence !== null && confidence < ECHO_MAX_CONFIDENCE)) {
     await ctx.wa.sendText(to, copy["proc.transcript_echo"](text)).catch(() => undefined);
   }
