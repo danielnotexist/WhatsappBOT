@@ -530,3 +530,8 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 **בדיקות:** 896 יחידה (חדשות: `lib/billing/result.test.ts`, `components/auth/shell-session.test.tsx`, `lib/design/dashes.test.tsx`, נחיתה מחוברת/לא מחוברת, routes של התשלום עם ובלי session), lint, typecheck, build, e2e 21/21 (חדש: `e2e/pay.spec.ts`; ב-`screens.spec.ts` גם דף התשלום, עדכון הכרטיס ו-`/pay/done` בשלושה רוחבים, בלי גלילה אופקית ו-axe נקי; בהרשמה ובאזור האישי הכותרת המחוברת), e2e:demo 3/3, eval typecheck + dry-run.
 
 **דרוש מדניאל:** לעבור על דף התשלום (שלושת המצבים) ועל `/pay/done` בטלפון. ב-HYP: אותה כתובת חזרה `/api/pay/return` (ללא שינוי).
+
+### 2026-10-22 — בדיקת אימות סופית: `hasSession` רק בזמן בקשה
+
+- **תיקון:** בשרת הפיתוח (`next dev`, cacheComponents) כל כניסה מחוברת לדף עם חור ה-session (`/start/*`, `/login/*`, `/`, דפי התשלום) רשמה שגיאה "Next.js encountered the unstable value `new Date()` while prerendering": `hasSession` קרא את העוגייה ובדק תפוגה מול השעה הנוכחית בלי `connection()`. עכשיו `hasSession` (`lib/auth/current-user.ts`) קורא קודם ל-`await connection()`, כמו שאר הדפים שבודקים session. בפרודקשן לא היה שינוי התנהגות (החור כבר דינמי); השגיאה נעלמה מיומן השרת ב-e2e (0 מופעים, היו בכל ריצה).
+- **אימות:** lint, typecheck, 896 יחידה, build, e2e 21/21, e2e:demo 3/3, SQL מקומי (כל הבדיקות), eval typecheck + dry-run. צילומים של DEMO_MODE בפרודקשן ב-1280 וב-375: `/`, `/start/email`, `/start/code`, `/account` אחרי הרשמה בקוד 123456, `/pay/<token>` מהאזור האישי ו-`/` מחובר: אין "—" או "–" בטקסט הגלוי, גלולת הדבש "לאזור האישי" בדף הבית כשמחוברים, דף התשלום בשפת האתר.

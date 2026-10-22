@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { restoreDemoUser } from "./demo-user";
@@ -22,6 +23,7 @@ export async function getSession(): Promise<Session | null> {
  * restore — for the headers that switch "כניסה" to "לאזור האישי" (a request-time hole: call inside Suspense).
  */
 export async function hasSession(): Promise<boolean> {
+  await connection(); // the expiry check reads the current time: request-time only, never in a prerender
   const store = await cookies();
   return verifySessionToken(store.get(SESSION_COOKIE)?.value) !== null;
 }
