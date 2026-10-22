@@ -2,6 +2,7 @@ import "server-only";
 import QRCode from "qrcode";
 import { BRAND } from "@/lib/brand";
 import { isDemo } from "@/lib/demo";
+import { liveWaInDemo } from "@/lib/env";
 import { palette } from "@/lib/design/tokens";
 import { cn } from "@/lib/utils";
 
@@ -20,8 +21,8 @@ export async function qrSvg(value: string, opts: { dark?: string; light?: string
  * The SVG comes from our own value through the qrcode library, never from user HTML.
  */
 export async function QrCode({ value, label, className }: { value: string; label: string; className?: string }) {
-  // DEMO_MODE: a harmless text QR instead of the wa.me link (the placeholder number is not ours).
-  const svg = await qrSvg(isDemo() ? `${BRAND.name} - גרסת הדגמה. בגרסה האמיתית הסריקה פותחת את וואטסאפ.` : value);
+  // DEMO_MODE: a harmless text QR instead of the wa.me link (the placeholder number is not ours) — unless LIVE_WA=1.
+  const svg = await qrSvg(isDemo() && !liveWaInDemo() ? `${BRAND.name} - גרסת הדגמה. בגרסה האמיתית הסריקה פותחת את וואטסאפ.` : value);
   return (
     <figure className={cn("m-0", className)}>
       <div role="img" aria-label={label} className="overflow-hidden rounded-2xl [&>svg]:block [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: svg }} />
