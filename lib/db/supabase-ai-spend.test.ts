@@ -32,6 +32,18 @@ describe("SupabaseDb — ai_spend (0009)", () => {
     expect(nan.calls[0]).toEqual(["rpc", "ai_spend_add", { p_day: "2026-10-22", p_cost: 0, p_calls: 2 }]);
   });
 
+  it("reserves through ai_spend_reserve (-1 = refused) and settles through ai_spend_adjust (0010)", async () => {
+    const r = stub({ data: "0.400000", error: null });
+    expect(await r.db.reserveAiSpend("2026-10-22", 0.1, 3)).toBe(0.4);
+    expect(r.calls).toEqual([["rpc", "ai_spend_reserve", { p_day: "2026-10-22", p_cost: 0.1, p_budget: 3 }]]);
+    expect(await stub({ data: -1, error: null }).db.reserveAiSpend("2026-10-22", 0.1, 3)).toBe(-1);
+    await expect(stub({ data: null, error: { message: "boom" } }).db.reserveAiSpend("2026-10-22", 0.1, 3)).rejects.toThrow(/reserveAiSpend/);
+    const a = stub({ data: "0.25", error: null });
+    expect(await a.db.adjustAiSpend("2026-10-22", -0.05)).toBe(0.25);
+    expect(a.calls).toEqual([["rpc", "ai_spend_adjust", { p_day: "2026-10-22", p_delta: -0.05 }]]);
+    await expect(stub({ data: null, error: { message: "boom" } }).db.adjustAiSpend("2026-10-22", 1)).rejects.toThrow(/adjustAiSpend/);
+  });
+
   it("reads the day's total and the user's count; missing rows are 0", async () => {
     const total = stub({ data: { cost_usd: "1.25" }, error: null });
     expect(await total.db.getAiSpend("2026-10-22")).toBe(1.25);

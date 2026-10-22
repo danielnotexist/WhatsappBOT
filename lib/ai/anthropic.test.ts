@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AnthropicProvider, costUsd } from "./anthropic";
+import { ANTHROPIC_REQUEST_DEMO, AnthropicProvider, costUsd } from "./anthropic";
 import { AiProviderError } from "./types";
 
 function fakeFetch(body: unknown, status = 200) {
@@ -48,6 +48,17 @@ describe("AnthropicProvider", () => {
     expect(err).toBeInstanceOf(AiProviderError);
     expect(err.retryable).toBe(true);
     expect(f.calls[0]!.body.model).toBe("claude-haiku-5-5");
+  });
+
+  it("an aborted signal (the spend guard's turn deadline) stops the call before anything is sent", async () => {
+    const f = fakeFetch({});
+    const p = new AnthropicProvider({ apiKey: "sk-test", fetch: f.fn, maxRetries: 0 });
+    const ac = new AbortController();
+    ac.abort();
+    await expect(p.complete({ tier: "router", system: "s", messages: [{ role: "user", content: "x" }], signal: ac.signal })).rejects.toThrow();
+    expect(f.calls).toHaveLength(0);
+    // the live demo waits less and retries once (inside the chat route's 60 s)
+    expect(ANTHROPIC_REQUEST_DEMO.timeoutMs * (ANTHROPIC_REQUEST_DEMO.maxRetries + 1)).toBeLessThan(60_000);
   });
 
   it("prices known models and returns null for unknown ones", () => {

@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 import { getSession } from "@/lib/auth/current-user";
 import { botContext } from "@/lib/bot/handle-inbound";
+import { awaitingAnswer } from "@/lib/bot/onboarding";
 import { BRAND } from "@/lib/brand";
 import { getDb } from "@/lib/db";
 import type { UserRow } from "@/lib/db/types";
@@ -10,6 +11,7 @@ import { isDemo } from "@/lib/demo";
 import { EnvError, liveAiInDemo } from "@/lib/env";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
 import { oggOpusDurationMs } from "@/lib/stt/ogg";
+import { webmDurationMs } from "@/lib/stt/webm";
 
 /** A model turn with tools, or a recording plus its transcription, can take a while. */
 export const maxDuration = 60;
@@ -75,7 +77,7 @@ export async function GET() {
   if (user instanceof Response) return user;
   const db = getDb();
   const [linked, items] = await Promise.all([chatLinked(db, user.id), chatHistory(db, user.id)]);
-  return Response.json({ ok: true, linked, liveAi: liveAiInDemo(), items } satisfies ChatHistoryResponse, { headers: NO_STORE });
+  return Response.json({ ok: true, linked, liveAi: liveAiInDemo(), awaiting: awaitingAnswer(user), items } satisfies ChatHistoryResponse, { headers: NO_STORE });
 }
 
 /**
@@ -84,7 +86,7 @@ export async function GET() {
  *   JSON { start: true }                                  — start the chat (link + welcome), idempotent
  *   JSON { text }                                         — a typed message (up to 2,000 characters)
  *   JSON { reply: { id, title, list? } }                  — a button / list reply; only ids that are the person's own
- *   multipart audio=<webm|ogg|mp4…>, durationMs          — a recording (up to a minute / 2 MB), transcribed like a voice note
+ *   multipart audio=<webm|ogg|mp4>, durationMs           — a recording (up to a minute / 512 KB), transcribed like a voice note
  * 200 ChatPostResponse (the person's message as stored + the bot's replies) · 400/401/403/404/413/429 ChatErrorResponse.
  */
 export async function POST(request: Request) {
@@ -103,7 +105,7 @@ export async function POST(request: Request) {
     const base = getDb();
     const out = await runChat({ base, user, input: parsed, makeCtx: ({ db, wa }) => botContext({ db, wa }) });
     if (!out.ok) return fail(out.code, out.message);
-    return Response.json({ ok: true, user: out.user, replies: out.replies } satisfies ChatPostResponse, { headers: NO_STORE });
+    return Response.json({ ok: true, user: out.user, replies: out.replies, awaiting: out.awaiting } satisfies ChatPostResponse, { headers: NO_STORE });
   } catch (e) {
     if (e instanceof EnvError) return fail("server_error", e.message, 503); // names the missing variables, never values
     console.error("[demo-chat] failed:", (e as Error).message);
@@ -111,12 +113,52 @@ export async function POST(request: Request) {
   }
 }
 
+/** Room for the multipart framing and the durationMs field around the recording. */
+const FORM_OVERHEAD_BYTES = 16 * 1024;
+
+/**
+ * The body, read up to `max` bytes — never buffered past it, whatever Content-Length says (or a chunked upload that
+ * has none). null when it is longer.
+ */
+async function readLimited(request: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > max) return null;
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
+
+/** The recording's length when the container tells it (Ogg/Opus, WebM); null for mp4 — bounded by the size. */
+function measuredDurationMs(bytes: Uint8Array, mimeType: string): number | null {
+  if (mimeType === "audio/ogg") return oggOpusDurationMs(bytes);
+  if (mimeType === "audio/webm") return webmDurationMs(bytes);
+  return null;
+}
+
 async function parseInput(request: Request): Promise<ChatInput | null | Response> {
   const type = request.headers.get("content-type") ?? "";
   if (type.startsWith("multipart/form-data")) {
-    const declared = Number(request.headers.get("content-length") ?? 0);
-    if (declared > DEMO_CHAT_LIMITS.audioBytes + 64 * 1024) return fail("too_large");
-    const form = await request.formData().catch(() => null);
+    const raw = await readLimited(request, DEMO_CHAT_LIMITS.audioBytes + FORM_OVERHEAD_BYTES).catch(() => null);
+    if (!raw) return fail("too_large");
+    const form = await new Response(raw, { headers: { "content-type": type } }).formData().catch(() => null);
     const file = form?.get("audio");
     if (!(file instanceof Blob) || file.size === 0) return fail("bad_request");
     if (file.size > DEMO_CHAT_LIMITS.audioBytes) return fail("too_large");
@@ -126,9 +168,10 @@ async function parseInput(request: Request): Promise<ChatInput | null | Response
     const said = Number(form?.get("durationMs") ?? 0);
     if (Number.isFinite(said) && said > maxMs + 1500) return fail("too_large");
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const measured = oggOpusDurationMs(bytes); // Ogg/Opus only; webm / mp4 rely on the size cap and the recorder's own stop
+    const measured = measuredDurationMs(bytes, mimeType);
     if (measured !== null && measured > maxMs + 1500) return fail("too_large");
-    return { kind: "audio", bytes, mimeType: file.type || mimeType };
+    const durationMs = measured ?? (Number.isFinite(said) && said > 0 ? Math.min(Math.round(said), maxMs) : null);
+    return { kind: "audio", bytes, mimeType: file.type || mimeType, durationMs };
   }
 
   const body = (await request.json().catch(() => null)) as { start?: unknown; text?: unknown; reply?: unknown } | null;

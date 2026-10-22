@@ -9,7 +9,8 @@ import { connectLinkFor, type BotContext } from "./context";
  * First-contact state machine (PLAN §1), persisted in users.profile.onboarding:
  *   welcome → (סיור) ways_card → first_task → ask_name → ask_business → ask_pain → ask_morning_time → connect → done
  *   welcome → (נתחיל לעבוד) first_task → … (same tail)
- * Every step is one message; any free text while a question is open is taken as the answer.
+ * Every step is one message; free text while a question is open is taken as the answer — unless it looks like a
+ * request (`looksLikeRequest`): then the assistant answers it and the question is asked again.
  */
 export type OnboardingStep = "welcome" | "first_task" | "ask_name" | "ask_business" | "ask_pain" | "ask_morning_time" | "connect" | "done";
 
@@ -36,6 +37,44 @@ export async function startOnboarding(ctx: BotContext, userId: string): Promise<
 }
 
 const MORNING: Record<string, string | null> = { mt_0700: "07:00", mt_0730: "07:30", mt_0800: "08:00", mt_0830: "08:30", mt_none: null };
+
+/** The steps that wait for the person's answer (a typed name, a business name, a list choice). */
+const ASKING: readonly OnboardingStep[] = ["ask_name", "ask_business", "ask_pain", "ask_morning_time"];
+
+/** Is onboarding waiting for an answer right now? (the website chat hides its suggested requests meanwhile) */
+export function awaitingAnswer(user: UserRow): boolean {
+  const state = onboardingOf(user);
+  return state !== null && ASKING.includes(state.step);
+}
+
+/** Stems of requests in the second person ("תזכירי", "תנסח"…) — never the start of a name. */
+const REQUEST_STEMS = ["תזכיר", "תנסח", "תכתוב", "תכתב", "תשלח", "תבדוק", "תבדק", "תקבע", "תמצא", "תמצי", "תעש", "תגיד", "תראה", "תראי", "תסכם", "תעדכן", "תבטל", "תוסיף", "תזיז", "תחפש", "תכין", "תכינ", "תעזור", "תעזר", "תפתח", "תקרא", "תקרי", "תענה", "תעני", "תזמן"];
+/** First words of a question or a request. */
+const REQUEST_WORDS = new Set(["מה", "מתי", "איפה", "איך", "למה", "כמה", "האם", "מי", "יש", "אין", "אפשר", "צריך", "צריכה", "רוצה", "בבקשה", "שלחי", "כתבי", "נסחי", "קבעי", "הזכירי", "סכמי", "בדקי", "שלח", "כתוב", "נסח", "קבע", "הזכר", "סכם", "בדוק", "מחר", "היום"]);
+
+/**
+ * An answer to "איך לקרוא לך?" / "מה שם העסק?" that is really a request for the assistant (the first thing many people
+ * do is ask for something): a question, a request word first, digits in a name, or too many words. Such an answer is
+ * never stored as a name; the assistant answers it and the question is asked again.
+ */
+export function looksLikeRequest(text: string, field: "name" | "business"): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/[?？]/.test(t)) return true;
+  const words = t.split(/\s+/);
+  const first = words[0]!.replace(/^[״"'׳(]+/, "");
+  if (REQUEST_WORDS.has(first) || REQUEST_STEMS.some((stem) => first.startsWith(stem))) return true;
+  if (field === "name") return /\d/.test(t) || words.length > 4 || t.length > 40;
+  return words.length > 8 || t.length > 80;
+}
+
+/** Replies that are not a name (a thank-you, an OK): the name question is simply asked again. */
+const NOT_A_NAME = /^(?:תודה(?: רבה)?|אוקי+|אוקיי+|סבבה|בסדר|היי|הי|שלום|כן|לא|יופי|מעולה|ok|okay|thanks)[.!]*$/i;
+
+/** "קוראים לי דנה" / "שמי דנה" → "דנה". */
+function nameFrom(text: string): string {
+  return text.replace(/^(?:קוראים לי|שמי|השם שלי(?: הוא| זה)?)\s+/, "").trim();
+}
 
 /**
  * Handles one message while onboarding is active. Returns `false` when the message should go to the
@@ -70,17 +109,20 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       return false;
     }
     case "ask_name": {
-      if (!text || msg.type !== "text") {
+      if (!text || msg.type !== "text" || NOT_A_NAME.test(text)) {
         await ctx.wa.sendText(to, copy["onb.ask_name"]());
         return true;
       }
-      const name = text.slice(0, 60);
+      // a request instead of a name: the assistant answers it, then the question comes again (afterAssistantReply)
+      if (looksLikeRequest(text, "name")) return false;
+      const name = (nameFrom(text) || text).slice(0, 60);
       await ctx.db.updateUserProfile(user.id, { name });
       await ctx.wa.sendText(to, copy["onb.ask_business"](name));
       await setStep(ctx.db, user.id, { step: "ask_business" });
       return true;
     }
     case "ask_business": {
+      if (text && msg.type === "text" && looksLikeRequest(text, "business")) return false;
       if (text) await ctx.db.updateUserProfile(user.id, { business_name: text.slice(0, 120) });
       await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]);
       await setStep(ctx.db, user.id, { step: "ask_pain" });
@@ -88,6 +130,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
     }
     case "ask_pain": {
       const pain = reply && reply.startsWith("pain_") ? reply : null;
+      if (!pain && !reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
       if (!pain) {
         await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]);
         return true;
@@ -99,6 +142,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       return true;
     }
     case "ask_morning_time": {
+      if (!reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
       if (!reply || !(reply in MORNING)) {
         await ctx.wa.sendList(to, copy["onb.ask_morning_time"](), lists.morningTime.button, [{ title: lists.morningTime.title, rows: lists.morningTime.rows }]);
         return true;
@@ -146,10 +190,18 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
   }
 }
 
-/** Called after the assistant answered the first task: continue with the questions (skip name if known). */
+/**
+ * Called after the assistant answered: after the first task, continue with the questions (skip name if known); after a
+ * request that came instead of an answer (`looksLikeRequest`), ask the open question again.
+ */
 export async function afterFirstTask(ctx: BotContext, user: UserRow, to: string): Promise<void> {
   const state = onboardingOf(user);
-  if (!state || state.step !== "first_task") return;
+  if (!state) return;
+  if (state.step === "ask_name") return void (await ctx.wa.sendText(to, copy["onb.ask_name_again"]()));
+  if (state.step === "ask_business") return void (await ctx.wa.sendText(to, copy["onb.ask_business_again"]()));
+  if (state.step === "ask_pain") return void (await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]));
+  if (state.step === "ask_morning_time") return void (await ctx.wa.sendList(to, copy["onb.ask_morning_time"](), lists.morningTime.button, [{ title: lists.morningTime.title, rows: lists.morningTime.rows }]));
+  if (state.step !== "first_task") return;
   if (user.name) {
     await ctx.wa.sendText(to, copy["onb.ask_business"](user.name));
     await setStep(ctx.db, user.id, { step: "ask_business", firstTaskDone: true });

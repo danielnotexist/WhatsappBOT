@@ -92,7 +92,7 @@ export class OpenRouterStt implements SttProvider {
         method: "POST",
         headers: { Authorization: `Bearer ${this.opts.apiKey}`, "Content-Type": "application/json", "X-Title": BRAND.latin },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: o.signal ? AbortSignal.any([AbortSignal.timeout(timeoutMs), o.signal]) : AbortSignal.timeout(timeoutMs),
       });
       // inside the same guard: the timeout (or a dropped connection) can also hit while the body is still arriving
       raw = await res.text();

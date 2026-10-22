@@ -473,6 +473,13 @@ export interface Db {
   getAiSpend(day: string): Promise<number>;
   /** adds one call's cost to the day (negative counts as 0); returns the day's new total */
   addAiSpend(day: string, costUsd: number, calls?: number): Promise<number>;
+  /**
+   * Before a paid call (migration 0010): adds an upper-bound estimate and one call to the day, only when the new total
+   * stays within `budgetUsd` (atomic — calls in flight at once each hold their own share). The new total, or -1 = refused.
+   */
+  reserveAiSpend(day: string, costUsd: number, budgetUsd: number): Promise<number>;
+  /** After it (migration 0010): moves the day's total by `deltaUsd` (actual − estimate, may be negative), never below 0. */
+  adjustAiSpend(day: string, deltaUsd: number): Promise<number>;
   /** how many of the user's messages reached a paid call on that day */
   getAiUserMessages(day: string, userId: string): Promise<number>;
   /** counts one more message for the user unless `limit` is reached (atomic); the new count, or -1 when the cap is full */

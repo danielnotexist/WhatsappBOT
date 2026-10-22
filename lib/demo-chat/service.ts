@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { BotContext } from "@/lib/bot/context";
 import { welcomeLinkedPhone } from "@/lib/bot/linking";
+import { awaitingAnswer } from "@/lib/bot/onboarding";
 import { parseButtonId } from "@/lib/bot/pending";
 import { processInbound } from "@/lib/bot/process-inbound";
 import type { Db, UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
 import { demoChatPhone } from "./phone";
-import { ChatTranscript, rowItem } from "./transcript";
+import { ChatTranscript, demoMediaId, rowItem } from "./transcript";
 import type { ChatItem } from "./types";
 
 /**
@@ -17,11 +18,11 @@ import type { ChatItem } from "./types";
 
 export type ChatInput =
   | { kind: "text"; text: string }
-  | { kind: "audio"; bytes: Uint8Array; mimeType: string }
+  | { kind: "audio"; bytes: Uint8Array; mimeType: string; durationMs?: number | null }
   | { kind: "reply"; id: string; title: string; list: boolean };
 
 export type ChatOutcome =
-  | { ok: true; user: ChatItem | null; replies: ChatItem[]; note?: string }
+  | { ok: true; user: ChatItem | null; replies: ChatItem[]; awaiting: boolean; note?: string }
   | { ok: false; code: "forbidden" | "blocked"; message: string };
 
 export const CHAT_ERRORS = {
@@ -117,7 +118,8 @@ export async function runChat(opts: { base: Db; user: UserRow; input: ChatInput 
     await transcript.flush();
     note = identity.linkedNow ? "linked" : "already linked";
   }
-  return { ok: true, user: userItem, replies: transcript.items(ctx.now()), note };
+  const fresh = await base.getUser(user.id);
+  return { ok: true, user: userItem, replies: transcript.items(ctx.now()), awaiting: fresh ? awaitingAnswer(fresh) : false, note };
 }
 
 function inboundFor(phone: string, user: UserRow, input: ChatInput, now: Date): InboundMessage {
@@ -137,6 +139,6 @@ function inboundFor(phone: string, user: UserRow, input: ChatInput, now: Date): 
     phoneNumberId: "demo-chat",
   };
   if (input.kind === "text") return { ...base, type: "text", text: input.text };
-  if (input.kind === "audio") return { ...base, type: "audio", mediaId: `demo-media.${randomUUID()}`, mimeType: input.mimeType };
+  if (input.kind === "audio") return { ...base, type: "audio", mediaId: demoMediaId(input.durationMs ?? null), mimeType: input.mimeType };
   return { ...base, type: input.list ? "list" : "button", text: input.title, reply: { id: input.id, title: input.title } };
 }

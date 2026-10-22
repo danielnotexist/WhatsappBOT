@@ -138,11 +138,25 @@ function parseInteractive(mediaUrl: string | null): Pick<ChatItem, "kind" | "but
   return null;
 }
 
+/**
+ * The media id of a recording made in the chat. It carries the recording's length, so the history shows it after a
+ * reload (the inbound row stores `media_url = "wa-media:<id>"`, as for a WhatsApp voice note).
+ */
+export function demoMediaId(durationMs: number | null): string {
+  const ms = durationMs && Number.isFinite(durationMs) && durationMs > 0 ? `.${Math.round(durationMs)}ms` : "";
+  return `demo-media.${randomUUID()}${ms}`;
+}
+
+function recordedDurationMs(mediaUrl: string | null): number | null {
+  const m = mediaUrl?.match(/^wa-media:demo-media\.[0-9a-f-]{36}\.(\d{1,7})ms$/);
+  return m ? Number(m[1]) : null;
+}
+
 /** A stored message as a bubble (the history). Null for rows the chat never showed. */
 export function rowItem(m: MessageRow): ChatItem | null {
   const base = { id: m.id, at: m.created_at };
   if (m.direction === "in") {
-    if (m.type === "audio") return { ...base, side: "user", kind: "voice", text: "", transcript: m.transcript };
+    if (m.type === "audio") return { ...base, side: "user", kind: "voice", text: "", transcript: m.transcript, durationMs: recordedDurationMs(m.media_url) };
     if (m.type === "button") return { ...base, side: "user", kind: "choice", text: m.text ?? "" };
     return { ...base, side: "user", kind: "text", text: m.text ?? m.transcript ?? "" };
   }

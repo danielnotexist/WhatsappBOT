@@ -18,6 +18,10 @@ export class FallbackStt implements SttProvider {
     let spent: number | null = null; // what the answered calls so far cost, when reported
     const withSpent = (t: Transcript): Transcript => (spent === null ? t : { ...t, costUsd: spent });
     for (const p of this.providers) {
+      if (opts?.signal?.aborted) {
+        errors.push(new SttError(`${p.name}: not tried, the turn's deadline passed`, false, p.name)); // no further paid call
+        break;
+      }
       try {
         const t = await p.transcribe(audio, opts);
         if (typeof t.costUsd === "number") spent = (spent ?? 0) + t.costUsd;

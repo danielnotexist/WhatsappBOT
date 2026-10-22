@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, Tool } from "@anthropic-ai/sdk/resources/messages";
-import { requireEnv } from "@/lib/env";
+import { liveAiInDemo, requireEnv } from "@/lib/env";
 import { AiProviderError, type AiProvider, type ChatMessage, type CompletionRequest, type CompletionResponse, type ModelTier, type ToolCall } from "./types";
 
 /**
@@ -29,6 +29,19 @@ export function costUsd(model: string, u: { input: number; output: number; cache
   if (!p) return null;
   return (u.input * p.in + u.output * p.out + u.cacheRead * p.cacheRead + u.cacheWrite * p.cacheWrite) / 1_000_000;
 }
+
+/** The output ceiling of a request (thinking tokens count toward it) — also the spend guard's upper bound. */
+export function maxTokensFor(req: Pick<CompletionRequest, "tier" | "maxTokens">): number {
+  return req.maxTokens ?? (req.tier === "router" ? 1024 : 4096);
+}
+
+/**
+ * The SDK's per-request timeout and retries. The live demo answers inside one web request (app/api/demo/chat,
+ * maxDuration 60 s) with up to six model calls per message, so it waits less and retries once; the spend guard's
+ * per-turn deadline (lib/ai/budget.ts) aborts whatever is still running before the platform kills the function.
+ */
+export const ANTHROPIC_REQUEST = { timeoutMs: 60_000, maxRetries: 2 } as const;
+export const ANTHROPIC_REQUEST_DEMO = { timeoutMs: 25_000, maxRetries: 1 } as const;
 
 function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
   return messages.map((m): MessageParam => {
@@ -62,32 +75,36 @@ export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   private readonly client: Anthropic;
 
-  constructor(opts: { apiKey: string; fetch?: typeof fetch; models?: Partial<Record<ModelTier, string>>; baseURL?: string }) {
-    this.client = new Anthropic({ apiKey: opts.apiKey, fetch: opts.fetch, baseURL: opts.baseURL, maxRetries: 2, timeout: 60_000 });
+  constructor(opts: { apiKey: string; fetch?: typeof fetch; models?: Partial<Record<ModelTier, string>>; baseURL?: string; timeoutMs?: number; maxRetries?: number }) {
+    this.client = new Anthropic({ apiKey: opts.apiKey, fetch: opts.fetch, baseURL: opts.baseURL, maxRetries: opts.maxRetries ?? ANTHROPIC_REQUEST.maxRetries, timeout: opts.timeoutMs ?? ANTHROPIC_REQUEST.timeoutMs });
     this.models = { ...DEFAULT_MODELS, ...opts.models };
   }
 
   readonly models: Record<ModelTier, string>;
 
-  /** Hebrew EnvError when ANTHROPIC_API_KEY is missing. */
-  static fromEnv(fetchImpl?: typeof fetch): AnthropicProvider {
-    return new AnthropicProvider({ apiKey: requireEnv(["ANTHROPIC_API_KEY"]).ANTHROPIC_API_KEY, fetch: fetchImpl });
+  /** Hebrew EnvError when ANTHROPIC_API_KEY is missing. The live demo gets the shorter timeout and fewer retries. */
+  static fromEnv(fetchImpl?: typeof fetch, source: Record<string, string | undefined> = process.env): AnthropicProvider {
+    const request = liveAiInDemo(source) ? ANTHROPIC_REQUEST_DEMO : ANTHROPIC_REQUEST;
+    return new AnthropicProvider({ apiKey: requireEnv(["ANTHROPIC_API_KEY"], source).ANTHROPIC_API_KEY, fetch: fetchImpl, ...request });
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
     const model = this.models[req.tier];
     const tools: Tool[] = (req.tools ?? []).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema as Tool["input_schema"], strict: true }));
     try {
-      const res = await this.client.messages.create({
-        model,
-        // Thinking tokens count toward max_tokens (adaptive is on for both tiers) — keep headroom.
-        max_tokens: req.maxTokens ?? (req.tier === "router" ? 1024 : 4096),
-        system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-        messages: toAnthropicMessages(req.messages),
-        ...(tools.length ? { tools, tool_choice: { type: "auto" } } : {}),
-        thinking: { type: "adaptive" },
-        output_config: { effort: "low" },
-      });
+      const res = await this.client.messages.create(
+        {
+          model,
+          // Thinking tokens count toward max_tokens (adaptive is on for both tiers) — keep headroom.
+          max_tokens: maxTokensFor(req),
+          system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
+          messages: toAnthropicMessages(req.messages),
+          ...(tools.length ? { tools, tool_choice: { type: "auto" } } : {}),
+          thinking: { type: "adaptive" },
+          output_config: { effort: "low" },
+        },
+        req.signal ? { signal: req.signal } : undefined,
+      );
       const text = res.content
         .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
         .map((b) => b.text)

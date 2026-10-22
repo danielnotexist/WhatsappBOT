@@ -487,7 +487,7 @@ export class SupabaseDb implements Db {
     return (data as unknown as import("./types").OpsFlagRow | null) ?? null;
   }
 
-  // ---- ai_spend / ai_spend_users (migration 0009) ----
+  // ---- ai_spend / ai_spend_users (migrations 0009, 0010) ----
 
   async getAiSpend(day: string): Promise<number> {
     const { data, error } = await this.client.from("ai_spend").select("cost_usd").eq("day", day).maybeSingle();
@@ -498,6 +498,18 @@ export class SupabaseDb implements Db {
   async addAiSpend(day: string, costUsd: number, calls = 1): Promise<number> {
     const { data, error } = await this.client.rpc("ai_spend_add", { p_day: day, p_cost: Number.isFinite(costUsd) ? costUsd : 0, p_calls: calls });
     if (error) this.fail("addAiSpend", error);
+    return Number(data ?? 0);
+  }
+
+  async reserveAiSpend(day: string, costUsd: number, budgetUsd: number): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_reserve", { p_day: day, p_cost: Number.isFinite(costUsd) ? costUsd : 0, p_budget: budgetUsd });
+    if (error) this.fail("reserveAiSpend", error);
+    return Number(data ?? -1);
+  }
+
+  async adjustAiSpend(day: string, deltaUsd: number): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_adjust", { p_day: day, p_delta: Number.isFinite(deltaUsd) ? deltaUsd : 0 });
+    if (error) this.fail("adjustAiSpend", error);
     return Number(data ?? 0);
   }
 

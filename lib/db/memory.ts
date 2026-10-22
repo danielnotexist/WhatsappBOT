@@ -463,7 +463,7 @@ export class MemoryDb implements Db {
     return this.opsFlags.get(key) ?? null;
   }
 
-  // ---- ai_spend / ai_spend_users (migration 0009): the day total has no user in it; the per-user counts go with the user ----
+  // ---- ai_spend / ai_spend_users (migrations 0009, 0010): the day total has no user in it; the per-user counts go with the user ----
   aiSpend = new Map<string, { cost_usd: number; calls: number }>();
   aiSpendUsers = new Map<string, number>();
 
@@ -476,6 +476,22 @@ export class MemoryDb implements Db {
     // numeric(12, 6) in SQL — round the same way so both layers report the same total
     cur.cost_usd = Math.round((cur.cost_usd + Math.max(Number.isFinite(costUsd) ? costUsd : 0, 0)) * 1e6) / 1e6;
     cur.calls += Math.max(calls, 0);
+    this.aiSpend.set(day, cur);
+    return cur.cost_usd;
+  }
+
+  async reserveAiSpend(day: string, costUsd: number, budgetUsd: number): Promise<number> {
+    const cost = Math.max(Number.isFinite(costUsd) ? costUsd : 0, 0);
+    const cur = this.aiSpend.get(day) ?? { cost_usd: 0, calls: 0 };
+    const next = Math.round((cur.cost_usd + cost) * 1e6) / 1e6;
+    if (!Number.isFinite(budgetUsd) || next > budgetUsd) return -1;
+    this.aiSpend.set(day, { cost_usd: next, calls: cur.calls + 1 });
+    return next;
+  }
+
+  async adjustAiSpend(day: string, deltaUsd: number): Promise<number> {
+    const cur = this.aiSpend.get(day) ?? { cost_usd: 0, calls: 0 };
+    cur.cost_usd = Math.max(Math.round((cur.cost_usd + (Number.isFinite(deltaUsd) ? deltaUsd : 0)) * 1e6) / 1e6, 0);
     this.aiSpend.set(day, cur);
     return cur.cost_usd;
   }

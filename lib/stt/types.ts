@@ -15,6 +15,8 @@ export interface TranscribeOptions {
   language?: string;
   /** free-text hint (names, business terms) to improve accuracy */
   context?: string;
+  /** aborts the call — the spend guard's per-turn deadline in the demo (lib/ai/budget.ts) */
+  signal?: AbortSignal;
 }
 
 export interface Transcript {

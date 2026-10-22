@@ -63,6 +63,8 @@ function ChatPanel({ liveAi, dailyMessages }: { liveAi: boolean; dailyMessages: 
   const [waiting, setWaiting] = useState<Waiting>(null);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Record<string, string>>({});
+  // onboarding waits for an answer (the name, the business…): a suggested request tapped now would be taken as one
+  const [awaiting, setAwaiting] = useState(false);
   const [text, setText] = useState("");
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -74,6 +76,7 @@ function ChatPanel({ liveAi, dailyMessages }: { liveAi: boolean; dailyMessages: 
       setError(res.message);
       return false;
     }
+    setAwaiting(res.awaiting);
     setItems((list) => {
       const kept = list.filter((m) => m.id !== tempKey);
       return [...kept, ...(res.user ? [{ ...userPatch, ...res.user, ...(res.user.durationMs ? {} : { durationMs: userPatch.durationMs ?? null }) }] : []), ...res.replies];
@@ -94,6 +97,7 @@ function ChatPanel({ liveAi, dailyMessages }: { liveAi: boolean; dailyMessages: 
           return;
         }
         setItems(data.items);
+        setAwaiting(data.awaiting);
         setLoaded(true);
         if (!data.linked) {
           setWaiting("text");
@@ -237,7 +241,7 @@ function ChatPanel({ liveAi, dailyMessages }: { liveAi: boolean; dailyMessages: 
         </p>
       ) : null}
 
-      {!waiting && !text && loaded ? (
+      {!waiting && !text && loaded && !awaiting ? (
         <div className="flex flex-none gap-1.5 overflow-x-auto px-2.5 pb-1.5 [scrollbar-width:none]" aria-label="רעיונות להתחלה" role="group">
           {STARTERS.map((s) => (
             <button
@@ -310,7 +314,7 @@ function UserBubble({ item, pending }: { item: ChatItem; pending: boolean }) {
     const heard = item.transcript ?? "";
     return (
       <Bubble side="out" time={time} reaction={pending ? undefined : "✅"} label={`הודעה קולית${heard ? `: ${heard}` : ""}`}>
-        <VoiceNote duration={item.durationMs ? clockDuration(item.durationMs) : ""} transcript={pending ? undefined : heard || undefined} />
+        <VoiceNote icon="mic" duration={item.durationMs ? clockDuration(item.durationMs) : ""} transcript={pending ? undefined : heard || undefined} />
       </Bubble>
     );
   }
@@ -372,6 +376,11 @@ function DocumentLine({ item }: { item: ChatItem }) {
 
 function ListPicker({ item, active, chosen, onPick }: { item: ChatItem; active: boolean; chosen: string | null; onPick: (id: string, title: string) => void }) {
   const [open, setOpen] = useState(false);
+  const listRef = useRef<HTMLUListElement>(null);
+  // the rows open below the end of the log: bring them into view (the log's own auto-scroll runs on new messages only)
+  useEffect(() => {
+    if (open) listRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [open]);
   const rows = item.list!.sections.flatMap((s) => s.rows);
   const label = item.list!.button || "בחירה";
   return (
@@ -389,7 +398,7 @@ function ListPicker({ item, active, chosen, onPick }: { item: ChatItem; active: 
         {chosen ? `נבחר: ${chosen}` : label}
       </button>
       {open && active && !chosen ? (
-        <ul role="list" aria-label={label} className="border-t border-white/10">
+        <ul ref={listRef} role="list" aria-label={label} className="border-t border-white/10">
           {rows.map((r) => (
             <li key={r.id}>
               <button
@@ -440,6 +449,9 @@ function Composer({
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const rec = useRef<{ recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; startedAt: number; send: boolean; timer: number } | null>(null);
+  // getUserMedia can take a while (the permission prompt): a second tap must not open a second microphone
+  const starting = useRef(false);
+  const mounted = useRef(true);
 
   const stop = useCallback((send: boolean) => {
     const r = rec.current;
@@ -450,18 +462,32 @@ function Composer({
     else r.stream.getTracks().forEach((t) => t.stop());
   }, []);
 
-  useEffect(() => () => stop(false), [stop]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      stop(false);
+    };
+  }, [stop]);
 
   const start = async () => {
+    if (starting.current || rec.current) return;
     if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       onError(ERRORS.micUnsupported);
       return;
     }
+    starting.current = true;
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      onError(ERRORS.micDenied);
+      if (mounted.current) onError(ERRORS.micDenied);
+      return;
+    } finally {
+      starting.current = false;
+    }
+    if (!mounted.current || rec.current) {
+      stream.getTracks().forEach((t) => t.stop()); // the page is gone (or a recording already runs): release the microphone
       return;
     }
     const mimeType = pickMime();
@@ -533,7 +559,7 @@ function Composer({
         maxLength={DEMO_CHAT_LIMITS.textChars}
         placeholder="הודעה"
         enterKeyHint="send"
-        className="max-h-32 min-h-10 flex-1 resize-none rounded-[1.25rem] bg-[var(--wa-in)] px-3.5 py-2 text-[0.9375rem] leading-snug text-[var(--wa-fg)] [field-sizing:content] placeholder:text-[var(--wa-time)] focus-visible:outline-2 focus-visible:outline-[var(--wa-green)]"
+        className="max-h-32 min-h-10 flex-1 resize-none rounded-[1.25rem] bg-[var(--wa-in)] px-3.5 py-2 text-base leading-snug md:text-[0.9375rem] text-[var(--wa-fg)] [field-sizing:content] placeholder:text-[var(--wa-time)] focus-visible:outline-2 focus-visible:outline-[var(--wa-green)]"
       />
       {text.trim() ? (
         <button type="submit" disabled={disabled} aria-label="שליחה" className="grid size-10 flex-none place-items-center rounded-full bg-[var(--wa-green)] text-white disabled:opacity-50">

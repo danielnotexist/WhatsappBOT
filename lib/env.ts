@@ -191,11 +191,13 @@ export type ClientEnv = z.infer<typeof clientSchema>;
 export class EnvError extends Error {
   readonly missing: string[];
 
-  constructor(issues: z.core.$ZodIssue[]) {
+  /** `detail`: a Hebrew sentence that replaces the generic one (names only, never values). */
+  constructor(issues: z.core.$ZodIssue[], detail?: string) {
     const missing = [...new Set(issues.map((issue) => issue.path.map(String).join(".")))];
     super(
-      `משתני סביבה חסרים או לא תקינים: ${missing.join(", ")}. ` +
-        "ראו .env.example להסבר מאיפה מביאים כל ערך.",
+      detail ??
+        `משתני סביבה חסרים או לא תקינים: ${missing.join(", ")}. ` +
+          "ראו .env.example להסבר מאיפה מביאים כל ערך.",
     );
     this.name = "EnvError";
     this.missing = missing;

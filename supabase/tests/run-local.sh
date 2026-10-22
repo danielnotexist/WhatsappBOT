@@ -85,4 +85,18 @@ race "two parallel drafts of a cap-1 agent → one row, the other agent_daily_ca
   "select count(*) from public.pending_actions where user_id = 'c1111111-1111-4111-8111-111111111111'" \
   "1"
 
+# ai_spend_reserve (0010): two calls reserve at once, room for one → the second waits for the first, then is refused
+reserve_a="$(mktemp)"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select public.ai_spend_reserve('2030-01-01', 0.6, 1); select pg_sleep(2); commit;" >"$reserve_a" 2>&1 &
+pid_reserve=$!
+sleep 0.7
+out_reserve="$("${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select public.ai_spend_reserve('2030-01-01', 0.6, 1)")"
+wait "$pid_reserve" || { cat "$reserve_a"; echo "✖ race: ai_spend_reserve — the first reservation failed"; exit 1; }
+grep -qx "0.600000" "$reserve_a" || { cat "$reserve_a"; echo "✖ race: ai_spend_reserve — the first reservation was not 0.6"; exit 1; }
+rm -f "$reserve_a"
+[[ "$out_reserve" == "-1" ]] || { echo "$out_reserve"; echo "✖ race: ai_spend_reserve — the second reservation passed ($out_reserve)"; exit 1; }
+total_reserve="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select cost_usd from public.ai_spend where day = '2030-01-01'")"
+[[ "$total_reserve" == "0.600000" ]] || { echo "✖ race: ai_spend_reserve — expected 0.600000, got $total_reserve"; exit 1; }
+echo "ok - race: two parallel reservations with room for one → one passes, the other -1"
+
 echo "SUPABASE LOCAL: ALL TESTS PASSED"

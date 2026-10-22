@@ -1,5 +1,6 @@
 -- =============================================================================
--- ai_spend.test.sql — מיגרציה 0009: ai_spend / ai_spend_users / ai_spend_add() / ai_spend_admit_message()
+-- ai_spend.test.sql — מיגרציות 0009 ו-0010: ai_spend / ai_spend_users / ai_spend_add() / ai_spend_admit_message() /
+-- ai_spend_reserve() / ai_spend_adjust()
 -- טרנזקציה אחת + ROLLBACK. הצלחה = "AI SPEND: ALL CHECKS PASSED".
 -- =============================================================================
 \set ON_ERROR_STOP on
@@ -57,6 +58,40 @@ select pg_temp.check('the default day is the calendar day in Asia/Jerusalem',
 select pg_temp.expect_state('cost_usd cannot be negative', '23514',
   $sql$insert into public.ai_spend (day, cost_usd) values ('2026-01-01', -0.1)$sql$);
 
+-- ---- reserve before a call, settle after (0010) ----
+select pg_temp.check('reserve: the first call of a day creates the row with the estimate',
+  public.ai_spend_reserve('2026-11-01', 0.4, 1) = 0.4);
+select pg_temp.check('reserve: … and counts one call',
+  (select calls from public.ai_spend where day = '2026-11-01') = 1);
+select pg_temp.check('reserve: a second estimate that still fits → the new total',
+  public.ai_spend_reserve('2026-11-01', 0.5, 1) = 0.9);
+select pg_temp.check('reserve: an estimate that would pass the budget → -1',
+  public.ai_spend_reserve('2026-11-01', 0.2, 1) = -1);
+select pg_temp.check('reserve: … and nothing changes',
+  (select cost_usd from public.ai_spend where day = '2026-11-01') = 0.9
+  and (select calls from public.ai_spend where day = '2026-11-01') = 2);
+select pg_temp.check('reserve: exactly up to the budget is allowed',
+  public.ai_spend_reserve('2026-11-01', 0.1, 1) = 1.0);
+select pg_temp.check('reserve: an estimate larger than the whole budget, or no budget → -1',
+  public.ai_spend_reserve('2026-11-02', 2, 1) = -1
+  and public.ai_spend_reserve('2026-11-02', 0.1, null) = -1);
+select pg_temp.check('reserve: … and no row',
+  not exists (select 1 from public.ai_spend where day = '2026-11-02'));
+select pg_temp.check('adjust: the actual cost below the estimate gives the difference back',
+  public.ai_spend_adjust('2026-11-01', -0.35) = 0.65);
+select pg_temp.check('adjust: above the estimate adds the difference',
+  public.ai_spend_adjust('2026-11-01', 0.05) = 0.7);
+select pg_temp.check('adjust: calls unchanged',
+  (select calls from public.ai_spend where day = '2026-11-01') = 3);
+select pg_temp.check('adjust: never below 0',
+  public.ai_spend_adjust('2026-11-01', -5) = 0);
+select pg_temp.check('adjust: null moves nothing',
+  public.ai_spend_adjust('2026-11-01', null) = 0);
+select pg_temp.check('adjust: a day without a row starts it at max(delta, 0)',
+  public.ai_spend_adjust('2026-11-03', -0.1) = 0);
+select pg_temp.check('adjust: … a positive one too',
+  public.ai_spend_adjust('2026-11-04', 0.25) = 0.25);
+
 -- ---- per-user daily messages ----
 insert into public.users (id, email) values
   ('81111111-1111-4111-8111-111111111111', 'spend-a@example.com'),
@@ -101,9 +136,16 @@ select pg_temp.check('the functions are not callable by anon / authenticated',
   and not has_function_privilege('anon', 'public.ai_spend_add(date, numeric, integer)', 'execute')
   and not has_function_privilege('authenticated', 'public.ai_spend_admit_message(date, uuid, integer)', 'execute')
   and not has_function_privilege('anon', 'public.ai_spend_admit_message(date, uuid, integer)', 'execute'));
-select pg_temp.check('service_role can call both functions',
+select pg_temp.check('reserve / adjust are not callable by anon / authenticated',
+  not has_function_privilege('authenticated', 'public.ai_spend_reserve(date, numeric, numeric)', 'execute')
+  and not has_function_privilege('anon', 'public.ai_spend_reserve(date, numeric, numeric)', 'execute')
+  and not has_function_privilege('authenticated', 'public.ai_spend_adjust(date, numeric)', 'execute')
+  and not has_function_privilege('anon', 'public.ai_spend_adjust(date, numeric)', 'execute'));
+select pg_temp.check('service_role can call all four functions',
   has_function_privilege('service_role', 'public.ai_spend_add(date, numeric, integer)', 'execute')
-  and has_function_privilege('service_role', 'public.ai_spend_admit_message(date, uuid, integer)', 'execute'));
+  and has_function_privilege('service_role', 'public.ai_spend_admit_message(date, uuid, integer)', 'execute')
+  and has_function_privilege('service_role', 'public.ai_spend_reserve(date, numeric, numeric)', 'execute')
+  and has_function_privilege('service_role', 'public.ai_spend_adjust(date, numeric)', 'execute'));
 
 select 'AI SPEND: ALL CHECKS PASSED';
 rollback;

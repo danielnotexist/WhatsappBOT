@@ -138,12 +138,15 @@ test.describe("DEMO_MODE=1 — production build, zero keys", () => {
     await expect(log.getByText("החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.")).toBeVisible();
     await log.getByRole("button", { name: "נתחיל לעבוד" }).click();
     await expect(log.getByText(/ננסה משהו אמיתי/)).toBeVisible();
+    const starters = page.getByRole("group", { name: "רעיונות להתחלה" });
+    await expect(starters).toBeVisible(); // the first task: the suggestions fit
 
     // a typed message → the draft with שלח / ערוך / בטל (mock AI) → בטל
     await page.getByRole("textbox", { name: "הודעה" }).fill("תנסחי מייל לדנה שהפגישה זזה ליום ה׳");
     await page.keyboard.press("Enter");
     await expect(log.getByText("טיוטה למייל")).toBeVisible();
     await expect(log.getByText("כדי שנדבר בנוח - איך לקרוא לך?")).toBeVisible(); // the site's short hyphen
+    await expect(starters).toHaveCount(0); // a suggestion tapped now would be taken as the name
     await snap(page, "chat-draft");
     await log.getByRole("button", { name: "בטל", exact: true }).click();
     await expect(log.getByText("בוטל. הטיוטה נמחקה ולא נשלחה.")).toBeVisible();

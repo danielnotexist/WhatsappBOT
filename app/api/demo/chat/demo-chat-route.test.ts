@@ -12,7 +12,7 @@ import { setGlobalSingleton } from "@/lib/global-singleton";
 import { MemoryRateLimiter, setRateLimiterForTests } from "@/lib/rate-limit";
 import { setSttProviderForTests } from "@/lib/stt";
 import { MockStt } from "@/lib/stt/mock";
-import { fakeOggOpus } from "@/lib/stt/test-fixtures";
+import { fakeOggOpus, fakeWebm } from "@/lib/stt/test-fixtures";
 import { GET, POST } from "./route";
 
 const jar = new Map<string, string>();
@@ -130,7 +130,7 @@ describe("/api/demo/chat — who may use it", () => {
 describe("/api/demo/chat — the same pipeline as WhatsApp", () => {
   it("start: links the account's virtual number once, with the usual welcome and onboarding; the history keeps it", async () => {
     const userId = await signIn("dana@example.com");
-    expect(await history()).toMatchObject({ ok: true, linked: false, liveAi: false, items: [] });
+    expect(await history()).toMatchObject({ ok: true, linked: false, liveAi: false, awaiting: false, items: [] });
     const start = ok(await send(json({ start: true })));
     expect(start.user).toBeNull();
     expect(texts(start.replies)[0]).toBe("החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.");
@@ -237,6 +237,44 @@ describe("/api/demo/chat — the same pipeline as WhatsApp", () => {
     expect(items.at(-1)).toMatchObject({ kind: "list", list: { button: "לבחירה" } });
   });
 
+  it("a request instead of the name is answered, never stored as the name, and the question comes again; 'awaiting' follows the questions", async () => {
+    const userId = await signIn("dana@example.com");
+    await send(json({ start: true }));
+    const go = ok(await send(json({ reply: { id: "onb:start", title: "נתחיל לעבוד" } })));
+    expect(go.awaiting).toBe(false); // the first task: the suggested requests fit
+    const first = ok(await send(json({ text: "מה יש לי מחר?" })));
+    expect(texts(first.replies).at(-1)).toBe("כדי שנדבר בנוח — איך לקרוא לך?");
+    expect(first.awaiting).toBe(true);
+    expect((await history()).awaiting).toBe(true);
+
+    // the page's own suggestion, tapped while the name question is open (the review's repro)
+    const req = ok(await send(json({ text: "תזכירי לי מחר ב-9 להתקשר לבנק" })));
+    expect(texts(req.replies)[0]).toMatch(/^אזכיר: להתקשר לבנק/);
+    expect(texts(req.replies).at(-1)).toBe("ועוד דבר קטן, כדי שנדבר בנוח: איך לקרוא לך?");
+    expect(texts(req.replies).join("\n")).not.toContain("נעים להכיר");
+    expect((await db.getUser(userId))!.name).toBeNull();
+    expect(req.awaiting).toBe(true);
+
+    // a thank-you is not a name either; then the real name
+    expect(texts(ok(await send(json({ text: "תודה" }))).replies)).toEqual(["כדי שנדבר בנוח — איך לקרוא לך?"]);
+    const named = ok(await send(json({ text: "קוראים לי דנה" })));
+    expect(texts(named.replies)).toEqual(["נעים להכיר, דנה. מה שם העסק או המשרד?"]);
+    expect((await db.getUser(userId))!.name).toBe("דנה");
+
+    // a request instead of the business name: answered, asked again, not stored
+    const draft = ok(await send(json({ text: "תנסחי מייל לדנה שהפגישה זזה ליום ה׳" })));
+    expect(draft.replies.find((m) => m.kind === "buttons")!.text).toContain("*טיוטה למייל*");
+    expect(texts(draft.replies).at(-1)).toBe("ועוד דבר קטן: מה שם העסק או המשרד?");
+    expect((await db.getUser(userId))!.business_name ?? null).toBeNull();
+    const business = ok(await send(json({ text: "משרד לוי" })));
+    expect((await db.getUser(userId))!.business_name).toBe("משרד לוי");
+    expect(business.awaiting).toBe(true); // the pain list
+    const pain = ok(await send(json({ reply: { id: "pain_email", title: "מיילים שמחכים לתשובה", list: true } })));
+    expect(pain.awaiting).toBe(true); // the morning-time list
+    const morning = ok(await send(json({ reply: { id: "mt_none", title: "בלי סיכום", list: true } })));
+    expect(morning.awaiting).toBe(false); // the connect nudge: free text is fine there
+  });
+
   it("a recording goes through the voice path (in-memory media → STT → the transcript, answered as text)", async () => {
     const userId = await signIn("dana@example.com");
     await send(json({ start: true }));
@@ -251,11 +289,37 @@ describe("/api/demo/chat — the same pipeline as WhatsApp", () => {
     expect((await db.recentMessages(userId, 50)).find((m) => m.type === "audio")).toMatchObject({ direction: "in", transcript: "תזכיר לי מחר ב-9 להתקשר לבנק" });
   });
 
-  it("recording limits: type, size and (Ogg) length — 400 / 413 before any STT call", async () => {
+  it("the recording's length is kept on the inbound row: the history shows it after a reload", async () => {
+    await signIn("dana@example.com");
+    await send(json({ start: true }));
+    await send(json({ reply: { id: "onb:start", title: "נתחיל לעבוד" } }));
+    const measured = ok(await send(audio(fakeWebm(4000), "audio/webm;codecs=opus", 9000)));
+    expect(measured.user).toMatchObject({ kind: "voice", durationMs: 3800 }); // measured from the file, not the page's figure
+    const items = (await history()).items.filter((m) => m.kind === "voice");
+    expect(items.map((m) => m.durationMs)).toEqual([3800]);
+    const said = ok(await send(audio(new Uint8Array([0, 0, 0, 1, 2, 3]), "audio/mp4", 3200)));
+    expect(said.user).toMatchObject({ kind: "voice", durationMs: 3200 }); // mp4: what the page measured
+  });
+
+  it("recording limits: type, size and (Ogg, WebM) length — 400 / 413 before any STT call", async () => {
     await signIn("dana@example.com");
     expect((await send(audio(new Uint8Array([1, 2, 3]), "video/mp4"))).status).toBe(400);
+    for (const type of ["audio/mpeg", "audio/wav", "audio/aac"]) expect((await send(audio(new Uint8Array([1, 2, 3]), type))).status, type).toBe(400); // not what a browser records
     expect((await send(audio(new Uint8Array(2 * 1024 * 1024 + 1), "audio/webm"))).status).toBe(413);
+    expect((await send(audio(new Uint8Array(512 * 1024 + 1), "audio/mp4"))).status).toBe(413);
     expect((await send(audio(fakeOggOpus(65_000), "audio/ogg"))).status).toBe(413);
+    expect((await send(audio(fakeWebm(65_000), "audio/webm;codecs=opus", 4000))).status).toBe(413); // the page's figure is not trusted
+    // a chunked upload (no Content-Length) is cut off at the limit, never buffered whole
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled += 64 * 1024;
+        c.enqueue(new Uint8Array(64 * 1024));
+      },
+    });
+    const chunked = new Request(URL_, { method: "POST", headers: { "content-type": "multipart/form-data; boundary=x", "x-forwarded-for": "7.7.7.7" }, body: endless, duplex: "half" } as RequestInit);
+    expect((await send(chunked)).status).toBe(413);
+    expect(pulled).toBeLessThan(1024 * 1024);
     expect((await send(audio(new Uint8Array([1, 2]), "audio/webm", 90_000))).status).toBe(413);
     expect((await send(audio(new Uint8Array(0), "audio/webm"))).status).toBe(400);
     expect(stt.calls).toHaveLength(0);
