@@ -239,6 +239,17 @@
 }
 
 /*
+ * The website chat (/demo/chat) on a phone is the whole screen: the page is exactly the viewport tall — the demo strip,
+ * then the chat — so the conversation scrolls inside and the composer stays at the bottom. Wide screens: a phone frame.
+ */
+@media (width < 48rem) {
+  body:has([data-chat-page]) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+/*
  * Reduced motion: every animation and transition lands on its end state in the same frame. Zero, not the usual 0.01ms:
  * every element's transition-property is `all` by default, so a 0.01ms duration turned each style change (a step's
  * padding, the grid's columns, a colour) into a transition whose first painted frame was still the old value — the new

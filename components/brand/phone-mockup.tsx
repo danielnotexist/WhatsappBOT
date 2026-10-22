@@ -10,11 +10,14 @@ export function PhoneMockup({
   label,
   className,
   screenClassName,
+  islandClassName,
 }: {
   children: ReactNode;
   label?: string;
   className?: string;
   screenClassName?: string;
+  /** the camera island (e.g. hidden where the frame turns into the full screen of a phone) */
+  islandClassName?: string;
 }) {
   return (
     <div
@@ -32,7 +35,7 @@ export function PhoneMockup({
         )}
       >
         {/* camera island */}
-        <div aria-hidden="true" className="absolute inset-x-0 top-2 z-10 mx-auto h-[1.375rem] w-24 rounded-full bg-[#0A120F]" />
+        <div aria-hidden="true" className={cn("absolute inset-x-0 top-2 z-10 mx-auto h-[1.375rem] w-24 rounded-full bg-[#0A120F]", islandClassName)} />
         {children}
       </div>
     </div>

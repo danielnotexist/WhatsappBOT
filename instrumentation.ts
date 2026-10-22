@@ -7,5 +7,11 @@ export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { assertDemoSafe, isDemo } = await import("./lib/demo");
   assertDemoSafe();
-  if (isDemo()) console.info("[demo] DEMO_MODE=1 — מצב הדגמה: כל האינטגרציות מדומות, שום דבר לא נשלח החוצה.");
+  if (!isDemo()) return;
+  const { liveAiInDemo } = await import("./lib/env");
+  console.info(
+    liveAiInDemo()
+      ? "[demo] DEMO_MODE=1 + LIVE_AI=1 — מצב הדגמה עם AI ותמלול אמיתיים (תחת תקרה יומית). שאר האינטגרציות מדומות, שום דבר לא נשלח החוצה."
+      : "[demo] DEMO_MODE=1 — מצב הדגמה: כל האינטגרציות מדומות, שום דבר לא נשלח החוצה.",
+  );
 }

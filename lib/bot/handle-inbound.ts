@@ -1,9 +1,10 @@
 import "server-only";
 import { getAiProvider } from "@/lib/ai";
-import { getDb } from "@/lib/db";
+import { spendGuardFromEnv } from "@/lib/ai/budget";
+import { getDb, type Db } from "@/lib/db";
 import { getHyp } from "@/lib/hyp";
 import { getSttProvider } from "@/lib/stt";
-import { getWaSender } from "@/lib/wa";
+import { getWaSender, type WaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
 import { activeMicrosoftConnection, graphForConnection, graphForUser } from "@/lib/ms";
 import { graphExecutors, graphTools } from "@/lib/ms/tools";
@@ -17,32 +18,38 @@ import { processInbound } from "./process-inbound";
 
 let executorsRegistered = false;
 
-/** Production entry: wires the process-wide singletons (and the Graph/Google tools/executors) into the pure pipeline. */
-export async function handleInbound(message: InboundMessage): Promise<{ handled: boolean; note?: string }> {
-  const db = getDb();
+/**
+ * The production bot context: the process-wide singletons (and the Graph/Google tools/executors) for the pure pipeline.
+ * `overrides` swap the data layer view and the sender — the website chat (app/api/demo/chat) records the replies of one
+ * request instead of sending them, through the very same pipeline.
+ */
+export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotContext {
+  const db = overrides.db ?? getDb();
   if (!executorsRegistered) {
+    const base = getDb();
     const microsoft = graphExecutors(async (userId) => {
-      const user = await db.getUser(userId);
+      const user = await base.getUser(userId);
       if (!user) return null;
-      const g = await graphForUser(db, user);
+      const g = await graphForUser(base, user);
       return g ? { graph: g.graph, timeZone: g.timeZone } : null;
     });
     const google = googleExecutors(async (userId) => {
-      const user = await db.getUser(userId);
-      return user ? googleForUser(db, user) : null;
+      const user = await base.getUser(userId);
+      return user ? googleForUser(base, user) : null;
     });
-    const ex = routeExecutorsByProvider({ microsoft, google }, (action) => providerForAction(db, action));
+    const ex = routeExecutorsByProvider({ microsoft, google }, (action) => providerForAction(base, action));
     for (const [kind, fn] of Object.entries(ex)) registerExecutor(kind as keyof typeof ex, fn);
     executorsRegistered = true;
   }
   const ctx: BotContext = {
     db,
-    wa: getWaSender(),
+    wa: overrides.wa ?? getWaSender(),
     ai: getAiProvider(),
     now: () => new Date(),
     appUrl: process.env.APP_URL || "http://localhost:3000",
     stt: getSttProvider,
     hyp: getHyp,
+    spend: spendGuardFromEnv(db),
     async extraTools(user, connections) {
       const ms = activeMicrosoftConnection(connections);
       const g = activeGoogleConnection(connections);
@@ -52,5 +59,10 @@ export async function handleInbound(message: InboundMessage): Promise<{ handled:
       ];
     },
   };
-  return processInbound(ctx, message);
+  return ctx;
+}
+
+/** Production entry for one WhatsApp message (the worker). */
+export async function handleInbound(message: InboundMessage): Promise<{ handled: boolean; note?: string }> {
+  return processInbound(botContext(), message);
 }

@@ -5,7 +5,10 @@
  *     no long-lived connections); otherwise the in-memory db, production included, with user ids derived from the
  *     email (lib/auth/demo-user.ts) so every instance agrees on them. See lib/env.ts `dataMode()`.
  *   - Integrations: every outbound factory returns its mock — WA sender, AI, Microsoft, Google, HYP, mailer, STT,
- *     queue — whatever keys exist (lib/env.ts `integrationsMocked()`).
+ *     queue — whatever keys exist (lib/env.ts `integrationsMocked()`). With `LIVE_AI=1` the model (Anthropic) and the
+ *     speech-to-text (OpenRouter) are real and everything else stays mocked (lib/env.ts `liveAiInDemo()` / `aiMocked()`
+ *     / `sttMocked()`), under a daily spend cap and a per-user daily message cap (lib/ai/budget.ts). The /demo/chat page
+ *     talks to the same pipeline as WhatsApp (app/api/demo/chat).
  *   - Sign-in: the code DEMO_OTP_CODE works for any email, statelessly (lib/auth/otp.ts `fixedCode`); the user row
  *     itself is created/found normally (in Supabase it persists). On the memory store only, the session also carries
  *     the email, so an instance that never saw the user recreates it (lib/auth/current-user.ts).
@@ -15,7 +18,9 @@
  *
  * Refuses to run next to anything that can reach the outside world on its own: WA_ACCESS_TOKEN, HYP_KEY, HYP_PASSP,
  * MS_CLIENT_SECRET, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, QSTASH_TOKEN — and without a stable TOKEN_ENC_KEY (sessions
- * must verify on every instance). Checked at boot (instrumentation.ts) and on every `isDemo()`.
+ * must verify on every instance). Checked at boot (instrumentation.ts) and on every `isDemo()`. The AI keys
+ * (ANTHROPIC_API_KEY, OPENROUTER_API_KEY) are allowed: they only answer the requests we make, nothing reaches a person,
+ * and without LIVE_AI=1 they are not used at all.
  *
  * Dependency-free on purpose: lib/env.ts and proxy.ts import it.
  */

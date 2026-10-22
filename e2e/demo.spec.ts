@@ -113,6 +113,58 @@ test.describe("DEMO_MODE=1 — production build, zero keys", () => {
     await ctx.close();
   });
 
+  test("/demo/chat: 404 signed out; from /account → welcome → a button → a typed draft → 'בטל'; the history after a reload", async ({ browser }) => {
+    test.setTimeout(150_000);
+    const ctx = await newContext(browser);
+    // signed out: the page is a real 404 and the API answers 401
+    expect((await ctx.request.get("/demo/chat")).status()).toBe(404);
+    expect((await ctx.request.get("/api/demo/chat")).status()).toBe(401);
+
+    const email = uniqueEmail("demo-chat");
+    expect((await ctx.request.post("/api/auth/otp/send", { data: { email } })).ok()).toBe(true);
+    expect((await ctx.request.post("/api/auth/otp/verify", { data: { email, code: "123456" } })).ok()).toBe(true);
+    const doc = await ctx.request.get("/demo/chat");
+    expect(doc.status()).toBe(200);
+    expect(doc.headers()["permissions-policy"]).toContain("microphone=(self)");
+
+    const page = await ctx.newPage();
+    await page.goto("/account");
+    await page.getByRole("link", { name: "לבדוק את עלזה בצ'אט" }).click();
+    await expect(page).toHaveURL(/\/demo\/chat$/);
+    await expectDemoChrome(page);
+    const log = page.getByRole("log", { name: "השיחה" });
+
+    // first visit: the chat's number is linked and the WhatsApp welcome arrives, with its buttons
+    await expect(log.getByText("החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.")).toBeVisible();
+    await log.getByRole("button", { name: "נתחיל לעבוד" }).click();
+    await expect(log.getByText(/ננסה משהו אמיתי/)).toBeVisible();
+
+    // a typed message → the draft with שלח / ערוך / בטל (mock AI) → בטל
+    await page.getByRole("textbox", { name: "הודעה" }).fill("תנסחי מייל לדנה שהפגישה זזה ליום ה׳");
+    await page.keyboard.press("Enter");
+    await expect(log.getByText("טיוטה למייל")).toBeVisible();
+    await expect(log.getByText("כדי שנדבר בנוח - איך לקרוא לך?")).toBeVisible(); // the site's short hyphen
+    await snap(page, "chat-draft");
+    await log.getByRole("button", { name: "בטל", exact: true }).click();
+    await expect(log.getByText("בוטל. הטיוטה נמחקה ולא נשלחה.")).toBeVisible();
+    await expect(log.getByRole("button", { name: "בטל", exact: true })).toBeDisabled();
+
+    // a reload: the same conversation from the history
+    await page.reload();
+    await expect(log.getByText("בוטל. הטיוטה נמחקה ולא נשלחה.")).toBeVisible();
+    await expect(log.getByText("תנסחי מייל לדנה שהפגישה זזה ליום ה׳").first()).toBeVisible(); // the bubble (the draft quotes it too)
+    await expect(log.getByText("טיוטה למייל")).toBeVisible();
+
+    // a phone: the chat is the whole screen, the composer at the bottom of the viewport
+    await page.setViewportSize({ width: 390, height: 780 });
+    const input = page.getByRole("textbox", { name: "הודעה" });
+    await expect(input).toBeInViewport();
+    const box = (await input.boundingBox())!;
+    expect(box.y + box.height).toBeGreaterThan(700);
+    await snap(page, "chat-phone");
+    await ctx.close();
+  });
+
   test("/login → email → 123456 → /account", async ({ browser }) => {
     const setup = await newContext(browser);
     const email = uniqueEmail("demo-login");

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
-import { CSP_REPORT_ONLY, SECURITY_HEADERS, config, proxy as proxyFor } from "./proxy";
+import { SESSION_COOKIE, createSessionToken } from "./lib/auth/session";
+import { CSP_REPORT_ONLY, SECURITY_HEADERS, config, demoChatHidden, proxy as proxyFor } from "./proxy";
 
 /** A request as the browser makes it: a page load unless `mode` says otherwise. */
 function request(path = "/start", mode: string | null = "navigate") {
@@ -31,6 +32,34 @@ describe("proxy.ts security headers", () => {
     expect(SECURITY_HEADERS["Referrer-Policy"]).toBe("strict-origin-when-cross-origin");
     expect(SECURITY_HEADERS["Permissions-Policy"]).toContain("camera=()");
     expect(SECURITY_HEADERS["X-Frame-Options"]).toBe("DENY");
+  });
+
+  it("/demo/chat: hidden (404 rewrite) outside DEMO_MODE and without a valid session; open to a signed-in demo visitor", () => {
+    const req = (cookie?: string) => new NextRequest(new URL("/demo/chat", "http://localhost:3000"), { headers: cookie ? { cookie } : {} });
+    expect(demoChatHidden(req())).toBe(true);
+    expect(demoChatHidden(new NextRequest(new URL("/account", "http://localhost:3000")))).toBe(false);
+    vi.stubEnv("DEMO_MODE", "1");
+    vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 2).toString("base64"));
+    try {
+      expect(demoChatHidden(req())).toBe(true);
+      expect(demoChatHidden(req(`${SESSION_COOKIE}=forged.token`))).toBe(true);
+      const token = createSessionToken("11111111-1111-4111-8111-111111111111");
+      expect(demoChatHidden(req(`${SESSION_COOKIE}=${token}`))).toBe(false);
+      const hidden = proxyFor(req());
+      expect(hidden.headers.get("x-middleware-rewrite")).toContain("/_demo-chat-unavailable");
+      expect(proxyFor(req(`${SESSION_COOKIE}=${token}`)).headers.get("x-middleware-rewrite")).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("the microphone is off everywhere except the website chat (voice messages), and only for this site there", () => {
+    expect(SECURITY_HEADERS["Permissions-Policy"]).toContain("microphone=()");
+    expect(proxy("/account").headers.get("Permissions-Policy")).toContain("microphone=()");
+    const chat = proxy("/demo/chat").headers.get("Permissions-Policy")!;
+    expect(chat).toContain("microphone=(self)");
+    expect(chat).toContain("camera=()");
+    expect(proxy("/demo/chat/x").headers.get("Permissions-Policy")).toContain("microphone=()");
   });
 
   it("DEMO_MODE=1 adds X-Robots-Tag: noindex, nofollow (read per request); nothing outside the demo", () => {

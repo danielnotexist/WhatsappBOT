@@ -114,9 +114,36 @@ export function dataMode(source: Record<string, string | undefined> = process.en
 /**
  * Outbound integrations (WhatsApp, AI, Microsoft, Google, HYP, mail, STT, queue) use their mocks: in DATA_MODE=memory
  * (dev/tests) and always in DEMO_MODE=1 — also when the demo keeps its data in Supabase and whatever keys exist.
+ * The one exception is the model and STT under LIVE_AI=1 in the demo: those two ask `aiMocked()` / `sttMocked()`.
  */
 export function integrationsMocked(source: Record<string, string | undefined> = process.env): boolean {
   return isDemo(source) || dataMode(source) === "memory";
+}
+
+/** The raw LIVE_AI switch (1 / true). It means something only inside the demo — use `liveAiInDemo()`. */
+export function liveAiFlag(source: Record<string, string | undefined> = process.env): boolean {
+  const value = source.LIVE_AI?.trim().toLowerCase();
+  return value === "1" || value === "true";
+}
+
+/**
+ * מצב "AI חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_AI=1`. The real model (Anthropic) and the real speech-to-text
+ * (OpenRouter) answer; every outbound integration — WhatsApp, mail, HYP, Microsoft, Google, queue — stays on its mock,
+ * and lib/demo.ts still refuses the keys that could send anything. The spend is capped per day (lib/ai/budget.ts).
+ * LIVE_AI without DEMO_MODE changes nothing (outside the demo the real providers are already the default).
+ */
+export function liveAiInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveAiFlag(source) && isDemo(source);
+}
+
+/** The model provider (lib/ai) uses its mock: in DATA_MODE=memory and in the demo, except the demo with LIVE_AI=1. */
+export function aiMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveAiInDemo(source);
+}
+
+/** Speech-to-text (lib/stt) uses its mock by default: same rule as the model — real in the demo only with LIVE_AI=1. */
+export function sttMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveAiInDemo(source);
 }
 
 /**

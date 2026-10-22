@@ -487,6 +487,32 @@ export class SupabaseDb implements Db {
     return (data as unknown as import("./types").OpsFlagRow | null) ?? null;
   }
 
+  // ---- ai_spend / ai_spend_users (migration 0009) ----
+
+  async getAiSpend(day: string): Promise<number> {
+    const { data, error } = await this.client.from("ai_spend").select("cost_usd").eq("day", day).maybeSingle();
+    if (error) this.fail("getAiSpend", error);
+    return Number((data as { cost_usd: number | string } | null)?.cost_usd ?? 0);
+  }
+
+  async addAiSpend(day: string, costUsd: number, calls = 1): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_add", { p_day: day, p_cost: Number.isFinite(costUsd) ? costUsd : 0, p_calls: calls });
+    if (error) this.fail("addAiSpend", error);
+    return Number(data ?? 0);
+  }
+
+  async getAiUserMessages(day: string, userId: string): Promise<number> {
+    const { data, error } = await this.client.from("ai_spend_users").select("messages").eq("day", day).eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getAiUserMessages", error);
+    return Number((data as { messages: number } | null)?.messages ?? 0);
+  }
+
+  async admitAiUserMessage(day: string, userId: string, limit: number): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_admit_message", { p_day: day, p_user_id: userId, p_limit: limit });
+    if (error) this.fail("admitAiUserMessage", error);
+    return typeof data === "number" ? data : Number(data ?? -1);
+  }
+
   async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {
     const { data, error } = await this.client.from("graph_subscriptions").upsert(row, { onConflict: "subscription_id" }).select(SupabaseDb.GSUB_COLS).single();
     if (error) this.fail("upsertGraphSubscription", error);

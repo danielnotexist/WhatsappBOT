@@ -164,6 +164,7 @@ export class MemoryDb implements Db {
     for (const g of this.googleScopeGrants) if (g.user_id === id) g.user_id = null;
     this.agents = this.agents.filter((a) => a.user_id !== id);
     this.billingApprovals = this.billingApprovals.filter((a) => a.user_id !== id);
+    for (const key of [...this.aiSpendUsers.keys()]) if (key.endsWith(`|${id}`)) this.aiSpendUsers.delete(key); // the day totals stay
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -460,6 +461,37 @@ export class MemoryDb implements Db {
 
   async getOpsFlag(key: string): Promise<import("./types").OpsFlagRow | null> {
     return this.opsFlags.get(key) ?? null;
+  }
+
+  // ---- ai_spend / ai_spend_users (migration 0009): the day total has no user in it; the per-user counts go with the user ----
+  aiSpend = new Map<string, { cost_usd: number; calls: number }>();
+  aiSpendUsers = new Map<string, number>();
+
+  async getAiSpend(day: string): Promise<number> {
+    return this.aiSpend.get(day)?.cost_usd ?? 0;
+  }
+
+  async addAiSpend(day: string, costUsd: number, calls = 1): Promise<number> {
+    const cur = this.aiSpend.get(day) ?? { cost_usd: 0, calls: 0 };
+    // numeric(12, 6) in SQL — round the same way so both layers report the same total
+    cur.cost_usd = Math.round((cur.cost_usd + Math.max(Number.isFinite(costUsd) ? costUsd : 0, 0)) * 1e6) / 1e6;
+    cur.calls += Math.max(calls, 0);
+    this.aiSpend.set(day, cur);
+    return cur.cost_usd;
+  }
+
+  async getAiUserMessages(day: string, userId: string): Promise<number> {
+    return this.aiSpendUsers.get(`${day}|${userId}`) ?? 0;
+  }
+
+  async admitAiUserMessage(day: string, userId: string, limit: number): Promise<number> {
+    if (!this.users.has(userId)) throw new Error(`ai_spend_users: unknown user ${userId}`); // the SQL foreign key
+    if (!(limit >= 1)) return -1;
+    const key = `${day}|${userId}`;
+    const cur = this.aiSpendUsers.get(key) ?? 0;
+    if (cur >= limit) return -1;
+    this.aiSpendUsers.set(key, cur + 1);
+    return cur + 1;
   }
 
   async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {

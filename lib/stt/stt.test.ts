@@ -157,6 +157,12 @@ describe("fallback and env", () => {
     );
     expect(sttFromEnv({ DATA_MODE: "memory", NODE_ENV: "development", STT_PROVIDER: "mock", OPENROUTER_API_KEY: "or" })).toBeInstanceOf(MockStt);
     expect(sttFromEnv({ DEMO_MODE: "1", TOKEN_ENC_KEY: Buffer.alloc(32, 1).toString("base64"), STT_PROVIDER: "openrouter", OPENROUTER_API_KEY: "or" })).toBeInstanceOf(MockStt);
+    // the demo with LIVE_AI=1: OpenRouter (whatever else STT_PROVIDER names), or mock on request; a missing key fails in Hebrew
+    const live = { DEMO_MODE: "1", LIVE_AI: "1", TOKEN_ENC_KEY: Buffer.alloc(32, 1).toString("base64"), OPENROUTER_API_KEY: "or" };
+    expect(sttFromEnv(live).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
+    expect(sttFromEnv({ ...live, STT_PROVIDER: "soniox", SONIOX_API_KEY: "k" }).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
+    expect(sttFromEnv({ ...live, STT_PROVIDER: "mock" })).toBeInstanceOf(MockStt);
+    expect(() => sttFromEnv({ ...live, OPENROUTER_API_KEY: "" })).toThrow(/OPENROUTER_API_KEY/);
     expect(sttFromEnv({ OPENROUTER_API_KEY: "or" }).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
     expect(sttFromEnv({ OPENROUTER_API_KEY: "or", SONIOX_API_KEY: "k" }).name).toBe("openrouter:deepgram/nova-3→openrouter:openai/gpt-transcribe");
     expect(sttFromEnv({ OPENROUTER_API_KEY: "or", STT_MODEL: "openai/gpt-4o-transcribe", STT_FALLBACK_MODEL: "openai/gpt-4o-mini-transcribe" }).name).toBe(

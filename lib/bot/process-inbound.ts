@@ -1,4 +1,5 @@
 import { agentDraftAwaitsText, handleAgentMessage, updateStickyAfterTurn } from "@/lib/agents/commands";
+import { BudgetExceededError, type SpendBlock, type SpendTurn } from "@/lib/ai/budget";
 import { maybeSummarize } from "@/lib/ai/memory";
 import { runAssistant } from "@/lib/ai/orchestrator";
 import { AiProviderError } from "@/lib/ai/types";
@@ -6,6 +7,7 @@ import { payLinkFor } from "@/lib/billing/pay-link";
 import { isPaidPlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
+import { budgetReply } from "@/lib/copy/bot-live";
 import type { MessageType } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -37,6 +39,10 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   const user = await ctx.db.getUser(identity.user_id);
   if (!user) return { handled: true, note: "identity without user" };
   const to = msg.fromE164;
+  // paid model / STT calls of this message pass the spend guard (LIVE_AI demo, AI_DAILY_BUDGET_USD): each one is checked
+  // before it is made and recorded after; the first one counts the message against the user's daily cap
+  const spendTurn = ctx.spend ? ctx.spend.turn(user.id) : null;
+  if (spendTurn) ctx = withSpendTurn(ctx, spendTurn);
 
   // 1. dedupe (unique wa_message_id) + store the inbound row
   const stored = await ctx.db.insertMessage({ user_id: user.id, wa_message_id: msg.waMessageId, direction: "in", type: toDbType(msg.type), text: msg.text, media_url: msg.mediaId ? `wa-media:${msg.mediaId}` : null });
@@ -51,8 +57,17 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });
   };
 
+  const capReached = async (reason: SpendBlock) => {
+    await say(budgetReply(reason, ctx.spend?.limits.demo ?? false, ctx.spend?.limits.userDailyMessages ?? null));
+    return { handled: true, note: `ai cap: ${reason}` };
+  };
+  /** a read-only look before work that needs a paid call (nothing is counted yet) */
+  const spendBlocked = async () => (spendTurn ? spendTurn.blocked() : null);
+
   // 1b. voice notes (Milestone 5): "מקשיבה…" → download → STT → transcript on the message → continue as text
   if (msg.type === "audio" && ctx.stt) {
+    const blocked = await spendBlocked();
+    if (blocked) return capReached(blocked);
     const voice = await transcribeVoiceNote(ctx, user.id, msg, stored.id);
     if (!voice.ok) return { handled: true, note: voice.note };
     msg = { ...msg, type: "text", text: voice.transcript };
@@ -110,7 +125,9 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   }
   const ask = routing.text;
 
-  // 5c. trial / monthly quota
+  // 5c. the daily spend cap (before the trial counts the message: a capped message costs nothing), then trial / quota
+  const blocked = await spendBlocked();
+  if (blocked) return capReached(blocked);
   const remaining = await ctx.db.countTrialMessage(user.id);
   if (remaining < 0) {
     const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
@@ -172,6 +189,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
     await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length ? "button" : "text", text: reply || `[${out.pendingActions.map((a) => a.kind).join(",")}]`, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
     await updateStickyAfterTurn(ctx, user, out.agent?.key ?? null, Boolean(routing.activeKey) || routing.clearSticky);
   } catch (e) {
+    if (e instanceof BudgetExceededError) return capReached(e.reason); // the cap was reached between the check and a call
     const retryable = e instanceof AiProviderError ? e.retryable : false;
     console.error("[bot] assistant failed:", (e as Error).message);
     await say(retryable ? copy["err.model"]() : copy["err.generic"]());
@@ -189,4 +207,10 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   // 10. memory (best effort)
   await maybeSummarize(ctx.db, ctx.ai, freshUser, ctx.now());
   return { handled: true, note: "replied" };
+}
+
+/** The message's own view of the model and STT: both wrapped by one spend turn (lib/ai/budget.ts). */
+function withSpendTurn(ctx: BotContext, turn: SpendTurn): BotContext {
+  const stt = ctx.stt;
+  return { ...ctx, ai: turn.ai(ctx.ai), stt: stt ? () => turn.stt(stt()) : undefined };
 }

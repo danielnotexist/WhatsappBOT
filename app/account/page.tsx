@@ -19,6 +19,9 @@ import type { ConnectionRow, SubscriptionRow, WaIdentityRow } from "@/lib/db/typ
 import { cn } from "@/lib/utils";
 import { isBuiltinRole } from "@/lib/agents/constraints";
 import { loadAgents } from "@/lib/agents/service";
+import { isDemoChatPhone } from "@/lib/demo-chat/phone";
+import { isDemo } from "@/lib/demo";
+import { MascotAvatar } from "@/components/brand/mascot";
 import { AgentsSection } from "./_components/agents-section";
 import { DeleteAccountForm } from "./_components/delete-account-form";
 import { Chevron, Row, Section, Tile } from "./_components/parts";
@@ -100,6 +103,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const linked = linkedPhones(phones);
   const meter = usageView(subscription, usage, now, tz);
   const name = firstName(user.name);
+  const demo = isDemo(); // the website chat exists only in the demo
 
   return (
     <>
@@ -138,6 +142,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
         <Section id="whatsapp" title="וואטסאפ" description={`המספר שממנו מדברים עם ${BRAND.name}.`} className="lg:col-start-1 lg:row-start-2">
           <ul className="divide-y divide-line border-y border-line">
             {linked.length ? linked.map((p) => <PhoneItem key={p.id} phone={p} timeZone={tz} />) : <NoPhoneItem />}
+            {demo ? <DemoChatItem /> : null}
           </ul>
           {linked.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">מספר אחד לחשבון. להחלפה מנתקים את המספר הנוכחי, ומקשרים חדש מכאן.</p> : null}
         </Section>
@@ -233,8 +238,31 @@ function ConnectionItem({ provider, title, product, row, state }: { provider: "m
   );
 }
 
+/** DEMO_MODE: the website chat — the same conversation as WhatsApp, on the site (app/demo/chat). */
+function DemoChatItem() {
+  return (
+    <Row
+      mark={
+        <Tile>
+          <MascotAvatar sizes="48px" className="size-12 rounded-2xl" />
+        </Tile>
+      }
+      title="הצ'אט באתר"
+      action={
+        <Cta tone="honey" size="sm" href="/demo/chat">
+          לבדוק את {BRAND.name} בצ&apos;אט
+        </Cta>
+      }
+    >
+      <p className="mt-1 text-[0.9375rem] text-cream-muted">כותבים, מקליטים ולוחצים על כפתורים, כמו בוואטסאפ.</p>
+    </Row>
+  );
+}
+
 function PhoneItem({ phone, timeZone }: { phone: WaIdentityRow; timeZone: string }) {
-  const formatted = formatPhone(phone.phone_e164);
+  // the website chat's virtual number (+999…, lib/demo-chat/phone.ts) is shown by what it is, not as a number
+  const chat = isDemoChatPhone(phone.phone_e164);
+  const formatted = chat ? "הצ'אט באתר" : formatPhone(phone.phone_e164);
   return (
     <Row
       mark={
@@ -243,14 +271,18 @@ function PhoneItem({ phone, timeZone }: { phone: WaIdentityRow; timeZone: string
         </Tile>
       }
       title={
-        <bdi dir="ltr" className="tabular">
-          {formatted}
-        </bdi>
+        chat ? (
+          formatted
+        ) : (
+          <bdi dir="ltr" className="tabular">
+            {formatted}
+          </bdi>
+        )
       }
       action={
         <form action={unlinkPhoneAction}>
           <input type="hidden" name="id" value={phone.id} />
-          <Cta tone="ghost" size="sm" type="submit" aria-label={`ניתוק המספר ${formatted}`}>
+          <Cta tone="ghost" size="sm" type="submit" aria-label={chat ? `ניתוק ${formatted}` : `ניתוק המספר ${formatted}`}>
             ניתוק
           </Cta>
         </form>

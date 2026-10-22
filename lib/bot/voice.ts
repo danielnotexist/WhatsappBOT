@@ -1,4 +1,6 @@
+import { BudgetExceededError } from "@/lib/ai/budget";
 import { copy } from "@/lib/copy/bot";
+import { budgetReply } from "@/lib/copy/bot-live";
 import { copyM5 } from "@/lib/copy/bot-m5";
 import { oggOpusDurationMs } from "@/lib/stt/ogg";
 import { WaApiError } from "@/lib/wa/client";
@@ -51,6 +53,8 @@ export async function transcribeVoiceNote(ctx: BotContext, userId: string, msg: 
     confidence = t.confidence; // null through OpenRouter: there the echo is by length only
     stt = { model: t.provider, costUsd: t.costUsd ?? null };
   } catch (e) {
+    // the daily spend cap was reached (lib/ai/budget.ts): no call was made
+    if (e instanceof BudgetExceededError) return fail(`ai cap: ${e.reason}`, budgetReply(e.reason, e.demo, ctx.spend?.limits.userDailyMessages ?? null));
     console.error("[voice] transcription failed:", (e as Error).message);
     return fail("transcription failed");
   }

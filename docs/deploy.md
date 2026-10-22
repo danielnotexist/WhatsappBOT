@@ -1,6 +1,6 @@
 # העלאה ל-Vercel — גרסת הדגמה (`DEMO_MODE=1`) ואחר כך המצב האמיתי
 
-> עודכן 21.10.2026. הקוד: `lib/demo.ts` (המתג והבדיקות), `lib/env.ts` (`dataMode()`, `integrationsMocked()`),
+> עודכן 22.10.2026. הקוד: `lib/demo.ts` (המתג והבדיקות), `lib/env.ts` (`dataMode()`, `integrationsMocked()`),
 > `instrumentation.ts` (בדיקה בעלייה), `proxy.ts` (noindex), `components/demo/*` (הפס, הערת הקוד, חלון הוואטסאפ).
 > התוכנית: סעיף 1 בתוכנית הסבב ("אתר חי ב-Vercel לגלישה").
 
@@ -15,7 +15,8 @@
 | Microsoft / Google | מסך המעבר עובר ל-`/api/auth/{microsoft,google}/start`, שכותב חיבור לדוגמה (טוקני fixture מוצפנים, החשבון = המייל של המשתמש) דרך שכבת הנתונים הרגילה, וחוזר ל-`/start/ready?connected=…` (בהרשמה) או ל-`/account`. אין פנייה ל-Microsoft או ל-Google. |
 | וואטסאפ | כפתור "חיבור לוואטסאפ" פותח חלון: "בגרסה האמיתית ייפתח וואטסאפ עם ההודעה: היי עלזה! …" עם הקוד החד-פעמי האמיתי (ראו §7). אין שליחת הודעות. |
 | תשלום | `/pay/<token>` → `/api/pay/mock` (במקום HYP) → `/api/pay/return` → `/account` עם מנוי פעיל. אין חיוב. |
-| AI, תמלול, מייל, תור | תמיד המימוש המדומה (`MockProvider`, `MockStt`, `ConsoleMailer`, `LocalQueue`), גם אם יש מפתחות. |
+| AI, תמלול, מייל, תור | המימוש המדומה (`MockProvider`, `MockStt`, `ConsoleMailer`, `LocalQueue`), גם אם יש מפתחות. **חריג אחד:** `LIVE_AI=1` מפעיל את המודל והתמלול האמיתיים, תחת תקרה יומית (§9). מייל ותור נשארים מדומים תמיד. |
+| הצ'אט באתר | `/demo/chat` (רק בהדגמה ורק למשתמש מחובר, אחרת 404): שיחה עם עלזה כמו בוואטסאפ, דרך אותו pipeline. כניסה מהאזור האישי: "לבדוק את עלזה בצ'אט" (§9). |
 | מנועי חיפוש | `X-Robots-Tag: noindex, nofollow` בכל תשובה (`proxy.ts`, נבדק בכל בקשה) + `<meta name="robots" content="noindex, nofollow">` (נקבע ב-build). |
 | בכל עמוד | פס דק למעלה: "גרסת הדגמה - שום דבר לא נשלח באמת" (נקבע בכל בקשה). |
 
@@ -35,7 +36,7 @@
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | מהפרויקט ב-Supabase (Project Settings → API) | **מומלץ**: נתונים שנשמרים בין instances. המיגרציות 0001–0005 כבר רצו שם. `SUPABASE_SERVICE_ROLE_KEY` — Sensitive, שרת בלבד, אף פעם לא `NEXT_PUBLIC_`. |
 | `WA_PUBLIC_NUMBER` | אופציונלי | המספר שמופיע בקישור wa.me ובקוד ה-QR. בלי זה — מספר דמה (`972500000000`). |
 
-**לא להגדיר** בהדגמה: אף אחד מהמפתחות ברשימת הסירוב ב-§1. מפתחות כמו `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `MS_CLIENT_ID`, `GOOGLE_CLIENT_ID` מותרים אבל לא בשימוש (הכול מדומה) — עדיף לא להוסיף אותם עד המעבר למצב האמיתי.
+**לא להגדיר** בהדגמה: אף אחד מהמפתחות ברשימת הסירוב ב-§1. `MS_CLIENT_ID` ו-`GOOGLE_CLIENT_ID` מותרים אבל לא בשימוש. `ANTHROPIC_API_KEY` ו-`OPENROUTER_API_KEY` מותרים, ובשימוש רק עם `LIVE_AI=1` (§9) — אז הם **Sensitive**.
 
 שינוי במשתנים נכנס לתוקף רק ב-deployment הבא (Redeploy).
 
@@ -69,6 +70,7 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
 2. אחרי כניסה: הפס למעלה בכל עמוד; `curl -sI` (עם עוגיית הכניסה, או מהדפדפן ב-DevTools) מראה `x-robots-tag: noindex, nofollow`.
 3. `/` → "בואו נתחיל" → מייל → `123456` → חיבור Microsoft → `/start/ready?connected=microsoft` ("Outlook מחובר") → "חיבור לוואטסאפ" פותח את החלון → `/account` מציג את המייל ואת החיבור.
 4. `/login` → מייל → `123456` → `/account`.
+5. `/account` → "לבדוק את עלזה בצ'אט" → `/demo/chat`: ההודעה "החשבון מקושר", כפתורי ההיכרות, ואז הודעה, הקלטה וכפתורים (§9). בלי כניסה `/demo/chat` מחזיר 404.
 
 ## 6. הדגמה בלי Supabase (זיכרון בלבד)
 
@@ -103,3 +105,35 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
 3. Redeploy. `/api/health` → `"mode": "supabase"`, `"checks": { "env": "ok" }`. אם חסר משהו — הודעה בעברית עם שמות המשתנים.
 4. כתובות חזרה אצל הספקים: Meta webhook (`/api/wa/webhook`), HYP (`/api/pay/return`), Microsoft (`/api/auth/microsoft/callback`), Google (`/api/auth/google/callback`, `docs/google-setup.md`).
 5. הפס, הערת הקוד, החלון ו-noindex נעלמים לבד. Deployment Protection — להחליט מחדש (אתר שיווקי ציבורי צריך כתובת ציבורית).
+
+## 9. AI חי בהדגמה (`LIVE_AI=1`) והצ'אט באתר
+
+> נוסף 22.10.2026 (התוכנית "בדיקה אמיתית של עלזה", §2–§3). הקוד: `lib/env.ts` (`liveAiInDemo()` / `aiMocked()` / `sttMocked()`),
+> `lib/ai/budget.ts` (התקרות), `supabase/migrations/0009_ai_spend.sql`, `app/api/demo/chat/route.ts`, `app/demo/chat/`, `lib/demo-chat/`.
+
+**מה זה.** `DEMO_MODE=1` + `LIVE_AI=1`: המודל האמיתי (Anthropic: Haiku 5.5 כ-router, Sonnet 5.5 כמודל החזק) והתמלול האמיתי (OpenRouter: `deepgram/nova-3`, גיבוי `openai/gpt-transcribe`) עונים. כל השאר נשאר מדומה: שליחת וואטסאפ, מייל, HYP, Microsoft ו-Google (היומן והמייל מה-fixtures). ההדגמה עדיין מסרבת לעלות ליד המפתחות ששולחים דברים באמת (§1). בלי `LIVE_AI` — הכול כמו קודם.
+
+**משתנים ב-Vercel** (Production + Preview):
+
+| משתנה | ערך | הערות |
+|---|---|---|
+| `LIVE_AI` | `1` | המתג. משפיע רק יחד עם `DEMO_MODE=1`. |
+| `ANTHROPIC_API_KEY` | מ-platform.claude.com | **Sensitive** (מוצפן, לא נראה אחרי שמירה). חסר → הצ'אט עונה בהודעה בעברית עם שם המשתנה החסר (בלי ערכים). |
+| `OPENROUTER_API_KEY` | מ-openrouter.ai → Keys | **Sensitive**. לתמלול. |
+| `AI_DAILY_BUDGET_USD` | ברירת מחדל `3` | תקרת ההוצאה היומית (כל המשתמשים יחד). `0` = לעצור הכול. |
+| `DEMO_USER_DAILY_MESSAGES` | ברירת מחדל `60` | הודעות למשתמש ביום שמגיעות למודל או לתמלול. |
+
+**התקרות (`lib/ai/budget.ts`).** לפני **כל** קריאה בתשלום (router, מודל חזק, סיכום זיכרון, תמלול) נבדק הסכום של היום בטבלה `ai_spend`; אחרי הקריאה נרשמת העלות בפועל (Anthropic: ה-usage כפול המחירון שב-`lib/ai/anthropic.ts`; OpenRouter: `usage.cost`; כשספק לא מדווח — הערכה שמרנית). הקריאה הראשונה של הודעה סופרת אותה במכסת המשתמש (`ai_spend_users`, אטומי ב-SQL). כשמגיעים לתקרה הבוט עונה "הגענו לתקרת הבדיקות של היום. אפשר להמשיך מחר." (או "הגענו ל-60 הודעות היום…") ולא קורא ל-API; ההודעה לא נספרת בתקופת הניסיון. היום = לוח השנה של ישראל. התקרה "רכה": שתי הודעות שנבדקות באותו רגע יכולות לעבור אותה בעלות של קריאה אחת. מחוץ להדגמה התקרה פועלת רק כש-`AI_DAILY_BUDGET_USD` מוגדר במפורש.
+
+**לפני שמדליקים, עם Supabase:** להריץ את `supabase/migrations/0009_ai_spend.sql` (SQL Editor, או `supabase db push`). בלי הטבלה הבדיקה לפני הקריאה נכשלת וההודעה לא נענית (נכשל סגור, לא פתוח). בדיקה מקומית: `DB_NAME=… supabase/tests/run-local.sh` (כולל `ai_spend.test.sql`).
+
+**הצ'אט באתר — `/demo/chat`.** רק בהדגמה ורק למשתמש מחובר (אחרת 404, כבר ב-`proxy.ts`). מסגרת טלפון במסך רחב, מסך מלא בטלפון.
+- כל משתמש מקבל "מספר וירטואלי" משלו, שנגזר מ-`demo-<userId>` (`+999` ועוד 12 ספרות — `wa_identities` מקבל רק E.164; באזור האישי הוא מוצג כ"הצ'אט באתר"). בפעם הראשונה המספר מקושר לחשבון וההיכרות הרגילה מתחילה ("החשבון מקושר", סיור / נתחיל לעבוד).
+- כל הודעה עוברת ב-`processInbound` — אותו pipeline כמו וואטסאפ — עם sender מקליט לבקשה אחת. התשובות (טקסט, כפתורים, רשימות, קבצים וקישורים) חוזרות לדף ונשמרות ב-`messages` להיסטוריה (מה שה-pipeline לא שומר בעצמו נשמר עם `hidden_from_model`, כך שההקשר של המודל זהה לוואטסאפ).
+- הקלטה: MediaRecorder בדפדפן (webm/ogg, ב-Safari mp4), עד דקה ו-2MB, עולה כקובץ ועוברת באותו מסלול של הודעה קולית (מקור מדיה בזיכרון במקום ההורדה ממטא). המיקרופון מותר רק בעמוד הזה (`Permissions-Policy` ב-`proxy.ts`).
+- כפתורים: לחיצה נשלחת כ-button reply. מזהה שמפנה לשורה (טיוטה ממתינה, תזכורת, אישור חיוב, סוכן) מתקבל רק אם השורה של אותו משתמש — אחרת 403, לפני שה-pipeline רץ.
+- הגבלות: 20 בקשות לדקה למשתמש, 60 ל-IP, עד 2,000 תווים להודעה; בקשה מאתר אחר (Origin) נדחית.
+
+**בדיקה אחרי deploy:** `/api/health` → `"liveAi": true`. `/account` → "לבדוק את עלזה בצ'אט" → "מה יש לי מחר?" (יומן ה-fixture), "תנסחי מייל ל…" ואישור בכפתור, "תזכירי לי מחר ב-9", והקלטה קצרה בעברית. העלות בפועל: `select * from public.ai_spend order by day desc;`.
+
+**אבטחת המפתחות.** רק כמשתני Sensitive ב-Vercel; מקומית רק בקובץ עם הרשאות 600 מחוץ לריפו. אף פעם לא בריפו, בלוגים או בצ'אט. מפתח שנשלח פעם בצ'אט — להחליף (Anthropic: console → API keys → Revoke; OpenRouter: Keys → Delete) ולהכניס את החדש ישירות ב-Vercel.

@@ -467,6 +467,17 @@ export interface Db {
   setOpsFlagOnce(key: string, value: Record<string, unknown>): Promise<boolean>;
   getOpsFlag(key: string): Promise<OpsFlagRow | null>;
 
+  // ai_spend / ai_spend_users (migration 0009) — the daily spend cap and the per-user daily message cap (lib/ai/budget.ts).
+  // `day` is the calendar day in Asia/Jerusalem, "YYYY-MM-DD".
+  /** what the paid AI / STT calls cost on that day (USD); 0 when nothing was spent */
+  getAiSpend(day: string): Promise<number>;
+  /** adds one call's cost to the day (negative counts as 0); returns the day's new total */
+  addAiSpend(day: string, costUsd: number, calls?: number): Promise<number>;
+  /** how many of the user's messages reached a paid call on that day */
+  getAiUserMessages(day: string, userId: string): Promise<number>;
+  /** counts one more message for the user unless `limit` is reached (atomic); the new count, or -1 when the cap is full */
+  admitAiUserMessage(day: string, userId: string, limit: number): Promise<number>;
+
   // graph_subscriptions
   upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow>;
   findGraphSubscription(subscriptionId: string): Promise<GraphSubscriptionRow | null>;

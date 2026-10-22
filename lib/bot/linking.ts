@@ -1,5 +1,6 @@
 import { extractLinkToken } from "@/lib/auth/link-token";
 import { copy, buttons } from "@/lib/copy/bot";
+import type { UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
 import { LINK, maskPhone, siteLink, type BotContext } from "./context";
 import { startOnboarding } from "./onboarding";
@@ -43,9 +44,17 @@ export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage):
 
   await ctx.db.createWaIdentity(user.id, phone, msg.profileName);
   await ctx.db.markLinkTokenUsed(row.id);
-  await ctx.db.addAudit({ user_id: user.id, action: "wa.link", target: maskPhone(phone), result: "ok" });
+  await welcomeLinkedPhone(ctx, user, phone);
+  return { handled: true, note: "linked" };
+}
+
+/**
+ * After a number was linked to the account: the audit line, "linked", the welcome with its buttons and the first
+ * onboarding step. Shared by the WhatsApp link token and the website chat's virtual number (lib/demo-chat).
+ */
+export async function welcomeLinkedPhone(ctx: BotContext, user: UserRow, phone: string, source: "whatsapp" | "demo_chat" = "whatsapp"): Promise<void> {
+  await ctx.db.addAudit({ user_id: user.id, action: "wa.link", target: source === "demo_chat" ? "demo-chat" : maskPhone(phone), result: "ok" });
   await ctx.wa.sendText(phone, copy["link.success"]());
   await ctx.wa.sendButtons(phone, copy["onb.welcome"](user.name), buttons.welcome);
   await startOnboarding(ctx, user.id);
-  return { handled: true, note: "linked" };
 }

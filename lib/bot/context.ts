@@ -1,3 +1,4 @@
+import type { SpendGuard } from "@/lib/ai/budget";
 import type { AiProvider } from "@/lib/ai/types";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import type { Tool } from "@/lib/ai/tools";
@@ -20,6 +21,8 @@ export interface BotContext {
   stt?: () => SttProvider;
   /** HYP gateway for one-tap charges from WhatsApp (lazy: a missing HYP_* only fails the press that charges) */
   hyp?: () => HypGateway;
+  /** the daily spend cap of paid model / STT calls (lib/ai/budget.ts); absent → calls are not guarded */
+  spend?: SpendGuard | null;
 }
 
 export const LINK = {

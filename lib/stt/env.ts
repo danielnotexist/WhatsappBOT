@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isDemo } from "@/lib/demo";
-import { EnvError, integrationsMocked, requireEnv } from "@/lib/env";
+import { EnvError, requireEnv, sttMocked } from "@/lib/env";
 import { FallbackStt } from "./fallback";
 import { MockStt } from "./mock";
 import { OpenAiStt } from "./openai";
@@ -12,7 +12,8 @@ import type { SttProvider } from "./types";
  * STT env (kept out of lib/env.ts's full-app schema because these keys are optional for the app as a whole):
  *   STT_PROVIDER        openrouter | soniox | openai | mock. Unset: mock in DATA_MODE=memory; otherwise openrouter
  *                       (also when OPENROUTER_API_KEY is missing → a Hebrew EnvError naming it), except that a deployment
- *                       with only SONIOX_API_KEY keeps Soniox. DEMO_MODE=1 is always mock.
+ *                       with only SONIOX_API_KEY keeps Soniox. DEMO_MODE=1 is mock, except with LIVE_AI=1: then OpenRouter
+ *                       (the only real STT the demo uses; STT_PROVIDER=mock keeps it mocked).
  *   OPENROUTER_API_KEY  required for openrouter (already in lib/env.ts — the same key also serves images)
  *   STT_MODEL           OpenRouter model slug, default deepgram/nova-3
  *   STT_FALLBACK_MODEL  OpenRouter model slug tried when the first fails or hears nothing, default openai/gpt-transcribe;
@@ -52,7 +53,7 @@ export function requireSttEnv<K extends keyof SttEnv>(keys: readonly K[], source
 const isSet = (source: Source, key: string) => Boolean(source[key]?.trim());
 
 function defaultProvider(source: Source): SttEnv["STT_PROVIDER"] {
-  if (integrationsMocked(source)) return "mock";
+  if (sttMocked(source)) return "mock";
   if (!isSet(source, "OPENROUTER_API_KEY") && isSet(source, "SONIOX_API_KEY")) return "soniox"; // a pre-OpenRouter setup keeps working
   return "openrouter";
 }
@@ -71,7 +72,11 @@ function openRouterFromEnv(source: Source, fetchImpl?: typeof fetch): SttProvide
 
 /** Builds the provider from env (no network calls). */
 export function sttFromEnv(source: Source = process.env, fetchImpl?: typeof fetch): SttProvider {
-  if (isDemo(source)) return new MockStt(); // the demo never calls a paid API, whatever STT_PROVIDER says
+  if (isDemo(source)) {
+    // the demo calls no paid STT, whatever STT_PROVIDER says — except LIVE_AI=1, and then only OpenRouter (or mock on request)
+    if (sttMocked(source) || source.STT_PROVIDER?.trim() === "mock") return new MockStt();
+    return openRouterFromEnv(source, fetchImpl);
+  }
   const provider = isSet(source, "STT_PROVIDER") ? requireSttEnv(["STT_PROVIDER"], source).STT_PROVIDER : defaultProvider(source);
   switch (provider) {
     case "mock":

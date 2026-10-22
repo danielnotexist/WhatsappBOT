@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 import { DEMO_COPY, isDemo } from "@/lib/demo";
 
 /**
@@ -42,6 +43,13 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The website chat (/demo/chat, DEMO_MODE only) records voice messages: the microphone is allowed for this site on that
+ * page only — everywhere else it stays off, like the camera.
+ */
+export const MIC_PAGES: ReadonlySet<string> = new Set(["/demo/chat"]);
+export const PERMISSIONS_POLICY_WITH_MIC = SECURITY_HEADERS["Permissions-Policy"]!.replace("microphone=()", "microphone=(self)");
+
+/**
  * The code cards are static pages that read the address from the URL on the client; with no `?email=` there is nothing
  * to verify, so a page load goes back to the matching email card here — the server's HTML is right with or without JS
  * (the card does the same on the client, as a fallback).
@@ -60,12 +68,26 @@ export function codeCardWithoutEmail(request: NextRequest): string | null {
   return mode === null || mode === "navigate" ? home : null;
 }
 
+/**
+ * The website chat exists only in DEMO_MODE and only for a signed-in visitor: otherwise a real 404 here, before the page
+ * starts streaming (a notFound() inside the page's Suspense would keep a 200). The page checks again on its own.
+ */
+export function demoChatHidden(request: NextRequest): boolean {
+  if (request.nextUrl.pathname !== "/demo/chat") return false;
+  return !isDemo() || verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value) === null;
+}
+
 export function proxy(request: NextRequest) {
   const home = codeCardWithoutEmail(request);
-  const response = home ? NextResponse.redirect(new URL(home, request.url)) : NextResponse.next();
+  const response = home
+    ? NextResponse.redirect(new URL(home, request.url))
+    : demoChatHidden(request)
+      ? NextResponse.rewrite(new URL("/_demo-chat-unavailable", request.url)) // no such page → the site's 404
+      : NextResponse.next();
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(name, value);
   }
+  if (MIC_PAGES.has(request.nextUrl.pathname)) response.headers.set("Permissions-Policy", PERMISSIONS_POLICY_WITH_MIC);
   // מצב הדגמה (lib/demo.ts): לא לאינדוקס בשום מנוע חיפוש — נבדק בכל בקשה, גם אם ה-build נעשה בלי DEMO_MODE
   if (isDemo()) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
   return response;
