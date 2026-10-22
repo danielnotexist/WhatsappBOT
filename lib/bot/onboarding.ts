@@ -39,6 +39,28 @@ export async function startOnboarding(ctx: BotContext, userId: string): Promise<
 const MORNING: Record<string, string | null> = { mt_0700: "07:00", mt_0730: "07:30", mt_0800: "08:00", mt_0830: "08:30", mt_none: null };
 
 /** The steps that wait for the person's answer (a typed name, a business name, a list choice). */
+/** The list row that ends the "מה מעמיס" question. */
+export const PAIN_DONE = "pain_done";
+
+/** What was picked so far in the "מה מעמיס" list (profile.pain_points). */
+function painPointsOf(user: UserRow): string[] {
+  const v = user.profile.pain_points;
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/**
+ * The "מה מעמיס" list: the first time with all four rows; afterwards "עוד משהו?" with the rows not picked yet plus
+ * "זהו, מספיק" — WhatsApp lists allow one choice per message, this is how several are collected.
+ */
+async function sendPainList(ctx: BotContext, to: string, picked: string[]): Promise<void> {
+  const left = lists.pain.rows.filter((r) => !picked.includes(r.id));
+  if (!picked.length) {
+    await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: left }]);
+    return;
+  }
+  await ctx.wa.sendList(to, copy["onb.ask_pain_more"](), lists.pain.button, [{ title: lists.pain.title, rows: [...left, lists.pain.done] }]);
+}
+
 const ASKING: readonly OnboardingStep[] = ["ask_name", "ask_business", "ask_pain", "ask_morning_time"];
 
 /** Is onboarding waiting for an answer right now? (the website chat hides its suggested requests meanwhile) */
@@ -124,19 +146,29 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
     case "ask_business": {
       if (text && msg.type === "text" && looksLikeRequest(text, "business")) return false;
       if (text) await ctx.db.updateUserProfile(user.id, { business_name: text.slice(0, 120) });
-      await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]);
+      await sendPainList(ctx, to, []);
       await setStep(ctx.db, user.id, { step: "ask_pain" });
       return true;
     }
     case "ask_pain": {
-      const pain = reply && reply.startsWith("pain_") ? reply : null;
-      if (!pain && !reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
-      if (!pain) {
-        await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]);
+      // WhatsApp lists are single-choice, so the question repeats with what is left until "זהו" (or nothing is left)
+      const chosen = painPointsOf(user);
+      const pain = reply && reply.startsWith("pain_") && reply !== PAIN_DONE ? reply : null;
+      if (!pain && reply !== PAIN_DONE && !reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
+      if (!pain && reply !== PAIN_DONE) {
+        await sendPainList(ctx, to, chosen);
         return true;
       }
-      await ctx.db.mergeUserProfile(user.id, { pain_point: pain });
-      await ctx.wa.sendText(to, copy["onb.pain_ack"](pain));
+      const picked = pain && !chosen.includes(pain) ? [...chosen, pain] : chosen;
+      if (pain) {
+        await ctx.db.mergeUserProfile(user.id, { pain_point: picked[0], pain_points: picked });
+        await ctx.wa.sendText(to, copy["onb.pain_ack"](pain));
+      }
+      const left = lists.pain.rows.filter((r) => !picked.includes(r.id));
+      if (reply !== PAIN_DONE && left.length) {
+        await sendPainList(ctx, to, picked);
+        return true;
+      }
       await ctx.wa.sendList(to, copy["onb.ask_morning_time"](), lists.morningTime.button, [{ title: lists.morningTime.title, rows: lists.morningTime.rows }]);
       await setStep(ctx.db, user.id, { step: "ask_morning_time" });
       return true;
@@ -199,7 +231,7 @@ export async function afterFirstTask(ctx: BotContext, user: UserRow, to: string)
   if (!state) return;
   if (state.step === "ask_name") return void (await ctx.wa.sendText(to, copy["onb.ask_name_again"]()));
   if (state.step === "ask_business") return void (await ctx.wa.sendText(to, copy["onb.ask_business_again"]()));
-  if (state.step === "ask_pain") return void (await ctx.wa.sendList(to, copy["onb.ask_pain"](), lists.pain.button, [{ title: lists.pain.title, rows: lists.pain.rows }]));
+  if (state.step === "ask_pain") return void (await sendPainList(ctx, to, painPointsOf(user)));
   if (state.step === "ask_morning_time") return void (await ctx.wa.sendList(to, copy["onb.ask_morning_time"](), lists.morningTime.button, [{ title: lists.morningTime.title, rows: lists.morningTime.rows }]));
   if (state.step !== "first_task") return;
   if (user.name) {

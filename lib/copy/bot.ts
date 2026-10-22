@@ -29,7 +29,8 @@ export const copy = {
   "onb.ask_business": (name: string) => `נעים להכיר, ${name}. מה שם העסק או המשרד?`,
   "onb.ask_name_again": () => "ועוד דבר קטן, כדי שנדבר בנוח: איך לקרוא לך?",
   "onb.ask_business_again": () => "ועוד דבר קטן: מה שם העסק או המשרד?",
-  "onb.ask_pain": () => "מה הכי מעמיס עליך ביום-יום? זה עוזר לי לדעת במה להתמקד.",
+  "onb.ask_pain": () => "מה הכי מעמיס עליך ביום-יום? זה עוזר לי לדעת במה להתמקד. אפשר לבחור כמה, אחד בכל פעם.",
+  "onb.ask_pain_more": () => "עוד משהו שמעמיס? אפשר לבחור, או לסמן שזהו.",
   "onb.pain_ack": (pain: string) =>
     ({
       pain_email: "מובן. אז נתחיל מהתיבה — אני מסכמת מה מחכה ומנסחת תשובות, והאישור נשאר אצלך.",
@@ -145,6 +146,7 @@ export const lists = {
       { id: "pain_followup", title: "מעקבים ותזכורות", description: "דברים שנופלים בין הכיסאות" },
       { id: "pain_files", title: "למצוא מסמכים", description: "״איפה הקובץ ההוא?״" },
     ] satisfies ListRow[],
+    done: { id: "pain_done", title: "זהו, מספיק", description: "ממשיכים הלאה" } satisfies ListRow,
   },
   morningTime: {
     button: "לבחירה",

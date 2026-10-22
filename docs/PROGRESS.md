@@ -600,3 +600,4 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - **סימני התקדמות (בקשת דניאל):** שלוש הנקודות של "מקלידה" מיד (ושוב אחרי "רק שנייה…" וכל 20 שניות), 👀 על ההודעה מיד, "רק שנייה…" אם אחרי 4 שניות עוד לא נשלחה תשובה (פעם אחת, לא נשמר בהיסטוריה), ו-✅ במקום ה-👀 בסיום. `lib/bot/process-inbound.ts` (`startProgress`), הטקסט ב-`lib/copy/bot-live.ts` (`progress.wait`).
 - **QR וכפתור הוואטסאפ ב-`/start/ready`:** עם `LIVE_WA=1` הם פותחים את וואטסאפ באמת, ולא את חלון ההסבר של ההדגמה.
 - בדיקות: `lib/queue/local.test.ts`, "רק שנייה…" ב-`lib/bot/process-inbound.test.ts`, ועדכון הסדר ב-onboarding / voice.
+- **רשימת "מה מעמיס" - כמה בחירות:** רשימה בוואטסאפ מאפשרת בחירה אחת להודעה (מגבלה של Meta). אחרי כל בחירה עלזה שולחת "עוד משהו שמעמיס?" עם מה שנשאר ועם השורה "זהו, מספיק"; הבחירות נשמרות ב-`profile.pain_points` (ו-`pain_point` נשאר הראשון). `lib/bot/onboarding.ts` (`sendPainList`), טקסטים ב-`lib/copy/bot.ts` ו-`docs/copy/bot-copy.md`.

@@ -34,6 +34,13 @@ describe("onboarding", () => {
 
     await processInbound(h.ctx, h.listReply("pain_email", "מיילים שמחכים לתשובה"));
     expect(h.wa.texts.at(-2)).toContain("נתחיל מהתיבה");
+    // one choice per WhatsApp list: the question comes again with what is left, plus "זהו"
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.sections![0]!.rows.map((r) => r.id)).toEqual(["pain_calendar", "pain_followup", "pain_files", "pain_done"]);
+    await processInbound(h.ctx, h.listReply("pain_followup", "מעקבים ותזכורות"));
+    expect(h.wa.texts.at(-2)).toContain("תזכורות בשפה חופשית");
+    expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.sections![0]!.rows.map((r) => r.id)).toEqual(["pain_calendar", "pain_files", "pain_done"]);
+    await processInbound(h.ctx, h.listReply("pain_done", "זהו, מספיק"));
+    expect((await h.db.getUser(user.id))!.profile.pain_points).toEqual(["pain_email", "pain_followup"]);
     expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.kind).toBe("list");
     expect(h.wa.sent.filter((s) => s.kind !== "reaction").at(-1)!.sections![0]!.rows.map((r) => r.title)).toEqual(["07:00", "07:30", "08:00", "08:30", "לא עכשיו"]);
 
@@ -63,6 +70,7 @@ describe("onboarding", () => {
     expect(h.wa.texts.at(-1)).toBe("נעים להכיר, יוסי. מה שם העסק או המשרד?");
     await processInbound(h.ctx, h.inbound("כהן רואי חשבון"));
     await processInbound(h.ctx, h.listReply("pain_files"));
+    await processInbound(h.ctx, h.listReply("pain_done"));
     await processInbound(h.ctx, h.listReply("mt_none", "לא עכשיו"));
     expect(h.wa.texts.at(-2)).toContain("בסדר גמור");
     expect(h.wa.texts.at(-1)).toContain("זהו, אנחנו מסודרים");
