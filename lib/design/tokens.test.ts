@@ -44,4 +44,13 @@ describe("design tokens (לילה ירוק)", () => {
     expect(css).toMatch(/:root\s*{[^}]*--background:\s*var\(--alze-night\)/);
     expect(css).toContain("@custom-variant dark (&:where(.dark, .dark *):not(:where(.surface-light, .surface-light *)));");
   });
+
+  it("reduced motion lands every animation and transition in the same frame (zero durations and delays)", () => {
+    const block = /@media \(prefers-reduced-motion: reduce\) \{[^}]*\}/.exec(css)?.[0] ?? "";
+    for (const rule of ["animation-duration: 0s !important", "animation-delay: 0s !important", "transition-duration: 0s !important", "transition-delay: 0s !important"]) {
+      expect(block).toContain(rule);
+    }
+    // a tiny non-zero duration paints the old value for one frame (every element transitions `all` by default)
+    expect(block).not.toMatch(/0\.0\d*m?s/);
+  });
 });

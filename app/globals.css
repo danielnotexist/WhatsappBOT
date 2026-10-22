@@ -238,13 +238,21 @@
   }
 }
 
+/*
+ * Reduced motion: every animation and transition lands on its end state in the same frame. Zero, not the usual 0.01ms:
+ * every element's transition-property is `all` by default, so a 0.01ms duration turned each style change (a step's
+ * padding, the grid's columns, a colour) into a transition whose first painted frame was still the old value — the new
+ * step drawn one frame in the old layout. Delays go too, so nothing waits in its "before" state.
+ */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

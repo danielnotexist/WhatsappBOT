@@ -143,8 +143,7 @@ describe("StepPaper", () => {
     await Promise.resolve();
     expect(paper.style.backgroundColor).toBe(cssColor(cardTones.code.bg));
     expect(paper.style.boxShadow).not.toBe("");
-    // no CSS transition either: the global reduced-motion rule would turn the colour change into a 0.01ms transition
-    // whose first frame is the old colour
+    // no CSS transition either: a transition's first painted frame is the old colour
     expect(paper).toHaveClass("transition-none");
     expect(animate).not.toHaveBeenCalled();
   });

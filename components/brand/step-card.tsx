@@ -34,8 +34,8 @@ function paperColor(tone: CardTone): string {
  * `layout`). The step's content sits on top of it in the same grid cell (see components/auth/signup-shell.tsx).
  *  - Reduced motion: no morph; the colour and shadow are plain style values that React writes in the step's own commit
  *    (animated by motion, even with duration 0, they would land a frame later — the new step drawn on the old paper).
- *    `transition-none`: the global reduced-motion rule gives every element a 0.01ms transition of `all`, whose first
- *    frame is still the old colour; the paper never uses CSS transitions (motion drives it).
+ *    `transition-none`: the paper never uses CSS transitions (motion drives it), whatever a global rule sets — a
+ *    transition's first painted frame is still the old colour.
  *  - Shown again after the shell was hidden (a page outside the signup, then back/forward): the paper enters the way it
  *    does when the shell first appears, together with the step's own entrance.
  */
