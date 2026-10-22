@@ -28,6 +28,8 @@ describe("processInbound", () => {
       const run = processInbound(h.ctx, h.inbound("מה יש לי מחר?"));
       await vi.advanceTimersByTimeAsync(PROGRESS_NOTE_AFTER_MS + 10);
       expect(h.wa.texts).toContain("רק שנייה…");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.wa.sent.at(-1)!.kind).toBe("read"); // the typing dots again after the note
       finish();
       await run;
       expect(h.wa.texts.filter((t) => t === "רק שנייה…")).toHaveLength(1);

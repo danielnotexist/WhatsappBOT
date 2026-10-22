@@ -61,9 +61,11 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 
 /** How long a message may go without any reply before "רק שנייה…" is sent. */
 export const PROGRESS_NOTE_AFTER_MS = 4_000;
+/** The typing dots are shown again this often while no reply went out (WhatsApp clears them after ~25s). */
+export const TYPING_REFRESH_MS = 20_000;
 
 /**
- * The progress marks on an inbound message: a 👀 reaction right away (not on button presses, which have no bubble of
+ * The progress marks on an inbound message: the typing dots (markRead with typing, by the caller), a 👀 reaction right away (not on button presses, which have no bubble of
  * their own to react to in a useful way), a short "רק שנייה…" when no reply went out within PROGRESS_NOTE_AFTER_MS
  * (not stored: it is not part of the conversation), and ✅ replacing the 👀 when the message is handled. The returned
  * ctx notices every send, so a fast answer never gets the note.
@@ -88,13 +90,23 @@ function startProgress(ctx: BotContext, to: string, waMessageId: string, isButto
     downloadMedia: (...a) => wa.downloadMedia(...a),
   };
   if (!isButton) void wa.sendReaction(to, waMessageId, "👀").catch(() => undefined);
+  // WhatsApp's typing dots clear on any message we send and after ~25s: shown again after the note and every 20s
+  const typing = () => void wa.markRead(waMessageId, { typing: true }).catch(() => undefined);
   const timer = setTimeout(() => {
-    if (!replied) void wa.sendText(to, liveCopy["progress.wait"]()).catch(() => undefined);
+    if (replied) return;
+    void wa
+      .sendText(to, liveCopy["progress.wait"]())
+      .then(typing)
+      .catch(() => undefined);
   }, PROGRESS_NOTE_AFTER_MS);
+  const keepTyping = setInterval(() => {
+    if (!replied) typing();
+  }, TYPING_REFRESH_MS);
   return {
     ctx: { ...ctx, wa: tracked },
     async done() {
       clearTimeout(timer);
+      clearInterval(keepTyping);
       if (!isButton) await wa.sendReaction(to, waMessageId, "✅").catch(() => undefined);
     },
   };

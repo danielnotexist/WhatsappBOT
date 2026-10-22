@@ -597,6 +597,6 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 
 ## וואטסאפ חי - תיקונים מהבדיקה הראשונה עם דניאל
 - **הודעות שלא קיבלו תשובה אחרי הקישור:** בלי QStash, התור המקומי שלח את העבודה ל-worker בתוך `after()` בלי לחכות לה, ו-Vercel הקפיא את הפונקציה באמצע. נוסף `drain()` ל-`LocalQueue` (ול-`Queue` כאופציונלי), וה-webhook וה-`/api/jobs/tick` מחכים לו. ל-webhook נוסף `maxDuration = 300`.
-- **סימני התקדמות (בקשת דניאל):** 👀 על ההודעה מיד, "רק שנייה…" אם אחרי 4 שניות עוד לא נשלחה תשובה (פעם אחת, לא נשמר בהיסטוריה), ו-✅ במקום ה-👀 בסיום. `lib/bot/process-inbound.ts` (`startProgress`), הטקסט ב-`lib/copy/bot-live.ts` (`progress.wait`).
+- **סימני התקדמות (בקשת דניאל):** שלוש הנקודות של "מקלידה" מיד (ושוב אחרי "רק שנייה…" וכל 20 שניות), 👀 על ההודעה מיד, "רק שנייה…" אם אחרי 4 שניות עוד לא נשלחה תשובה (פעם אחת, לא נשמר בהיסטוריה), ו-✅ במקום ה-👀 בסיום. `lib/bot/process-inbound.ts` (`startProgress`), הטקסט ב-`lib/copy/bot-live.ts` (`progress.wait`).
 - **QR וכפתור הוואטסאפ ב-`/start/ready`:** עם `LIVE_WA=1` הם פותחים את וואטסאפ באמת, ולא את חלון ההסבר של ההדגמה.
 - בדיקות: `lib/queue/local.test.ts`, "רק שנייה…" ב-`lib/bot/process-inbound.test.ts`, ועדכון הסדר ב-onboarding / voice.
