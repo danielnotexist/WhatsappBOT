@@ -1,6 +1,7 @@
 import "server-only";
 import { getAiProvider } from "@/lib/ai";
 import { getDb } from "@/lib/db";
+import { getHyp } from "@/lib/hyp";
 import { getSttProvider } from "@/lib/stt";
 import { getWaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -41,6 +42,7 @@ export async function handleInbound(message: InboundMessage): Promise<{ handled:
     now: () => new Date(),
     appUrl: process.env.APP_URL || "http://localhost:3000",
     stt: getSttProvider,
+    hyp: getHyp,
     async extraTools(user, connections) {
       const ms = activeMicrosoftConnection(connections);
       const g = activeGoogleConnection(connections);

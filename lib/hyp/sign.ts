@@ -51,6 +51,8 @@ export interface HypSignParams extends HypParams {
   sendHeshSMS?: boolean;
   Pritim?: boolean;
   heshDesc?: string;
+  /** `True` = J5 authorization (two-phase), `J2` = card verification without a charge (success CCode=600) */
+  J5?: boolean | "J2";
   sendemail?: boolean;
   UTF8?: boolean;
   UTF8out?: boolean;
@@ -59,10 +61,46 @@ export interface HypSignParams extends HypParams {
 export type HypQueryInput =
   string | URLSearchParams | ReadonlyArray<readonly [string, string]> | HypParams;
 
+/** One invoice line (HYP Invoice / EZcount): `price` includes VAT. */
+export interface HypInvoiceItem {
+  description: string;
+  quantity: number;
+  price: number;
+}
+
+/**
+ * `heshDesc` for `Pritim=True`: `[code~description~quantity~price_incl_vat]…` (developers.hyp.co.il → Basic Invoicing).
+ * The `[`, `]` and `~` separators are stripped from descriptions; HYP rejects (CCode 400) a list whose total differs
+ * from `Amount`, so callers check `itemsTotal(items) === amount` first.
+ */
+export function formatHeshDesc(items: readonly HypInvoiceItem[]): string {
+  return items
+    .map((i) => `[0~${i.description.replace(/[[\]~]/g, " ").replace(/\s+/g, " ").trim()}~${i.quantity}~${formatAmount(i.price)}]`)
+    .join("");
+}
+
+export function itemsTotal(items: readonly HypInvoiceItem[]): number {
+  return Math.round(items.reduce((sum, i) => sum + i.quantity * i.price * 100, 0)) / 100;
+}
+
+/** "99" / "129.03" — at most two fractional digits, no trailing ".00". */
+export function formatAmount(amount: number): string {
+  const fixed = (Math.round(amount * 100) / 100).toFixed(2);
+  return fixed.endsWith(".00") ? fixed.slice(0, -3) : fixed;
+}
+
 export class HypError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HypError";
+  }
+}
+
+/** Thrown before anything was sent to HYP (no gateway configured, invalid request) — nothing can have been charged. */
+export class HypPreflightError extends HypError {
+  constructor(message: string) {
+    super(message);
+    this.name = "HypPreflightError";
   }
 }
 

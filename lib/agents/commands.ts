@@ -86,6 +86,17 @@ function templateFromText(text: string): BuiltinRole | "blank" | null {
 
 // ---------------------------------------------------------------- entry
 
+/**
+ * Whether the create / edit flow is waiting for typed text (a name, instructions, addresses). Earlier pipeline steps
+ * that match whole-message commands (billing: "חשבוניות", "קבלה"…) leave such a message to the flow.
+ */
+export function agentDraftAwaitsText(user: UserRow, now: Date): boolean {
+  const d = user.profile.agent_draft as AgentDraft | null | undefined;
+  if (!d || typeof d !== "object" || !d.updatedAt || Date.parse(d.updatedAt) + AGENT_DRAFT_TTL_MS <= now.getTime()) return false;
+  if (d.mode === "edit") return d.field === "instructions" || d.field === "recipients";
+  return d.step === "name" || d.step === "instructions" || d.step === "recipients";
+}
+
 export async function handleAgentMessage(ctx: BotContext, user: UserRow, msg: InboundMessage, text: string, sub: SubscriptionRow | null): Promise<AgentStep> {
   const now = ctx.now();
   const state = await loadAgents(ctx.db, user.id, now, sub);

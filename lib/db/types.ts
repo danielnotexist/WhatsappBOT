@@ -129,6 +129,8 @@ export interface SubscriptionRow {
   charge_failures: number;
   /** card expiry YYMM from HYP getToken */
   hyp_tokef: string | null;
+  /** plan that takes effect at the next monthly charge (pro → basic from the chat; migration 0007) */
+  scheduled_plan?: PlanKind | null;
 }
 
 /** Only the billing module reads the encrypted token (separate call, never listed with the row). */
@@ -147,6 +149,8 @@ export interface PaymentRow {
   invoice_url: string | null;
   raw: Record<string, unknown>;
   created_at: string;
+  /** the WhatsApp approval that led to this charge (migration 0007); null for monthly / web payments */
+  approval_id?: string | null;
 }
 
 export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry";
@@ -277,6 +281,41 @@ export interface PendingActionRow {
 export interface PendingActionMeta {
   agentKey: AgentKey;
   agentName: string;
+}
+
+// ---- billing approvals (migration 0007): one-tap charges / subscription changes from WhatsApp ----
+/** `renewal` = the automatic monthly charge taking the per-user charge lock (no phone, never pending) */
+export type BillingApprovalKind = "upgrade" | "retry" | "renew" | "resume" | "cancel" | "downgrade" | "keep_pro" | "renewal";
+export type BillingApprovalStatus = "pending" | "processing" | "succeeded" | "failed" | "declined" | "expired" | "unknown";
+
+/** An offer sent with buttons. Executed only from a press by `phone_e164` within 10 minutes (expires_at). */
+export interface BillingApprovalRow {
+  id: string;
+  user_id: string;
+  kind: BillingApprovalKind;
+  plan: "basic" | "pro";
+  /** the amount shown to the user, VAT included — charged exactly as shown */
+  amount_ils: number;
+  details: Record<string, unknown>;
+  /** the linked number the offer was sent to; null only for `renewal` */
+  phone_e164: string | null;
+  status: BillingApprovalStatus;
+  expires_at: string;
+  approved_msg_id: string | null;
+  approved_at: string | null;
+  hyp_trans_id: string | null;
+  ccode: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface NewBillingApproval {
+  user_id: string;
+  kind: Exclude<BillingApprovalKind, "renewal">;
+  plan: "basic" | "pro";
+  amount_ils: number;
+  details?: Record<string, unknown>;
+  phone_e164: string;
 }
 
 export interface LinkAttemptResult {
@@ -478,4 +517,20 @@ export interface Db {
 
   // audit
   addAudit(entry: AuditEntry): Promise<void>;
+
+  // billing approvals (migration 0007) — expires_at is always created_at + 10 minutes (DB default + CHECK)
+  createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow>;
+  getBillingApproval(id: string): Promise<BillingApprovalRow | null>;
+  /** the monthly charge's lock: inserts a `renewal` row as processing; null when another charge of the user is open */
+  openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null>;
+  /** SQL claim_billing_approval(): pending + not expired + owner + same number → processing (atomic); else null */
+  claimBillingApproval(id: string, claim: { userId: string; phoneE164: string; waMessageId: string }): Promise<BillingApprovalRow | null>;
+  /** conditional update: only when the current status is one of `fromStatus` (when given) */
+  updateBillingApproval(id: string, patch: Partial<Pick<BillingApprovalRow, "status" | "hyp_trans_id" | "ccode" | "error" | "details">>, fromStatus?: BillingApprovalStatus[]): Promise<BillingApprovalRow | null>;
+  /** newest first */
+  listBillingApprovals(userId: string, opts?: { statuses?: BillingApprovalStatus[]; kinds?: BillingApprovalKind[]; limit?: number }): Promise<BillingApprovalRow[]>;
+  /** SQL raise_plan_limit(): the current month's quota → newLimit (upgrade mid-month). Remaining after, or null when unchanged. */
+  raiseUsageLimit(userId: string, newLimit: number): Promise<number | null>;
+  /** SQL lower_plan_limit(): the current month's quota → newLimit (a downgrade taking effect), remaining clamped at 0. Remaining after, or null when unchanged. */
+  lowerUsageLimit(userId: string, newLimit: number): Promise<number | null>;
 }

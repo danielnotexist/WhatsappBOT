@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { HypClient, MockHypGateway } from "./client";
+import { HypClient, LazyHypGateway, MockHypGateway } from "./client";
+import { HypPreflightError } from "./sign";
 
 function fakeFetch(responder: (url: URL) => string, status = 200) {
   const urls: URL[] = [];
@@ -55,8 +56,32 @@ describe("HypClient", () => {
     expect(q.get("Tyear")).toBe("31");
     expect(q.get("Token")).toBe("True");
     expect(q.get("SendHesh")).toBe("True");
-    expect(q.get("Amount")).toBe("99.00");
+    expect(q.get("Amount")).toBe("99");
+    expect(q.get("ClientName")).toBe("דנה");
+    expect(q.has("Pritim")).toBe(false);
     expect(await hyp.invoiceUrl("408671193")).toContain("action=PrintHesh");
+  });
+
+  it("charges a token with invoice lines (Pritim + heshDesc), allowFalse for J2, and Id=0 as no transaction", async () => {
+    const f = fakeFetch((url) => {
+      if (url.searchParams.get("action") === "getToken") return "Id=7&CCode=0&Token=1234567890123454580&Tokef=3012";
+      return url.searchParams.get("Amount") === "129.03" ? "Id=408671194&CCode=0&Amount=129.03&ACode=1&Hesh=EZ" : "Id=0&CCode=997&Amount=99&ACode=";
+    });
+    const hyp = new HypClient(creds, f.fn);
+    const ok = await hyp.chargeToken({ amount: 129.03, token: "1234567890123454580", tokef: "3012", email: "d@x.co", items: [{ description: "שדרוג [פרו]~ יתרה", quantity: 1, price: 129.03 }], order: "a1", info: "upgrade:a1" });
+    expect(ok).toMatchObject({ ok: true, transId: "408671194" });
+    const q = f.urls[0]!.searchParams;
+    expect(q.get("Pritim")).toBe("True");
+    expect(q.get("heshDesc")).toBe("[0~שדרוג פרו יתרה~1~129.03]");
+    expect(q.get("ClientName")).toBe("לקוח"); // required by action=soft
+    expect(q.get("Order")).toBe("a1");
+    const bad = await hyp.chargeToken({ amount: 99, token: "1234567890123454580", tokef: "3012", email: "d@x.co" });
+    expect(bad).toMatchObject({ ok: false, transId: null, ccode: "997" });
+    // a list that does not add up is refused before anything is sent (HYP would answer CCode 400)
+    await expect(hyp.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "d@x.co", items: [{ description: "x", quantity: 1, price: 98 }] })).rejects.toBeInstanceOf(HypPreflightError);
+    expect(f.urls).toHaveLength(2);
+    await hyp.getToken("7", { allowFalse: true });
+    expect(f.urls[2]!.searchParams.get("allowFalse")).toBe("True");
   });
 
   it("explains getToken failures in Hebrew (901 = tokens not enabled)", async () => {
@@ -70,7 +95,20 @@ describe("HypClient", () => {
     expect(page).toContain("/api/pay/mock?Amount=99&Order=u1%3Abasic");
     expect((await m.verifyRedirect("Id=1&CCode=0&Sign=x")).ok).toBe(true);
     expect((await m.verifyRedirect("Id=1&CCode=6&Sign=x")).ok).toBe(false);
+    expect((await m.verifyRedirect("Id=1&CCode=600&Sign=x")).ok).toBe(true); // J2 card check
     m.chargeOk = false;
-    expect((await m.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "a@b.co" })).ok).toBe(false);
+    expect((await m.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "a@b.co" })).ccode).toBe("4");
+    m.chargeScript = ["0", "997", new Error("socket hang up")];
+    expect((await m.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "a@b.co" })).ok).toBe(true);
+    expect((await m.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "a@b.co" })).ccode).toBe("997");
+    await expect(m.chargeToken({ amount: 99, token: "t", tokef: "3012", email: "a@b.co" })).rejects.toThrow("socket hang up");
+    expect((await m.getToken("401594866")).token).toMatch(/^\d{15}4580$/);
+  });
+
+  it("the lazy gateway reports a missing configuration as a preflight error (nothing was sent)", async () => {
+    const lazy = new LazyHypGateway(() => {
+      throw new Error("משתני סביבה חסרים: HYP_MASOF");
+    });
+    await expect(lazy.chargeToken({ amount: 1, token: "t", tokef: "3012", email: "a@b.co" })).rejects.toBeInstanceOf(HypPreflightError);
   });
 });

@@ -9,9 +9,11 @@
 | `migrations/0001_init.sql` | enums, 18 טבלאות (users, auth_otps, link_tokens, wa_identities, wa_link_attempts, connections, graph_subscriptions, messages, conversation_state, pending_actions, jobs, reminders, usage, subscriptions, payments, audit_log, agents, wa_templates), אינדקסים, טריגר `updated_at` |
 | `migrations/0002_rls.sql` | deny-by-default: ביטול הרשאות ל-`anon`/`authenticated`, RLS על כל טבלה, policies "רק השורות שלי" (`auth.uid()`), GRANT ברמת עמודות (בלי טוקנים מוצפנים / raw) |
 | `migrations/0003_functions.sql` | `count_trial_message` (ספירה אטומית, 10/750/3000), `user_plan`, `claim_due_jobs` / `finish_job` / `requeue_stale_jobs` (תור משימות עם SKIP LOCKED ו-backoff), `expire_pending_actions`, `purge_old_messages` (90/365 יום), `purge_old_audit_log` (24 חודש), `purge_expired_tokens`, `dispatch_due_jobs` (pg_cron → pg_net → QStash), תזמוני pg_cron |
+| `migrations/0007_billing_whatsapp.sql` | חיוב מתוך וואטסאפ בלחיצה אחת: `billing_approvals` (תוקף 10 דק' ב-CHECK, חיוב פתוח אחד למשתמש), `claim_billing_approval()` (אטומי: משתמש + המספר הפעיל המקושר + pending + לפני תפוגה), `raise_plan_limit()` (שדרוג באמצע חודש), `payments.approval_id`, `subscriptions.scheduled_plan` — `docs/hyp-setup.md` |
 | `seed.sql` | נתוני דמו (שני משתמשים: דנה — ניסיון עם M365; יוסי — מנוי בסיסי עם Google ותשלום). **לא לפרודקשן.** |
 | `tests/rls_isolation.test.sql` | בידוד: לקוח א' לא רואה/משנה את לקוח ב'; `anon` = אפס; עמודות רגישות חסומות |
 | `tests/functions.test.sql` | בדיקות עשן לכל פונקציה ב-0003 + cascade במחיקת משתמש |
+| `tests/billing_whatsapp.test.sql` | 0007: תוקף 10 דקות, claim (מספר אחר / משתמש אחר / מספר שנותק / לחיצה כפולה / פג תוקף), חיוב פתוח אחד (כולל החיוב החודשי), תשלום מוצלח אחד לאישור, `raise_plan_limit`, הרשאות |
 | `tests/local_supabase_stub.sql` | מדמה את התפקידים ו-`auth.uid()` של Supabase ב-Postgres רגיל |
 | `tests/run-local.sh` | מריץ הכול על DB מקומי טרי |
 | `config.toml` | קונפיג Supabase CLI (לוקאלי) |

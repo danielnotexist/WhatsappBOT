@@ -1,16 +1,25 @@
+import { randomUUID } from "node:crypto";
 import { decryptToken, encryptToken } from "@/lib/crypto";
-import type { Db, SubscriptionRow, UserRow } from "@/lib/db/types";
+import type { BillingApprovalRow, Db, SubscriptionRow, UserRow } from "@/lib/db/types";
 import type { HypGateway } from "@/lib/hyp/client";
-import { CHARGE_RETRY_DAYS, MAX_CHARGE_FAILURES, PLANS, addOneMonth, isPaidPlan, type PaidPlan } from "./plans";
+import { classifyHypFailure } from "@/lib/hyp/codes";
+import { HypPreflightError } from "@/lib/hyp/sign";
+import { localDateOf } from "@/lib/time/zoned";
+import { MAX_CHARGE_FAILURES, PAUSE_DAY, PLANS, addOneMonth, chargeAttemptAt, isPaidPlan, type PaidPlan } from "./plans";
 
 /**
- * Subscription state machine (PLAN §4):
- *   trial ──pay──▶ active ──charge ok──▶ active (next month)
- *   active ──charge fails──▶ active (retry day 1,3) ──3rd failure──▶ past_due ──pay/charge ok──▶ active
- *   active/past_due ──cancel──▶ cancelled (until next_charge_at) ──period ends──▶ trial plan (user_plan())
+ * Subscription state machine (PLAN §4, docs/progress/hyp.md):
+ *   trial ──pay (web)──▶ active ──charge ok──▶ active (next month)
+ *   active ──charge fails day 1──▶ active, nudge ──day 3 / 5 fail──▶ active, nudge ──day 7 fail──▶ past_due (paused)
+ *   active ──"card" failure──▶ active (no automatic retry) ──day 7──▶ past_due
+ *          └─card updated before day 7──▶ automatic attempts resume on the next attempt day (3 / 5 / 7)
+ *   active / past_due ──[ניסיון חוזר] / card update + charge / web payment──▶ active
+ *   active ──cancel──▶ cancelled (until next_charge_at) ──period ends──▶ trial plan (user_plan())
+ *   pro ──downgrade──▶ scheduled_plan = basic ──next charge──▶ basic
  */
 
-const aad = (userId: string) => `${userId}:hyp`;
+const DAY_MS = 86_400_000;
+export const cardAad = (userId: string) => `${userId}:hyp`;
 
 export interface ActivationInput {
   plan: PaidPlan;
@@ -24,9 +33,11 @@ export interface ActivationInput {
 }
 
 /** After a verified first payment: store the encrypted token, activate, schedule the monthly charge job. */
-export async function activateSubscription(db: Db, user: UserRow, input: ActivationInput, now: Date = new Date()): Promise<{ subscription: SubscriptionRow; firstTime: boolean }> {
+export async function activateSubscription(db: Db, user: UserRow, input: ActivationInput, now: Date = new Date()): Promise<{ subscription: SubscriptionRow; firstTime: boolean; duplicate: boolean }> {
   const payment = await db.insertPayment({ user_id: user.id, hyp_trans_id: input.transId, amount_ils: input.amountIls, ccode: "0", acode: input.acode, invoice_url: input.invoiceUrl, raw: input.raw });
   const previous = await db.getSubscription(user.id);
+  // the same redirect twice (a refresh / back button): already activated for this transaction — change nothing
+  if (!payment && previous && previous.status !== "trial") return { subscription: previous, firstTime: false, duplicate: true };
   const nextChargeAt = addOneMonth(now);
   const subscription = await db.upsertSubscription(user.id, {
     plan: input.plan,
@@ -35,59 +46,260 @@ export async function activateSubscription(db: Db, user: UserRow, input: Activat
     next_charge_at: nextChargeAt.toISOString(),
     cancelled_at: null,
     charge_failures: 0,
+    scheduled_plan: null,
     hyp_tokef: input.tokef,
-    hyp_token_enc: encryptToken(input.token, { aad: aad(user.id) }),
+    hyp_token_enc: encryptToken(input.token, { aad: cardAad(user.id) }),
   });
   await scheduleCharge(db, user.id, nextChargeAt);
   await db.addAudit({ user_id: user.id, action: "subscription.activate", target: input.plan, result: payment ? "ok" : "duplicate_payment" });
-  return { subscription, firstTime: !previous || previous.status === "trial" };
+  return { subscription, firstTime: !previous || previous.status === "trial", duplicate: !payment };
 }
 
-export async function scheduleCharge(db: Db, userId: string, runAt: Date): Promise<void> {
+/** Replaces the saved card (HYP J2 card check → getToken). The plan, dates and failure count stay as they are. */
+export async function saveCardToken(db: Db, userId: string, token: string, tokef: string): Promise<void> {
+  await db.upsertSubscription(userId, { hyp_tokef: tokef, hyp_token_enc: encryptToken(token, { aad: cardAad(userId) }) });
+}
+
+/** The saved card, decrypted (server only). null when there is none. */
+export async function loadCardToken(db: Db, userId: string): Promise<{ token: string; tokef: string } | null> {
+  const secret = await db.getSubscriptionSecret(userId);
+  if (!secret?.hyp_token_enc || !secret.hyp_tokef) return null;
+  return { token: decryptToken(secret.hyp_token_enc, { aad: cardAad(userId) }), tokef: secret.hyp_tokef };
+}
+
+/**
+ * One queued `charge` job per user (older ones are cancelled). The plain key is per due date; a `tag` makes a
+ * distinct key (retry after "busy", resume after cancel…), since jobs.dedupe_key is unique across every status.
+ * The queued job of the same key (if any) was just cancelled, so a key that was used before must never leave the
+ * subscription without a job: it gets a unique suffix; if even that fails, this throws.
+ */
+export async function scheduleCharge(db: Db, userId: string, runAt: Date, tag?: string): Promise<void> {
   await db.cancelJobs(userId, "charge");
-  await db.createJob({ kind: "charge", user_id: userId, run_at: runAt, payload: {}, dedupe_key: `charge:${userId}:${runAt.toISOString().slice(0, 10)}`, max_attempts: 1 });
+  const key = tag ? `charge:${userId}:${runAt.toISOString().slice(0, 16)}:${tag}` : `charge:${userId}:${runAt.toISOString().slice(0, 10)}`;
+  const job = { kind: "charge" as const, user_id: userId, run_at: runAt, payload: tag ? { tag } : {}, max_attempts: 1 };
+  if (await db.createJob({ ...job, dedupe_key: key })) return;
+  if (await db.createJob({ ...job, dedupe_key: `${key}:${randomUUID()}` })) return;
+  throw new Error(`[billing] could not queue the charge job of ${userId} at ${runAt.toISOString()}`);
+}
+
+/** When the next charge job of this subscription should run (used when a cancelled subscription is resumed). */
+export function nextChargeRun(sub: Pick<SubscriptionRow, "next_charge_at" | "charge_failures">, now: Date): Date | null {
+  if (!sub.next_charge_at) return null;
+  const due = new Date(sub.next_charge_at);
+  const at = sub.charge_failures <= 0 ? due : chargeAttemptAt(due, sub.charge_failures);
+  return at.getTime() < now.getTime() ? new Date(now.getTime() + 60_000) : at;
+}
+
+/** The plan the next monthly charge is for: a scheduled downgrade takes effect at that charge. */
+export function renewalPlan(sub: Pick<SubscriptionRow, "plan" | "scheduled_plan">): PaidPlan | null {
+  const p = sub.scheduled_plan ?? sub.plan;
+  return isPaidPlan(p) ? p : null;
+}
+
+const dm = (d: Date) => {
+  const l = localDateOf(d);
+  return `${l.day}.${l.month}.${l.year}`;
+};
+
+/** The invoice line of a monthly charge: "מנוי פרו — 20.11.2026–20.12.2026". */
+export function renewalItem(plan: PaidPlan, from: Date, to: Date): string {
+  return `מנוי ${PLANS[plan].nameHe} — ${dm(from)}–${dm(to)}`;
 }
 
 export type ChargeOutcome =
-  | { kind: "charged"; transId: string; amountIls: number; nextChargeAt: Date; invoiceUrl: string | null }
-  | { kind: "retry"; failures: number; retryAt: Date; amountIls: number }
-  | { kind: "past_due"; failures: number; amountIls: number }
+  | { kind: "charged"; transId: string; amountIls: number; plan: PaidPlan; nextChargeAt: Date }
+  | { kind: "retry"; failures: number; retryAt: Date; amountIls: number; ccode: string }
+  | { kind: "card_invalid"; amountIls: number; pauseAt: Date; ccode: string }
+  | { kind: "paused"; failures: number; amountIls: number }
+  | { kind: "config_error"; ccode: string; retryAt: Date }
   | { kind: "skipped"; reason: string };
 
-/** One monthly charge for one user. Idempotent per due date through the payments unique key + job dedupe. */
-export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow, now: Date = new Date()): Promise<ChargeOutcome> {
-  const sub = await db.getSubscription(user.id);
-  if (!sub || !isPaidPlan(sub.plan) || !(sub.status === "active" || sub.status === "past_due")) return { kind: "skipped", reason: "not billable" };
-  if (sub.cancelled_at) return { kind: "skipped", reason: "cancelled" };
-  if (!sub.next_charge_at || Date.parse(sub.next_charge_at) > now.getTime() + 60_000) return { kind: "skipped", reason: "not due" };
-  const secret = await db.getSubscriptionSecret(user.id);
-  if (!secret?.hyp_token_enc || !secret.hyp_tokef) return { kind: "skipped", reason: "no token" };
+/** Why the monthly charge job has nothing to do right now (null = it should charge, or pause after a "card" failure). */
+function notDue(sub: SubscriptionRow | null, now: Date): string | null {
+  if (!sub || !isPaidPlan(sub.plan) || !(sub.status === "active" || sub.status === "past_due")) return "not billable";
+  if (sub.cancelled_at) return "cancelled";
+  if (sub.status === "past_due") return "paused";
+  if (!sub.next_charge_at || Date.parse(sub.next_charge_at) > now.getTime() + 60_000) return "not due";
+  // waiting for a card update after a "card" failure: nothing until the pause on day 7
+  const pauseAt = chargeAttemptAt(new Date(sub.next_charge_at), MAX_CHARGE_FAILURES - 1);
+  if (sub.charge_failures >= MAX_CHARGE_FAILURES && now.getTime() + 60_000 < pauseAt.getTime()) return "waiting for a card update";
+  return null;
+}
 
-  const amountIls = PLANS[sub.plan].priceIls;
-  const dueDay = sub.next_charge_at.slice(0, 10);
-  const token = decryptToken(secret.hyp_token_enc, { aad: aad(user.id) });
-  const result = await hyp.chargeToken({ amount: amountIls, token, tokef: secret.hyp_tokef, email: user.email, clientName: user.name ?? undefined, info: `${PLANS[sub.plan].nameHe} — ${dueDay}`, order: `${user.id}:${sub.plan}:${dueDay}` });
+/**
+ * One monthly charge attempt for one user (the `charge` job). Idempotent per due date through the payments unique key
+ * and the job dedupe; never concurrent with a WhatsApp one-tap charge of the same user.
+ *
+ * Everything that decides or changes the subscription runs under the per-user charge lock (a `renewal` row in
+ * billing_approvals, status processing): the subscription is read again after the lock is taken, and the lock is
+ * released only after the subscription reflects this attempt — so a one-tap charge never sees a stale cycle.
+ */
+export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow, now: Date = new Date()): Promise<ChargeOutcome> {
+  const before = await db.getSubscription(user.id);
+  const early = notDue(before, now);
+  if (early) return { kind: "skipped", reason: early };
+  if (!(await loadCardToken(db, user.id))) return { kind: "skipped", reason: "no token" };
+
+  const lockPlan = renewalPlan(before!)!;
+  const lock = await db.openRenewalCharge({ user_id: user.id, plan: lockPlan, amount_ils: PLANS[lockPlan].priceIls, details: { due: before!.next_charge_at, attempt: before!.charge_failures + 1 } });
+  if (!lock) {
+    // a one-tap charge from WhatsApp is in flight (or its outcome is unknown) — never charge in parallel
+    await scheduleCharge(db, user.id, new Date(now.getTime() + 15 * 60_000), "busy");
+    return { kind: "skipped", reason: "another charge is open" };
+  }
+  const release = (patch: Partial<Pick<BillingApprovalRow, "status" | "hyp_trans_id" | "ccode" | "error">>) => db.updateBillingApproval(lock.id, patch, ["processing"]);
+
+  let sub: SubscriptionRow;
+  let card: { token: string; tokef: string };
+  try {
+    // under the lock: a one-tap charge may have settled this cycle (or a downgrade changed the plan) since the read above
+    const fresh = await db.getSubscription(user.id);
+    const late = notDue(fresh, now);
+    if (late) {
+      await release({ status: "failed", error: `not charged: ${late}` });
+      return { kind: "skipped", reason: late };
+    }
+    sub = fresh!;
+    if (renewalPlan(sub) !== lockPlan) {
+      await release({ status: "failed", error: "not charged: the plan changed" });
+      await scheduleCharge(db, user.id, new Date(now.getTime() + 60_000), "replan");
+      return { kind: "skipped", reason: "the plan changed" };
+    }
+    // the card as it is now (a card update may have landed since the check above)
+    const current = await loadCardToken(db, user.id);
+    if (!current) {
+      await release({ status: "failed", error: "not charged: no token" });
+      return { kind: "skipped", reason: "no token" };
+    }
+    card = current;
+  } catch (e) {
+    await release({ status: "failed", error: `not charged: ${(e as Error).message.slice(0, 200)}` }).catch(() => null);
+    throw e;
+  }
+
+  const plan = lockPlan;
+  const amountIls = PLANS[plan].priceIls;
+  const due = new Date(sub.next_charge_at!);
+  const pauseAt = chargeAttemptAt(due, MAX_CHARGE_FAILURES - 1);
+
+  // the last day after a "card" failure without a card update: pause (nothing is charged)
+  if (sub.charge_failures >= MAX_CHARGE_FAILURES) {
+    const out = await pause(db, user.id, sub.charge_failures, amountIls);
+    await release({ status: "failed", error: "not charged: paused (no card update)" });
+    return out;
+  }
+
+  const nextChargeAt = addOneMonth(due);
+  const [first, ...rest] = (user.name ?? "").trim().split(/\s+/);
+  let result;
+  try {
+    result = await hyp.chargeToken({
+      amount: amountIls,
+      token: card.token,
+      tokef: card.tokef,
+      email: user.email,
+      clientName: first || undefined,
+      clientLName: rest.join(" ") || undefined,
+      info: `renewal:${lock.id}`,
+      order: lock.id,
+      items: [{ description: renewalItem(plan, due, nextChargeAt), quantity: 1, price: amountIls }],
+    });
+  } catch (e) {
+    if (e instanceof HypPreflightError) {
+      // nothing was sent (gateway not configured / invalid request): release the lock, the job reports the error
+      await release({ status: "failed", error: e.message.slice(0, 300) });
+      throw e;
+    }
+    // No answer: the charge may or may not have happened. The lock stays "unknown" and blocks every further charge
+    // of this user until someone reconciles it in the HYP portal (Order = lock id) — docs/hyp-setup.md.
+    await release({ status: "unknown", error: (e as Error).message.slice(0, 300) });
+    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown" });
+    throw e;
+  }
+
+  if (result.ok && !result.transId) {
+    // approved without a transaction id: it cannot be matched to a receipt or told apart from a decline — never retry
+    // automatically; "unknown" blocks further charges until reconciled in the HYP portal (Order = lock id)
+    await release({ status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
+    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown:no_trans_id" });
+    throw new Error(`HYP approved the monthly charge ${lock.id} without a transaction id — reconcile manually (docs/hyp-setup.md §7)`);
+  }
+
+  if (result.transId) {
+    await db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: amountIls, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: lock.id });
+  }
 
   if (result.ok && result.transId) {
-    const invoiceUrl = await hyp.invoiceUrl(result.transId).catch(() => null);
-    await db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: amountIls, ccode: "0", acode: result.acode, invoice_url: invoiceUrl, raw: result.response });
-    const nextChargeAt = addOneMonth(new Date(sub.next_charge_at));
-    await db.upsertSubscription(user.id, { status: "active", next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
+    // state first, lock last: a one-tap press that claims right after the release already sees the new cycle
+    await db.upsertSubscription(user.id, { status: "active", plan, scheduled_plan: null, next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
+    // a downgrade that takes effect now also lowers this calendar month's quota (an upgrade raises it at once)
+    if (PLANS[plan].messages < (isPaidPlan(sub.plan) ? PLANS[sub.plan].messages : 0)) await db.lowerUsageLimit(user.id, PLANS[plan].messages);
     await scheduleCharge(db, user.id, nextChargeAt);
-    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId, result: "ok" });
-    return { kind: "charged", transId: result.transId, amountIls, nextChargeAt, invoiceUrl };
+    await release({ status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
+    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId, result: plan === sub.plan ? "ok" : `ok:plan=${plan}` });
+    return { kind: "charged", transId: result.transId, amountIls, plan, nextChargeAt };
   }
 
-  const failures = sub.charge_failures + 1;
-  if (result.transId) await db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: amountIls, ccode: result.ccode || "?", acode: null, invoice_url: null, raw: result.response });
-  await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId ?? "", result: `failed:${result.ccode}` });
-  if (failures >= MAX_CHARGE_FAILURES) {
-    await db.upsertSubscription(user.id, { status: "past_due", charge_failures: failures });
-    return { kind: "past_due", failures, amountIls };
+  const ccode = result.ccode || "?";
+  const failureKind = classifyHypFailure(ccode);
+  const outcome = await applyFailure(db, user.id, sub, { ccode, failureKind, amountIls, due, pauseAt, now });
+  await release({ status: "failed", hyp_trans_id: result.transId, ccode: result.ccode || null });
+  await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId ?? lock.id, result: `failed:${ccode}:${failureKind}` });
+  return outcome;
+}
+
+/** The subscription after a declined monthly charge (runs while the charge lock is still held). */
+async function applyFailure(
+  db: Db,
+  userId: string,
+  sub: SubscriptionRow,
+  f: { ccode: string; failureKind: ReturnType<typeof classifyHypFailure>; amountIls: number; due: Date; pauseAt: Date; now: Date },
+): Promise<ChargeOutcome> {
+  const { ccode, failureKind, amountIls, due, pauseAt, now } = f;
+  if (failureKind === "config") {
+    // our terminal / request is wrong (901 tokens off, 902 PassP, 400 items…): not the customer's failure
+    console.error(`[billing] HYP configuration error ${ccode} on a monthly charge — see docs/hyp-setup.md`);
+    const retryAt = new Date(now.getTime() + DAY_MS);
+    await scheduleCharge(db, userId, retryAt, "config");
+    return { kind: "config_error", ccode, retryAt };
   }
-  const dueDate = new Date(sub.next_charge_at);
-  const retryAt = new Date(dueDate.getTime() + CHARGE_RETRY_DAYS[failures]! * 86_400_000);
-  await db.upsertSubscription(user.id, { charge_failures: failures });
-  await scheduleCharge(db, user.id, retryAt);
-  return { kind: "retry", failures, retryAt, amountIls };
+  if (failureKind === "card") {
+    if (now.getTime() + 60_000 >= pauseAt.getTime()) return pause(db, userId, MAX_CHARGE_FAILURES, amountIls);
+    await db.upsertSubscription(userId, { charge_failures: MAX_CHARGE_FAILURES });
+    await scheduleCharge(db, userId, pauseAt, "pause");
+    return { kind: "card_invalid", amountIls, pauseAt, ccode };
+  }
+  const failures = sub.charge_failures + 1;
+  if (failures >= MAX_CHARGE_FAILURES) return pause(db, userId, failures, amountIls);
+  let retryAt = chargeAttemptAt(due, failures);
+  if (retryAt.getTime() <= now.getTime()) retryAt = new Date(now.getTime() + 3_600_000); // the job ran late
+  await db.upsertSubscription(userId, { charge_failures: failures });
+  await scheduleCharge(db, userId, retryAt);
+  return { kind: "retry", failures, retryAt, amountIls, ccode };
+}
+
+/**
+ * A new card while the renewal waits for one (after a "card" failure there are no automatic attempts and the account
+ * is paused on day 7): the attempts whose day has passed count as failed, and the next regular attempt (day 3 / 5 / 7)
+ * charges the new card. Returns when it runs; null when the subscription is not waiting for a card.
+ */
+export async function resumeAfterCardUpdate(db: Db, userId: string, now: Date): Promise<Date | null> {
+  const sub = await db.getSubscription(userId);
+  if (!sub || sub.status !== "active" || sub.cancelled_at || sub.charge_failures < MAX_CHARGE_FAILURES || !sub.next_charge_at) return null;
+  const due = new Date(sub.next_charge_at);
+  let attempt = 1; // the attempt on day 1 is the one that failed
+  while (attempt < MAX_CHARGE_FAILURES - 1 && chargeAttemptAt(due, attempt).getTime() <= now.getTime()) attempt++;
+  const slot = chargeAttemptAt(due, attempt);
+  const runAt = slot.getTime() <= now.getTime() ? new Date(now.getTime() + 60_000) : slot;
+  await db.upsertSubscription(userId, { charge_failures: attempt });
+  await scheduleCharge(db, userId, runAt, "card");
+  await db.addAudit({ user_id: userId, action: "subscription.card_wait_ended", result: `attempt ${attempt + 1} at ${runAt.toISOString()}` });
+  return runAt;
+}
+
+async function pause(db: Db, userId: string, failures: number, amountIls: number): Promise<ChargeOutcome> {
+  await db.upsertSubscription(userId, { status: "past_due", charge_failures: failures });
+  await db.cancelJobs(userId, "charge");
+  await db.addAudit({ user_id: userId, action: "subscription.pause", result: `after day ${PAUSE_DAY}` });
+  return { kind: "paused", failures, amountIls };
 }

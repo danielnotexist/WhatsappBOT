@@ -53,8 +53,10 @@ app/
   api/wa/webhook        GET אימות רישום (WA_VERIFY_TOKEN) · POST אימות X-Hub-Signature-256 על ה-body הגולמי → תור (QStash / מקומי) → 200 מיידי
   api/wa/worker         מריץ משימה אחת מהתור (אימות חתימת QStash או סוד פנימי) → lib/bot
   pay/[token]/          דף תשלום אישי (קישור חתום מהשיחה, בלי session): בחירת מסלול → HYP
-  api/pay/return        ה-success URL של HYP: APISign VERIFY → getToken → הפעלת מנוי + משימת חיוב חודשית → הודעה בוואטסאפ
-  api/pay/mock          DATA_MODE=memory בלבד — מדמה את דף התשלום של HYP
+  api/pay/return        ה-success URL של HYP: APISign VERIFY → getToken → הפעלת מנוי + משימת חיוב חודשית → הודעה + קבלה בוואטסאפ; Order=<user>:card → החלפת הכרטיס (J2)
+  pay/card/[token]/     [עדכון כרטיס] מהשיחה (קישור חתום, 7 ימים) → דף HYP חדש לבדיקת כרטיס J2, בלי חיוב
+  invoice/[token]/      קישור הקבלה מהשיחה (חתום, 90 יום) → חתימת PrintHesh טרייה מ-HYP → ה-PDF
+  api/pay/mock          DATA_MODE=memory בלבד — מדמה את דף התשלום של HYP (כולל J2 → CCode 600) ואת ה-PDF של הקבלה
   api/jobs/run          worker למשימות מתוזמנות (pg_cron → QStash): charge (אבני דרך 5: סיכום בוקר, תזכורות)
   api/auth/microsoft/start     GET (session או קישור חד-פעמי מהשיחה ?t=) → Microsoft authorize עם PKCE; ?admin=1 → admin consent לארגון
   api/auth/microsoft/callback  code → tokens (מוצפנים) → connection + Graph subscription + הודעה בוואטסאפ; מטפל גם ב-admin_consent ובשגיאות AADSTS65001
@@ -78,8 +80,8 @@ lib/
   ms/                   oauth.ts (PKCE, authorize/admin-consent URLs, token exchange/refresh, סיווג AADSTS), graph.ts (מייל/יומן/קבצים/subscriptions, HTML→טקסט), token-store.ts (רענון + הצפנה), files-text.ts (PDF/Office→טקסט עם unpdf), tools.ts (כלי Graph למודל + executors לשליחה/יומן), subscriptions.ts + renewal.ts, connect-link.ts (קישור 30 דק'), __fixtures__/ (Graph מוקלט לבדיקות ול-DATA_MODE=memory)
   brand.ts              BRAND — השם (עלזה / Alze), תגית, דומיין
   wa/signature.ts       אימות X-Hub-Signature-256 של Meta (timing-safe) + challenge של רישום webhook
-  hyp/                  sign.ts (APISign SIGN/VERIFY), client.ts (HypClient: דף תשלום, VERIFY, getToken, soft עם טוקן + SendHesh, PrintHesh; MockHypGateway), index.ts
-  billing/              plans.ts (99/750, 299/3000, ימי ניסיון חוזר 1/3/5), pay-link.ts (קישור /pay/<token> חתום, 7 ימים), subscription.ts (מכונת מצבים: הפעלה, חיוב חודשי, past_due), service.ts (startPayment, completePayment, runChargeJob + הודעות/תבניות)
+  hyp/                  sign.ts (APISign SIGN/VERIFY, heshDesc), client.ts (HypClient: דף תשלום, VERIFY, getToken+allowFalse, soft עם טוקן + SendHesh + Pritim, PrintHesh; MockHypGateway), codes.ts (סיווג CCode: card/declined/temporary/config), index.ts
+  billing/              plans.ts (99/750, 299/3000, ניסיונות בימים 1/3/5/7), money.ts (יחסיות + מע״מ), pay-link.ts + links.ts (קישורים חתומים), subscription.ts (מכונת מצבים: הפעלה, חיוב חודשי, השהיה), service.ts (completePayment, עדכון כרטיס, runChargeJob + הודעות/תבניות), whatsapp.ts (חיוב בלחיצה אחת מהשיחה: הצעות, אישורים, ביטול/מעבר מסלול, קבלות), commands.ts — מדריך: docs/hyp-setup.md
 proxy.ts                כותרות אבטחה (CSP report-only, HSTS, nosniff, referrer, permissions). ב-Next 16 זה השם של middleware
 docs/                   תוכנית (PLAN.md), יומן התקדמות (PROGRESS.md), טקסטים (copy/), משפטי (legal/)
 scripts/, supabase/, design/   נכתבים בנפרד; מוחרגים מ-lint/typecheck/prettier/vitest
@@ -125,7 +127,7 @@ scripts/, supabase/, design/   נכתבים בנפרד; מוחרגים מ-lint/t
    client secret; Partner Center → Publisher Verification. → `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT=common`.
 6. **Google Cloud** — פרויקט, OAuth consent (External), scopes calendar + drive.file + gmail.send, Redirect URI
    `https://<domain>/api/auth/google/callback`, אימות sensitive scopes. → `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
-7. **HYP** — להפעיל טוקנים במסוף, "אימות על ידי חתימה", success/error URL (`https://<domain>/pay/return`), מסוף בדיקה. → `HYP_MASOF`, `HYP_KEY`, `HYP_PASSP`.
+7. **HYP** — מסוף בדיקה + מסוף אמיתי, טוקנים מופעלים, "אימות על ידי חתימה", success URL `https://<domain>/api/pay/return`, הפקת קבלות (HYP Invoice), בדיקת כרטיס J2 — הרשימה המלאה ב-`docs/hyp-setup.md`. → `HYP_MASOF`, `HYP_KEY`, `HYP_PASSP`.
 8. **Anthropic, OpenRouter, Upstash QStash, Resend** — ליצור חשבונות ומפתחות; ב-OpenRouter לטעון קרדיט (תמלול הודעות קוליות + תמונות); ב-Resend לאמת את הדומיין.
    → `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `QSTASH_*`, `RESEND_API_KEY` (Soniox — אופציונלי, `docs/progress/stt-openrouter.md`).
 9. **עו"ד** — חוות דעת Meta §4.7 + מדיניות פרטיות/תנאים (טיוטה תיכתב בקוד).

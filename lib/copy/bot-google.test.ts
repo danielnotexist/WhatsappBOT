@@ -25,7 +25,7 @@ describe("Google bot copy", () => {
     const args: Record<string, unknown[]> = { "g.connect_done": ["a@gmail.com", ALL], "g.connect_partial": [ALL, "https://x"], "g.web.connected_partial": ["a@gmail.com", ALL], "g.err.missing_scope": [GOOGLE_SCOPES.driveFile, "https://x"] };
     for (const [id, fn] of Object.entries(gcopy)) {
       const text = (fn as (...a: unknown[]) => string)(...(args[id] ?? ["x", "y"]));
-      expect(text, id).not.toMatch(/\/[יה]\b|\/ת\b/);
+      expect(text, id).not.toMatch(/\/[יהת](?![א-ת])/u);
       expect(text.length, id).toBeGreaterThan(10);
     }
   });

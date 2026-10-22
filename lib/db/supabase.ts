@@ -9,6 +9,10 @@ import type {
   AuditEntry,
   NewAgent,
   PendingActionMeta,
+  BillingApprovalKind,
+  BillingApprovalRow,
+  BillingApprovalStatus,
+  NewBillingApproval,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -60,8 +64,9 @@ export class SupabaseDb implements Db {
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,expires_at,created_at,revoked_at";
   private static GSUB_COLS = "id,connection_id,subscription_id,resource,expires_at,client_state";
-  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef";
-  private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at";
+  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef,scheduled_plan";
+  private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at,approval_id";
+  private static BA_COLS = "id,user_id,kind,plan,amount_ils,details,phone_e164,status,expires_at,approved_msg_id,approved_at,hyp_trans_id,ccode,error,created_at";
   private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
   private static REM_COLS = "id,user_id,text,due_at,job_id,status,recurrence,last_fired_at,created_at";
 
@@ -743,5 +748,77 @@ export class SupabaseDb implements Db {
       .not("status", "in", "(cancelled,expired,failed)");
     if (error) this.fail("countAgentActionsSince", error);
     return count ?? 0;
+  }
+
+  // ---- billing approvals (0007_billing_whatsapp.sql) ----
+  private static approval(row: unknown): BillingApprovalRow {
+    const r = row as BillingApprovalRow;
+    return { ...r, amount_ils: Number(r.amount_ils) };
+  }
+
+  async createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow> {
+    // expires_at / created_at come from the DB defaults (now() + 10 minutes, enforced by a CHECK)
+    const { data, error } = await this.client
+      .from("billing_approvals")
+      .insert({ user_id: row.user_id, kind: row.kind, plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: row.phone_e164 })
+      .select(SupabaseDb.BA_COLS)
+      .single();
+    if (error) this.fail("createBillingApproval", error);
+    return SupabaseDb.approval(data);
+  }
+
+  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null> {
+    const { data, error } = await this.client
+      .from("billing_approvals")
+      .insert({ user_id: row.user_id, kind: "renewal", plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: null, status: "processing" })
+      .select(SupabaseDb.BA_COLS)
+      .single();
+    if (error) {
+      if (error.code === "23505") return null; // another charge of this user is open (billing_approvals_one_open_charge_per_user)
+      this.fail("openRenewalCharge", error);
+    }
+    return SupabaseDb.approval(data);
+  }
+
+  async getBillingApproval(id: string): Promise<BillingApprovalRow | null> {
+    const { data, error } = await this.client.from("billing_approvals").select(SupabaseDb.BA_COLS).eq("id", id).maybeSingle();
+    if (error) this.fail("getBillingApproval", error);
+    return data ? SupabaseDb.approval(data) : null;
+  }
+
+  async claimBillingApproval(id: string, claim: { userId: string; phoneE164: string; waMessageId: string }): Promise<BillingApprovalRow | null> {
+    const { data, error } = await this.client.rpc("claim_billing_approval", { p_id: id, p_user_id: claim.userId, p_phone: claim.phoneE164, p_msg_id: claim.waMessageId });
+    if (error) this.fail("claimBillingApproval", error);
+    const rows = (data as unknown[] | null) ?? [];
+    return rows.length ? SupabaseDb.approval(rows[0]) : null;
+  }
+
+  async updateBillingApproval(id: string, patch: Partial<Pick<BillingApprovalRow, "status" | "hyp_trans_id" | "ccode" | "error" | "details">>, fromStatus?: BillingApprovalStatus[]): Promise<BillingApprovalRow | null> {
+    let q = this.client.from("billing_approvals").update(patch).eq("id", id);
+    if (fromStatus) q = q.in("status", fromStatus);
+    const { data, error } = await q.select(SupabaseDb.BA_COLS).maybeSingle();
+    if (error) this.fail("updateBillingApproval", error);
+    return data ? SupabaseDb.approval(data) : null;
+  }
+
+  async listBillingApprovals(userId: string, opts: { statuses?: BillingApprovalStatus[]; kinds?: BillingApprovalKind[]; limit?: number } = {}): Promise<BillingApprovalRow[]> {
+    let q = this.client.from("billing_approvals").select(SupabaseDb.BA_COLS).eq("user_id", userId);
+    if (opts.statuses) q = q.in("status", opts.statuses);
+    if (opts.kinds) q = q.in("kind", opts.kinds);
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(opts.limit ?? 50);
+    if (error) this.fail("listBillingApprovals", error);
+    return ((data as unknown[] | null) ?? []).map((r) => SupabaseDb.approval(r));
+  }
+
+  async raiseUsageLimit(userId: string, newLimit: number): Promise<number | null> {
+    const { data, error } = await this.client.rpc("raise_plan_limit", { p_user_id: userId, p_new_limit: newLimit });
+    if (error) this.fail("raiseUsageLimit", error);
+    return typeof data === "number" ? data : null;
+  }
+
+  async lowerUsageLimit(userId: string, newLimit: number): Promise<number | null> {
+    const { data, error } = await this.client.rpc("lower_plan_limit", { p_user_id: userId, p_new_limit: newLimit });
+    if (error) this.fail("lowerUsageLimit", error);
+    return typeof data === "number" ? data : null;
   }
 }
