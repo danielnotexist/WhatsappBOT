@@ -190,7 +190,7 @@ export function CodeStep({
   }
 
   // back to the email card with the address, and the opt-in the user chose there
-  const changeHref = `${authPaths[mode].email}?email=${encodeURIComponent(email)}${updates ? "&updates=1" : ""}` as Route;
+  const changeHref = `${authPaths[mode].email}?email=${encodeURIComponent(email)}${updates ? "&updates=1" : "&updates=0"}` as Route;
   const invalid = Boolean(error) && code.length === 0;
 
   return (

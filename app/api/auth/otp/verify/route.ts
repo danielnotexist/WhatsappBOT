@@ -8,7 +8,7 @@ import { EnvError } from "@/lib/env";
 /**
  * POST /api/auth/otp/verify  { email, code, updates? }
  * 200 { ok: true, isNewUser, next } + httpOnly session cookie · 400/401/429 { ok: false, code, message, attemptsLeft? }.
- * `updates: true` records the opt-in to "עדכונים וטיפים" (off by default — Israeli anti-spam law, §30A) with a timestamp.
+ * `updates: true` records the opt-in to "עדכונים וטיפים" (the toggle is on by default, Daniel 21.10; it can be turned off before sending) with a timestamp.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { email?: unknown; code?: unknown; updates?: unknown };

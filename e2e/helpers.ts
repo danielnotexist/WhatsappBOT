@@ -84,7 +84,11 @@ export async function submitEmail(page: Page, email: string, opts: { updates?: b
   const send = page.getByRole("button", { name: "שליחת קוד" });
   await expect(send).toBeDisabled();
   await page.getByLabel("כתובת מייל").fill(email);
-  if (opts.updates) await page.getByRole("switch", { name: "עדכונים וטיפים" }).click();
+  if (opts.updates !== undefined) {
+    // the toggle is ON by default — click only when the wanted state differs
+    const toggle = page.getByRole("switch", { name: "עדכונים וטיפים" });
+    if (((await toggle.getAttribute("aria-checked")) === "true") !== opts.updates) await toggle.click();
+  }
   await expect(send).toBeEnabled();
   await send.click();
   await expect(page.getByRole("heading", { name: "הזינו את הקוד" })).toBeVisible();

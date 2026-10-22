@@ -37,17 +37,17 @@ export const fieldClass =
 export function EmailStepFromUrl({ mode = "signup" }: { mode?: AuthMode }) {
   const params = useSearchParams();
   const { bfcacheId } = useRouter();
-  return <EmailStep key={bfcacheId} mode={mode} initialEmail={params.get("email") ?? ""} initialUpdates={mode === "signup" && params.get("updates") === "1"} />;
+  return <EmailStep key={bfcacheId} mode={mode} initialEmail={params.get("email") ?? ""} initialUpdates={mode === "signup" && params.get("updates") !== "0"} />;
 }
 
 /**
  * Step 2 (round plan §3): the email card. The send button stays disabled until the address looks valid; the
- * "updates and tips" toggle is OFF by default (anti-spam law) and travels to the code step in the URL.
+ * "updates and tips" toggle is ON by default (Daniel's decision, 21.10) and travels to the code step in the URL.
  */
 export function EmailStep({
   mode = "signup",
   initialEmail = "",
-  initialUpdates = false,
+  initialUpdates = mode === "signup",
   autoFocus = true,
 }: {
   mode?: AuthMode;
@@ -92,7 +92,7 @@ export function EmailStep({
       if (data.ok || data.code === "cooldown") {
         const qs = new URLSearchParams({
           email: email.trim().toLowerCase(),
-          ...(updates ? { updates: "1" } : {}),
+          updates: updates ? "1" : "0",
           ...(data.code === "cooldown" && data.retryAfterSeconds ? { wait: String(data.retryAfterSeconds) } : {}),
         });
         router.push(`${authPaths[mode].code}?${qs.toString()}` as Route);

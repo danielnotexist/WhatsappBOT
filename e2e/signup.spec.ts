@@ -36,10 +36,10 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await expect(page.getByText("לוקח בערך דקה.")).toBeVisible();
     await page.getByRole("link", { name: "בואו נתחיל" }).click();
 
-    // 2. email card (cream paper): the button wakes up only for a valid address; updates toggle is off by default
+    // 2. email card (cream paper): the button wakes up only for a valid address; updates toggle is on by default
     await expect(page).toHaveURL(/\/start\/email$/);
     await expect(page.getByText("קודם כל")).toBeVisible();
-    await expect(page.getByRole("switch", { name: "עדכונים וטיפים" })).toHaveAttribute("aria-checked", "false");
+    await expect(page.getByRole("switch", { name: "עדכונים וטיפים" })).toHaveAttribute("aria-checked", "true");
     await page.getByLabel("כתובת מייל").fill("not-an-email");
     await expect(page.getByRole("button", { name: "שליחת קוד" })).toBeDisabled();
     await page.getByLabel("כתובת מייל").fill("");

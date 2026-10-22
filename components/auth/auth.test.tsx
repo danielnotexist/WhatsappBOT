@@ -89,22 +89,22 @@ describe("helpers", () => {
 });
 
 describe("EmailStep", () => {
-  it("keeps the button disabled until the email is valid; the updates toggle is off by default", async () => {
+  it("keeps the button disabled until the email is valid; the updates toggle is on by default and can be turned off", async () => {
     const fetchMock = mockFetch(() => ({ ok: true, cooldownSeconds: 60 }));
     render(<EmailStep />);
     const button = screen.getByRole("button", { name: "שליחת קוד" });
     const toggle = screen.getByRole("switch", { name: "עדכונים וטיפים" });
     expect(button).toBeDisabled();
-    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
     fireEvent.change(screen.getByLabelText("כתובת מייל"), { target: { value: "Dana@Levi-Law.co.il" } });
     expect(button).toBeEnabled();
     fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
     await act(async () => {
       fireEvent.click(button);
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/otp/send", expect.objectContaining({ method: "POST" }));
-    expect(push).toHaveBeenCalledWith("/start/code?email=dana%40levi-law.co.il&updates=1");
+    expect(push).toHaveBeenCalledWith("/start/code?email=dana%40levi-law.co.il&updates=0");
   });
 
   it("shows the server's Hebrew message and stays on the card when sending fails", async () => {
@@ -144,7 +144,7 @@ describe("CodeStep", () => {
       await vi.advanceTimersByTimeAsync(3500);
     });
     expect(screen.getByRole("button", { name: "שליחה חוזרת" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "שינוי מייל" })).toHaveAttribute("href", "/start/email?email=dana%40levi-law.co.il");
+    expect(screen.getByRole("link", { name: "שינוי מייל" })).toHaveAttribute("href", "/start/email?email=dana%40levi-law.co.il&updates=0");
   });
 
   it("submits on the sixth digit and follows the server's next step", async () => {
