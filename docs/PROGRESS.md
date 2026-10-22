@@ -13,6 +13,7 @@
 - **קמע: דוכיפת תלת-ממדית רכה** — עד שתיווצר (OpenRouter, עד $3), placeholder SVG.
 - **מודלים (נעול):** router = Haiku 5.5 adaptive/low (רק הודעות פשוטות), חזק = Sonnet 5.5 adaptive/low — `docs/hebrew-eval-report.md`.
 - טון: מקצועי וחם, בלי בדיחות. פנייה ניטרלית (בלי "שלח/י").
+- **קריאת Gmail בלי CASA ל-100 המשתמשים הראשונים** (דניאל, 21.10.2026): `gmail.readonly` עכשיו, תחת תקרת המשתמשים של אפליקציה לא מאומתת; CASA או ספק מתווך (Composio) בהמשך. משנה את PLAN §8 סיכון 5 ("שלב 1 בלי קריאת Gmail; CASA בשלב 6") — הנוסח ב-PLAN עוד לא עודכן (מסמך מאושר; ראו "דרוש מדניאל"). פירוט: `docs/progress/gmail-read.md`, `docs/google-setup.md` §6.
 
 ## דרוש מדניאל
 
@@ -24,6 +25,8 @@
 | 3א | לרכוש דומיין (alze.ai — "כנראה פנוי", לאמת) | `docs/naming.md` | `BRAND.domain`, Resend, תבניות Meta |
 | 4 | כל משתני הסביבה של האתר | `.env.example` | האתר עולה בלי, אבל כל אינטגרציה אמיתית דורשת |
 | 5 | פורטלים (Meta, Entra, Google Cloud, HYP, Supabase, Vercel, Upstash, Resend) | `README.md` → "מה דניאל צריך לעשות ידנית" | לפי PLAN §9 |
+| 6 | לאשר עדכון PLAN §8 סיכון 5 ושורה 56 לפי ההחלטה על קריאת Gmail (21.10) | `docs/PLAN.md` | PLAN עדיין אומר "קריאת Gmail רק אחרי CASA" |
+| 7 | קריאת Gmail: Publish app ב-Google, מיגרציה 0008 לפני הפריסה, משתני התקרה ב-Vercel, להגיש אימות ל-scopes הרגישים לפני ~80 משתמשים | `docs/progress/gmail-read.md` → "מה דניאל עושה ידנית" | בלי Publish — ההרשאה פגה כל 7 ימים; עד אימות הרגישים כל חיבור Google נספר בתקרה |
 
 ## יומן
 
@@ -287,7 +290,7 @@ DATA_MODE=memory pnpm dev   # "תזכיר לי בעוד דקה לבדוק", וא
 > פירוט מלא: `docs/progress/m6.md`; מדריך הקמה: `docs/google-setup.md`. נבנה במקביל לאבן דרך 5 ולסבבי "עלזה" ומוזג אחריהם.
 
 **מה נעשה**
-- **OAuth 2.0 web flow** (`lib/google/oauth.ts`): code + PKCE S256, `access_type=offline`, `prompt=consent`, `include_granted_scopes=true`. Scopes: `openid email profile`, `calendar.events` (לא `calendar` המלא), `drive.file`, `gmail.send`. הסכמה מצטברת ל-`gmail.readonly` חסומה מאחורי `GOOGLE_GMAIL_READ_ENABLED=false` (דורש CASA).
+- **OAuth 2.0 web flow** (`lib/google/oauth.ts`): code + PKCE S256, `access_type=offline`, `prompt=consent`, `include_granted_scopes=true`. Scopes: `openid email profile`, `calendar.events` (לא `calendar` המלא), `drive.file`, `gmail.send`. הסכמה מצטברת ל-`gmail.readonly` חסומה מאחורי `GOOGLE_GMAIL_READ_ENABLED=false` (דורש CASA). *(עודכן 22.10: קריאת Gmail נפתחה ל-100 הראשונים בלי CASA — ראו הרשומה "קריאת Gmail" למטה.)*
 - **נתיבים**: `/api/auth/google/start` (`?t=` קישור חד-פעמי מהשיחה או session; `returnTo=onboarding|account`) ו-`/api/auth/google/callback` (state חד-פעמי עם TTL של 30 דק׳, granular consent → הודעת "חלקי" עם קישור להשלמה, `access_denied`, `admin_policy_enforced`, `invalid_grant`). הפניה רק לנתיבים קבועים (`lib/auth/oauth-return.ts`) — אין open redirect.
 - **טוקנים**: AES-256-GCM עם AAD `${userId}:google`, רענון 5 דק׳ לפני תפוגה, שמירת ה-refresh token הקיים; `invalid_grant` (כולל תפוגת 7 ימים במצב Testing) → `expired` + audit → הבוט שולח קישור חידוש.
 - **לקוח fetch בלי SDK** (`lib/google/client.ts`): Calendar, Drive (כולל export והמרה), Gmail send (RFC 2822; מעל 4MB → upload), userinfo; סיווג שגיאות (401, scope חסר, rate limit/5xx, 404/410). **MIME** (`lib/google/mime.ts`): כותרות בעברית ב-RFC 2047, קבצים מצורפים עם `filename*`, הגנה מ-header injection.
@@ -299,7 +302,7 @@ DATA_MODE=memory pnpm dev   # "תזכיר לי בעוד דקה לבדוק", וא
 
 **במיזוג (אבני דרך 5 + 6 + "עלזה")**
 - `lib/bot/process-inbound.ts`: הקלטה → תמלול לפני ה-onboarding (5), כפתורי תזכורת (5), ובלוק 6 עם `connectRequestProvider`/`reconnectProviderFor` (6). `handle-inbound.ts`: `stt` + כלי Graph ו-Google + executors מנותבים; כלי התזכורות ב-`BASE_TOOLS` תמיד. `context.ts`: `stt` + קישור OAuth ל-Google.
-- **סיכום הבוקר כולל את יומן Google**: `googleFor` ב-`lib/jobs` (`googleForUser` → `listEvents` ליום המקומי); למשתמש עם שני החיבורים — היומנים ממוזגים לפי שעה (אירועי כל-היום קודם). מיילים שמחכים לתשובה — רק מ-Microsoft 365 (קריאת Gmail אחרי CASA).
+- **סיכום הבוקר כולל את יומן Google**: `googleFor` ב-`lib/jobs` (`googleForUser` → `listEvents` ליום המקומי); למשתמש עם שני החיבורים — היומנים ממוזגים לפי שעה (אירועי כל-היום קודם). מיילים שמחכים לתשובה — רק מ-Microsoft 365 (קריאת Gmail אחרי CASA). *(עודכן 22.10: גם מ-Gmail לחיבורים עם `gmail.readonly` — ראו "קריאת Gmail" למטה.)*
 - `docs/legal/oauth-consent-screen-he.md` §3–4: `calendar.events` במקום `calendar`.
 - **בדיקות**: 386 (44 חדשות מאבן דרך 6 + 2 לסיכום בוקר עם Google), הכול מול fixtures / fetch מדומה.
 
@@ -309,7 +312,7 @@ pnpm test -- lib/google app/api/auth/google lib/bot/connect-intent lib/copy/bot-
 DATA_MODE=memory pnpm dev   # "לחבר את גוגל" בשיחה → /api/auth/google/start?t=… → callback מדומה
 ```
 
-**דרוש מדניאל:** פרויקט GCP + Calendar/Drive/Gmail APIs, מסך הסכמה External, OAuth client מסוג Web עם redirect `https://<דומיין>/api/auth/google/callback` (`docs/google-setup.md` §1–2); ב-Vercel `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_GMAIL_READ_ENABLED=false`; משתמשי בדיקה (עד 100, הרשאה פגה אחרי 7 ימים); לפני השקה — אימות דומיין, branding, סרטון הדגמה והצדקות ל-`calendar.events` ו-`gmail.send` (§5). קריאת Gmail רק אחרי CASA (§6).
+**דרוש מדניאל:** פרויקט GCP + Calendar/Drive/Gmail APIs, מסך הסכמה External, OAuth client מסוג Web עם redirect `https://<דומיין>/api/auth/google/callback` (`docs/google-setup.md` §1–2); ב-Vercel `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, ~~`GOOGLE_GMAIL_READ_ENABLED=false`~~ (בוטל 22.10: להשאיר **ריק** — `false` מכבה את קריאת Gmail לכולם); משתמשי בדיקה (עד 100, הרשאה פגה אחרי 7 ימים); לפני השקה — אימות דומיין, branding, סרטון הדגמה והצדקות ל-`calendar.events` ו-`gmail.send` (§5). ~~קריאת Gmail רק אחרי CASA (§6).~~ (עודכן 22.10: ל-100 הראשונים בלי CASA — §6.)
 
 ### 2026-10-21 — מיזוג: סבב "עלזה" 1–4 + אבני דרך 5 ו-6 (ענף האינטגרציה)
 
@@ -321,7 +324,7 @@ DATA_MODE=memory pnpm dev   # "לחבר את גוגל" בשיחה → /api/auth/
 
 ## מה נשאר (אבני דרך 5–7)
 - אבן דרך 5 (שארית): רישום 7 התבניות ב-Meta (ידני), טיפול ב-change notifications (מייל חדש → מידע לסיכום).
-- אבן דרך 6 (שארית): Google Picker בצד הלקוח (`docs/google-setup.md` §8), כפתורי החיבור באתר, אימות האפליקציה ב-Google, CASA לקריאת Gmail (ואז מיילים שמחכים לתשובה גם מ-Gmail בסיכום הבוקר).
+- אבן דרך 6 (שארית): Google Picker בצד הלקוח (`docs/google-setup.md` §8), כפתורי החיבור באתר, אימות האפליקציה ב-Google, CASA או ספק מתווך לקריאת Gmail מעבר ל-100 הראשונים (קריאת Gmail והחלק שלה בסיכום הבוקר כבר קיימים ל-100 הראשונים — רשומת "קריאת Gmail" למטה).
 - סבב "עלזה" שלבים 5–7 (אחרי אישור הצילומים): דף נחיתה קולנועי, ליטוש כניסה ואזור אישי, הדוכיפת התלת-ממדית (OpenRouter), Lighthouse ≥ 90, audit.
 - אבן דרך 7: השקה.
 
@@ -357,3 +360,22 @@ DATA_MODE=memory pnpm dev   # "לחבר את גוגל" בשיחה → /api/auth/
 **אימות:** דגימת פריימים (Playwright, כל פריים) על build הדגמה: 0 פריימים ריקים בכל המעברים (קודם: כ-18 פריימים ריקים במייל→קוד, בהרשמה ובכניסה), ואנימציית כניסה אחת זהה לרפרנס (השאלה אחרי 0.1s, התשובה אחרי 0.16s, 0.42s כל אחת).
 
 **בדיקות:** 558 יחידה (9 חדשות), e2e 15/15, e2e:demo 3/3, build.
+
+### 2026-10-22 — קריאת Gmail ל-100 המשתמשים הראשונים (ענף נפרד) + תיקוני סקירה
+
+> פירוט מלא: `docs/progress/gmail-read.md`; מדריך: `docs/google-setup.md` §3 ו-§6. נבנה בענף `worktree-wf_01acec0d-90f-1` במקביל לזרימות הסוכנים ו-HYP. מיגרציה **0008** (0006 ו-0007 שמורות להן).
+
+**מה נעשה**
+- `gmail.readonly` מתבקש בחיבור רגיל כל עוד יש מקום בתקרה של Google ל-100 משתמשים (לכל חיי הפרויקט). בנוסף יש הסכמה מצטברת `?feature=gmail_read` כשמשתמש שואל על התיבה. פנקס `google_scope_grants` (גיבוב פסבדונימי של החשבון), תקרה `GOOGLE_GMAIL_READ_CAP` (95), והתראות למפעיל ב-80 וב-95.
+- כלי קריאה `gmail_search_emails` / `gmail_get_email` / `gmail_get_thread` / `gmail_awaiting_reply`, ו"מיילים שמחכים לתשובה" מ-Gmail בסיכום הבוקר.
+- **תיקוני סקירה (22.10):** ה-callback לא שומר `gmail.readonly` שלא התבקש או שאינו בתוך התקרה, כי `scope=` בקישור ניתן לעריכה. `GOOGLE_GMAIL_READ_ENABLED=false` עוצר את הקריאה לכולם. `login_hint` הוא החשבון שעליו הוחלט. אישור נרשם בפנקס לפני כל שלב שיכול להיכשל. בדיקת התראות תקופתית רצה מ-`/api/jobs/run`. כותרות מייל הן שורה אחת מנוקה (אין "סעיף" מזויף בסיכום הבוקר). כל התווים הנסתרים מוסרים לפני ניטרול `</data>`. מדיניות הפרטיות §5 מתארת עכשיו גיבוב פסבדונימי שמקושר לחשבון עד מחיקתו.
+
+**איך בודקים**
+```bash
+pnpm test -- lib/google app/api/auth/google lib/jobs lib/ai/untrusted
+DB_NAME=whatsappbot_gmail_test supabase/tests/run-local.sh   # google_user_cap.test.sql כולל את המילוי הראשוני
+```
+
+**בדיקות:** 633 יחידה (25 חדשות בתיקוני הסקירה), build, SQL מקומי, eval typecheck + dry-run.
+
+**דרוש מדניאל:** שורות 6–7 בטבלה "דרוש מדניאל" למעלה. **לשילוב עם ענף הסוכנים:** להוסיף את ארבעת כלי `gmail_*` ל-`CAPABILITIES['mail.read']` (`docs/progress/gmail-read.md` → "פתוח / לשילוב").

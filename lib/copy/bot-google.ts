@@ -34,7 +34,7 @@ export const gcopy = {
   "g.unverified_heads_up": () => UNVERIFIED_HEADS_UP,
   "g.gmail_read.consent": (link: string, headsUp: boolean) => `כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף אחד מ-Google:\n${link}\n${headsUp ? `${UNVERIFIED_HEADS_UP}\n` : ""}הקישור עובד ל-30 הדקות הקרובות.`,
   "g.gmail_read.consent_no_link": () => 'כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף מ-Google. אפשר לכתוב "לחבר את גוגל" ואשלח קישור.',
-  "g.err.gmail_read_cap_reached": () => "קריאת מיילים ב-Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו — היא תיפתח שוב אחרי בדיקת האבטחה של Google. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
+  "g.err.gmail_read_cap_reached": () => "קריאת מיילים ב-Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
   "g.connect_partial": (missing: string[], link: string) => {
     const cannot = missing.map((s) => GOOGLE_CAPABILITY[s]?.cannot).filter(Boolean) as string[];
     return `חלק מההרשאות לא סומנו במסך של Google, ולכן לא אוכל ${joinHe(cannot)}.\nאם זה היה בטעות — אפשר לאשר שוב כאן:\n${link}\nהקישור עובד ל-30 הדקות הקרובות.`;
@@ -56,7 +56,7 @@ export const gcopy = {
   "g.web.no_email": () => "החיבור ל-Google לא הושלם: Google לא החזירה כתובת מייל לחשבון. אפשר לנסות שוב ולאשר את שיתוף כתובת המייל.",
   "g.web.link_expired": () => "הקישור לא בתוקף (הוא עובד 30 דקות). אפשר לבקש קישור חדש בשיחה.",
   "g.web.feature_disabled": () => "קריאת Gmail אינה זמינה כרגע. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
-  "g.web.gmail_read_cap_reached": () => "קריאת Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היא תיפתח שוב אחרי בדיקת האבטחה של Google; היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
+  "g.web.gmail_read_cap_reached": () => "קריאת Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
 } as const;
 
 export type GoogleCopyId = keyof typeof gcopy;

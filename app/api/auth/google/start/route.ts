@@ -20,7 +20,10 @@ const text = (body: string, status: number) => new Response(body, { status, head
  * redirects to Google's consent screen. `feature=gmail_read` = incremental consent for gmail.readonly only
  * (include_granted_scopes); refused when GOOGLE_GMAIL_READ_ENABLED=false or when the unverified-app user cap is
  * full for this (new) Google account. A plain connect adds gmail.readonly while under the cap
- * (lib/google/user-cap.ts); the requested scopes are stored with the state so the callback knows what was asked.
+ * (lib/google/user-cap.ts); the requested scopes and the cap decision are stored with the state so the callback
+ * knows what was asked and why (it re-checks what Google returns — keepGrantedGmailRead). The cap is decided for
+ * the account of the user's existing Google connection (also a revoked one), and that same account is the
+ * login_hint, so the consent screen opens on the account the decision was made for.
  * DEMO_MODE=1 → no Google at all: lib/auth/demo-connect.ts writes a fixture connection and we land right away.
  */
 export async function GET(request: Request) {
@@ -43,11 +46,12 @@ export async function GET(request: Request) {
   const featureParam = url.searchParams.get("feature");
   const feature = isGoogleFeature(featureParam) ? featureParam : null;
   const connections = await db.listConnections(user.id);
-  const existing = connections.find((c) => c.provider === "google" && c.status !== "revoked");
+  const account = googleAccountOf(connections);
   let cfg;
   let scopes: string[];
+  let access: GmailReadAccess;
   try {
-    const access = await gmailAccessFor(db, googleAccountOf(connections), Boolean(feature));
+    access = await gmailAccessFor(db, account, Boolean(feature));
     if (feature && access.reason === "disabled") return text(gcopy["g.web.feature_disabled"](), 403);
     if (feature && !access.allowed) return text(gcopy["g.web.gmail_read_cap_reached"](), 403);
     // DEMO_MODE: no Google — a fixture connection through the data layer, then the same landing as the callback
@@ -67,9 +71,9 @@ export async function GET(request: Request) {
   const { verifier, challenge } = pkcePair();
   const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
   await db.mergeUserProfile(user.id, {
-    oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
+    oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, gmail_read: access.reason, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
   });
-  return Response.redirect(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: existing?.account_email ?? null }), 303);
+  return Response.redirect(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: account }), 303);
 }
 
 /**

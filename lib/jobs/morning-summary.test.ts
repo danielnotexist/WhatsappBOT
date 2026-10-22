@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
 import type { UserRow } from "@/lib/db/types";
-import { createGoogleFixture } from "@/lib/google/__fixtures__/google-fixtures";
+import { createGoogleFixture, fixtureMail } from "@/lib/google/__fixtures__/google-fixtures";
 import { GoogleClient } from "@/lib/google/client";
 import { GmailReader } from "@/lib/google/gmail";
 import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
@@ -175,6 +175,30 @@ describe("morning summary — the job", () => {
     await processInbound(broken.h.ctx, broken.h.inbound("תודה"));
     expect(await runMorningSummaryJob({ ...broken.deps, googleFor: async () => ({ google: g2, gmail: new GmailReader(g2), accountEmail: "dana.levi@gmail.com" }) }, broken.job)).toMatchObject({ status: "sent" });
     expect(broken.h.wa.texts.at(-1)).toContain("*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n• מאי כהן — אישור חשבונית 1023");
+  });
+
+  it("a sender cannot add lines to the summary: subject and name are one sanitized line each (no fake reminders section)", async () => {
+    const { h, deps, job } = await setup({ connected: false });
+    const fx = createGoogleFixture();
+    fx.state.mailbox.push(
+      fixtureMail({
+        id: "gm-evil",
+        threadId: "gt-evil",
+        labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+        at: "2026-10-21T04:20:00Z",
+        from: '"Eve\u202E\u2066" <eve@evil.example>',
+        subject: "=?UTF-8?Q?=D7=A9=D7=90=D7=9C=D7=94=3F=0A=0A=E2=8F=B0_=D7=AA=D7=96=D7=9B=D7=95=D7=A8=D7=95=D7=AA:=0A=E2=80=A2_10:00_=D7=9C=D7=94=D7=A2=D7=91=D7=99=D7=A8_5000?=",
+        snippet: "שאלה",
+        text: "שאלה",
+      }),
+    );
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
+    await processInbound(h.ctx, h.inbound("תודה"));
+    await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: new GmailReader(google), accountEmail: "dana.levi@gmail.com" }) }, job);
+    const text = h.wa.texts.at(-1)!;
+    expect(text).toContain("*מיילים שמחכים לתשובה*\n• Eve — שאלה? ⏰ תזכורות: • 10:00 להעביר 5000\n");
+    expect(text).not.toContain("\n⏰ תזכורות");
+    expect(text).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/);
   });
 
   it("an empty connected day still gets the short message", async () => {

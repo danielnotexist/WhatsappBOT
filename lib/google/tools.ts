@@ -9,7 +9,8 @@ import { driveFileText } from "./drive-text";
 import { googleErrorOutput } from "./errors";
 import { gmailReadStatus, gmailReadTools } from "./gmail-tools";
 import { MimeError, isValidEmail, type MimeAttachment } from "./mime";
-import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, hasScope } from "./oauth";
+import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, gmailReadActive, hasScope } from "./oauth";
+import { connectHeadsUpSuffix } from "./user-cap";
 import { DATE_RE, TIME_RE, addMinutesLocal, freeSlots, localToInstant, minutesBetweenLocal, wallClock } from "./time";
 
 /**
@@ -25,6 +26,8 @@ export interface GoogleToolDeps {
   accountEmail: string | null;
   /** one-time chat link for the gmail.readonly incremental consent (lib/google/gmail-tools.ts gmailReadConsentLink) */
   gmailConsentLink?: () => string;
+  /** GOOGLE_GMAIL_READ_ENABLED (the kill switch); default: read from the environment, fail closed */
+  gmailReadEnabled?: boolean;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -200,7 +203,8 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
     });
   }
 
-  if (hasScope(granted, GOOGLE_SCOPES.gmailReadonly)) {
+  // gmail.readonly granted AND the feature on: GOOGLE_GMAIL_READ_ENABLED=false stops reading for every connection
+  if (hasScope(granted, GOOGLE_SCOPES.gmailReadonly) && (deps.gmailReadEnabled ?? gmailReadActive())) {
     tools.push(...gmailReadTools({ google: deps.google, timeZone: deps.timeZone, accountEmail: deps.accountEmail }));
   } else {
     // Without this, a Google-only user asking "what's new in my mail?" would be told to connect an account.
@@ -238,10 +242,12 @@ export interface GoogleForUser {
 class NoConnection extends Error {}
 class TooLarge extends Error {}
 
-function failure(e: unknown, kind: ExecKind, action: PendingActionRow, ctx: BotContext): { ok: false; message: string; retryable?: boolean } {
+async function failure(e: unknown, kind: ExecKind, action: PendingActionRow, ctx: BotContext): Promise<{ ok: false; message: string; retryable?: boolean }> {
   const link = () => connectLinkFor(ctx, action.user_id, "google");
-  if ((e instanceof GoogleOAuthError && e.needsReconnect) || (e instanceof GoogleApiError && e.unauthorized)) return { ok: false, message: copy["err.connection_expired"](GOOGLE_LABEL, link()) };
-  if (e instanceof GoogleApiError && e.insufficientScope) return { ok: false, message: gcopy["g.err.missing_scope"](SCOPE_FOR[kind], link()) };
+  // a Google connect link in chat carries the one-line "unverified app" heads-up, like every other one
+  const headsUp = async () => connectHeadsUpSuffix(ctx.db, await ctx.db.listConnections(action.user_id).catch(() => []), "google");
+  if ((e instanceof GoogleOAuthError && e.needsReconnect) || (e instanceof GoogleApiError && e.unauthorized)) return { ok: false, message: copy["err.connection_expired"](GOOGLE_LABEL, link()) + (await headsUp()) };
+  if (e instanceof GoogleApiError && e.insufficientScope) return { ok: false, message: gcopy["g.err.missing_scope"](SCOPE_FOR[kind], link()) + (await headsUp()) };
   if (e instanceof GoogleApiError && e.notFound && kind !== "send_mail") return { ok: false, message: gcopy["g.err.event_gone"]() };
   if (e instanceof GoogleApiError && e.retryable) return { ok: false, message: copy["err.provider_down"](GOOGLE_LABEL), retryable: true };
   if (e instanceof TooLarge || (e instanceof GoogleApiError && e.reason === "attachmentsTooLarge")) return { ok: false, message: gcopy["g.err.attachment_too_large"]() };

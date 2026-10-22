@@ -145,6 +145,8 @@ export class MemoryDb implements Db {
     this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
     this.reminders = this.reminders.filter((r) => r.user_id !== id);
     this.jobs = this.jobs.filter((j) => j.user_id !== id);
+    // the Google user-cap ledger stays (Google still counts the account) without the link — SQL: on delete set null
+    for (const g of this.googleScopeGrants) if (g.user_id === id) g.user_id = null;
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -387,7 +389,7 @@ export class MemoryDb implements Db {
     if (row) row.status = status;
   }
 
-  // ---- google_scope_grants / ops_flags (migration 0008): survive revoke and user deletion, like the SQL table ----
+  // ---- google_scope_grants / ops_flags (migration 0008): survive revoke and user deletion (deleteUser sets user_id null), like the SQL table ----
   googleScopeGrants: import("./types").GoogleScopeGrantRow[] = [];
   opsFlags = new Map<string, import("./types").OpsFlagRow>();
 

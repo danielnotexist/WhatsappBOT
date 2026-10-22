@@ -9,12 +9,17 @@ import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, gmailReadEnabled } from "./oauth";
 import {
   alertLevels,
   capAlertMail,
+  checkGoogleUserCapAlerts,
   countCapUsers,
   googleAccountHash,
+  googleAccountOf,
   googleCapConfig,
   googleConnectShowsUnverified,
   gmailReadAccess,
+  keepGrantedGmailRead,
+  maybeCheckGoogleUserCapAlerts,
   recordGoogleGrants,
+  resetGoogleUserCapCheckForTests,
   unverifiedScreenExpected,
   type GoogleCapConfig,
 } from "./user-cap";
@@ -120,9 +125,13 @@ describe("Google unverified-app user cap — 79 / 80 / 95 / 96 users", () => {
     await recordGoogleGrants(h.db, { userId: user.id, accountEmail: "dana.levi@gmail.com", granted: READ }, { cfg: CFG, notify });
     const conn = h.db.seedConnection(user.id, "google", "dana.levi@gmail.com");
     await h.db.revokeConnection(user.id, conn.id);
+    // a disconnect keeps the link to the account (privacy policy §5) …
+    expect(h.db.googleScopeGrants.every((g) => g.user_id === user.id)).toBe(true);
     await h.db.deleteUser(user.id);
     expect(await countCapUsers(h.db)).toBe(1);
     expect(await h.db.hasGoogleScopeGrant(googleAccountHash("dana.levi@gmail.com"), READ)).toBe(true);
+    // … deleting the account clears it, like the SQL table's `on delete set null`
+    expect(h.db.googleScopeGrants.every((g) => g.user_id === null)).toBe(true);
   });
 
   it("which grants count: sensitive scopes until GOOGLE_SENSITIVE_SCOPES_VERIFIED, restricted always; non-sensitive never", async () => {
@@ -138,6 +147,96 @@ describe("Google unverified-app user cap — 79 / 80 / 95 / 96 users", () => {
 
   it("disabled → never allowed, whatever the count", async () => {
     expect(await gmailReadAccess(db, "a@gmail.com", { ...CFG, gmailReadEnabled: false })).toEqual({ allowed: false, reason: "disabled", count: null, cap: 95 });
+  });
+
+  it("the cap decision and login_hint use the same account — also a revoked connection's", () => {
+    const conn = (status: "active" | "revoked", email: string) => ({ provider: "google", status, account_email: email }) as Parameters<typeof googleAccountOf>[0][number];
+    expect(googleAccountOf([conn("revoked", "old@gmail.com")])).toBe("old@gmail.com");
+    expect(googleAccountOf([conn("revoked", "old@gmail.com"), conn("active", "new@gmail.com")])).toBe("new@gmail.com");
+    expect(googleAccountOf([])).toBeNull();
+  });
+});
+
+describe("the callback keeps gmail.readonly only within the rules (keepGrantedGmailRead)", () => {
+  const BASE = [...GOOGLE_BASE_SCOPES];
+  const WITH_READ = [...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly];
+  let db: MemoryDb;
+  beforeEach(() => {
+    db = new MemoryDb();
+  });
+  const keep = (accountEmail: string, requested: string[], startReason?: string, cfg: GoogleCapConfig = CFG) => keepGrantedGmailRead(db, { accountEmail, granted: WITH_READ, requested, startReason }, cfg);
+
+  it("asked for under the cap → kept; not granted → nothing to keep", async () => {
+    expect(await keep("new@gmail.com", WITH_READ, "under_cap")).toEqual({ keep: true, reason: "requested" });
+    expect(await keepGrantedGmailRead(db, { accountEmail: "new@gmail.com", granted: BASE, requested: WITH_READ }, CFG)).toEqual({ keep: false, reason: "not_granted" });
+  });
+
+  it("not asked for (scope= edited in the consent URL, or an old grant from include_granted_scopes) → kept only for an account Google already counted", async () => {
+    expect(await keep("new@gmail.com", BASE)).toEqual({ keep: false, reason: "not_requested" });
+    await db.recordGoogleScopeGrant({ account_hash: googleAccountHash("veteran@gmail.com"), scope: GOOGLE_SCOPES.calendarEvents, user_id: null });
+    expect(await keep("Veteran@Gmail.com", BASE)).toEqual({ keep: true, reason: "already_counted" });
+  });
+
+  it("off → never kept, also for a counted account", async () => {
+    await db.recordGoogleScopeGrant({ account_hash: googleAccountHash("veteran@gmail.com"), scope: GOOGLE_SCOPES.gmailReadonly, user_id: null });
+    expect(await keep("veteran@gmail.com", WITH_READ, "already_counted", { ...CFG, gmailReadEnabled: false })).toEqual({ keep: false, reason: "disabled" });
+  });
+
+  it("asked for because ANOTHER account was counted, and the user picked a new account at Google: kept only under the cap", async () => {
+    await seed(db, 94);
+    expect(await keep("switched@gmail.com", WITH_READ, "already_counted")).toEqual({ keep: true, reason: "requested" });
+    await seed(db, 95);
+    expect(await keep("switched@gmail.com", WITH_READ, "already_counted")).toEqual({ keep: false, reason: "cap_reached" });
+    // the same at the cap after an under_cap decision (two consents racing): kept — that is the headroom under 100
+    expect(await keep("racer@gmail.com", WITH_READ, "under_cap")).toEqual({ keep: true, reason: "requested" });
+  });
+
+  it("a ledger error drops the grant instead of failing the connect", async () => {
+    const broken = new MemoryDb();
+    broken.hasGoogleScopeGrant = async () => {
+      throw new Error("relation google_scope_grants does not exist");
+    };
+    expect(await keepGrantedGmailRead(broken, { accountEmail: "a@gmail.com", granted: WITH_READ, requested: WITH_READ }, CFG)).toEqual({ keep: false, reason: "error" });
+  });
+});
+
+describe("operator alerts without a new grant (backfill) — checkGoogleUserCapAlerts", () => {
+  afterEach(() => resetGoogleUserCapCheckForTests());
+
+  it("a count that crossed 80 and the cap some other way alerts once per level", async () => {
+    const db = new MemoryDb();
+    const notified: number[] = [];
+    const notify = async (a: { level: number }) => void notified.push(a.level);
+    await seed(db, 79);
+    expect(await checkGoogleUserCapAlerts(db, { cfg: CFG, notify })).toEqual({ count: 79, alerts: [] });
+    await seed(db, 96); // e.g. the 0008 backfill
+    expect(await checkGoogleUserCapAlerts(db, { cfg: CFG, notify })).toEqual({ count: 96, alerts: [80, 95] });
+    expect(await checkGoogleUserCapAlerts(db, { cfg: CFG, notify })).toEqual({ count: 96, alerts: [] });
+    expect(notified).toEqual([80, 95]);
+    expect(db.audit.filter((a) => a.action === "ops.google_user_cap").map((a) => [a.user_id, a.target])).toEqual([
+      [null, "level:80"],
+      [null, "level:95"],
+    ]);
+  });
+
+  it("the job worker runs it at most once an hour per instance, and never throws", async () => {
+    const db = new MemoryDb();
+    let counts = 0;
+    const count = db.countGoogleScopeAccounts.bind(db);
+    db.countGoogleScopeAccounts = async (scopes) => {
+      counts++;
+      return count(scopes);
+    };
+    const t0 = new Date("2026-10-22T08:00:00Z");
+    await maybeCheckGoogleUserCapAlerts(db, t0);
+    await maybeCheckGoogleUserCapAlerts(db, new Date(t0.getTime() + 59 * 60_000));
+    expect(counts).toBe(1);
+    await maybeCheckGoogleUserCapAlerts(db, new Date(t0.getTime() + 61 * 60_000));
+    expect(counts).toBe(2);
+    db.countGoogleScopeAccounts = async () => {
+      throw new Error("db down");
+    };
+    await expect(maybeCheckGoogleUserCapAlerts(db, new Date(t0.getTime() + 3 * 60 * 60_000))).resolves.toBeUndefined();
   });
 });
 
@@ -207,6 +306,20 @@ describe("the 'unverified app' heads-up", () => {
     expect(google.split("\n").at(-1)).toBe("גוגל תציג מסך 'אפליקציה לא מאומתת' — זה צפוי בשלב הזה, אפשר ללחוץ 'מתקדם' ואז 'המשך'.");
     await processInbound(h.ctx, h.inbound("לחבר את אאוטלוק"));
     expect(h.wa.texts.at(-1)).not.toContain("אפליקציה לא מאומתת");
+  });
+
+  it("the reconnect prompt for an expired Google connection carries it too", async () => {
+    vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    h.db.seedConnection(user.id, "google", "dana.levi@gmail.com").status = "expired";
+    await processInbound(h.ctx, h.inbound("מה יש לי ביומן היום?"));
+    const reply = h.wa.texts.at(-1)!;
+    expect(reply).toContain("החיבור ל-Google פג תוקף");
+    expect(reply).toContain("/api/auth/google/start?t=");
+    expect(reply.split("\n").at(-1)).toBe("גוגל תציג מסך 'אפליקציה לא מאומתת' — זה צפוי בשלב הזה, אפשר ללחוץ 'מתקדם' ואז 'המשך'.");
   });
 
   it("the onboarding connect button for Google carries it too", async () => {

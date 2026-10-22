@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { emailsAwaitingReply } from "@/lib/jobs/awaiting-reply";
 import { FIXTURE_GMAIL_NOW, createGoogleFixture } from "./__fixtures__/google-fixtures";
 import { GoogleApiError, GoogleClient } from "./client";
-import { GMAIL_LIMITS, GMAIL_NOT_PERSONAL, GmailReader, decodeEntities, decodeMimeWords, parseAddressList } from "./gmail";
+import { GMAIL_LIMITS, GMAIL_NOT_PERSONAL, GmailReader, decodeEntities, decodeMimeWords, headerText, parseAddressList } from "./gmail";
 
 /** Every Gmail call goes to the recorded-shape fixture (mocked fetch) — no network. */
 function reader(opts: { onUnauthorized?: boolean } = {}) {
@@ -173,6 +173,12 @@ describe("Gmail decoding helpers", () => {
       { name: "", address: "z@w.org" },
     ]);
     expect(parseAddressList(null)).toEqual([]);
+  });
+
+  it("header values become one line: encoded or raw newlines and controls cannot add lines (subject, names)", () => {
+    expect(headerText("=?UTF-8?Q?=D7=A9=D7=90=D7=9C=D7=94=3F=0A=0A=E2=8F=B0_=D7=AA=D7=96=D7=9B=D7=95=D7=A8=D7=95=D7=AA:=0A=E2=80=A2_10:00?=")).toBe("שאלה? ⏰ תזכורות: • 10:00");
+    expect(headerText(" a\r\n\tb\u0007c\u0085d ")).toBe("a bcd");
+    expect(parseAddressList('"Eve\n\n⏰ תזכורות:" <eve@x.co>')).toEqual([{ name: "Eve ⏰ תזכורות:", address: "eve@x.co" }]);
   });
 
   it("snippet entities", () => {

@@ -91,8 +91,8 @@ export interface NewConnection {
 
 /**
  * google_scope_grants (migration 0008): Google accounts that ever granted a scope Google counts toward the
- * unverified-app user cap (lib/google/user-cap.ts). Kept after revoke and after account deletion (user_id → null),
- * because Google's cap counts users who granted, for the lifetime of the project.
+ * unverified-app user cap (lib/google/user-cap.ts). Kept after revoke (still linked to the user) and after account
+ * deletion (user_id → null), because Google's cap counts users who granted, for the lifetime of the project.
  */
 export interface GoogleScopeGrantRow {
   /** sha256 hex of the lowercased Google account email */

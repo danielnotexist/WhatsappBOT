@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "@/lib/ai/tools";
 import { clearExecutorsForTests, registerExecutor, type ActionExecutor } from "@/lib/bot/pending";
 import { processInbound } from "@/lib/bot/process-inbound";
@@ -37,7 +37,10 @@ describe("Google tools in the assistant", () => {
   beforeEach(() => {
     process.env.TOKEN_ENC_KEY ||= randomBytes(32).toString("base64");
   });
-  afterEach(() => clearExecutorsForTests());
+  afterEach(() => {
+    clearExecutorsForTests();
+    vi.unstubAllEnvs();
+  });
 
   it("reads a Drive file and drafts a Gmail with it attached; the approved draft is sent through Gmail as PDF attachment", async () => {
     const h = makeHarness();
@@ -139,12 +142,32 @@ describe("Google tools in the assistant", () => {
   });
 
   it("exposes only the tools whose scopes were granted", () => {
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
     const names = (scopes: string[]) => googleTools({ google: async () => { throw new Error("unused"); }, timeZone: TZ, scopes, accountEmail: null }).map((t) => t.name);
     expect(names(["openid", "email", GOOGLE_SCOPES.calendarEvents])).toEqual(["gcal_list_events", "gcal_free_slots", "gcal_create_event", "gcal_update_event", "gcal_delete_event", "gmail_read_status"]);
     expect(names(["openid", GOOGLE_SCOPES.gmailSend])).toEqual(["gmail_draft_email", "gmail_read_status"]);
     // gmail.readonly granted → the Gmail read tools (Microsoft's search_emails / get_email with the gmail_ prefix) instead of the status tool
     expect(names(["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly])).toEqual(["gmail_draft_email", "gmail_search_emails", "gmail_get_email", "gmail_get_thread", "gmail_awaiting_reply"]);
     expect(names([])).toHaveLength(10);
+  });
+
+  it("GOOGLE_GMAIL_READ_ENABLED=false is a kill switch: a connection that already granted gmail.readonly gets no gmail_* read tool", async () => {
+    const readScopes = ["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly];
+    const build = () => googleTools({ google: async () => { throw new Error("no Gmail call while off"); }, timeZone: TZ, scopes: readScopes, accountEmail: "dana.levi@gmail.com" });
+    vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "false");
+    const off = build();
+    expect(off.map((t) => t.name)).toEqual(["gmail_draft_email", "gmail_read_status"]);
+    // the status tool answers "not available" — no consent link while off
+    const db = new MemoryDb();
+    const ctx: ToolContext = { db, userId: "u1", now: new Date(), createPending: async () => { throw new Error("no pending"); } };
+    expect(await off.find((t) => t.name === "gmail_read_status")!.run({}, ctx)).toEqual({ available: false, say: "קריאה וסיכום של מיילים ב-Gmail אינם זמינים כרגע. שליחת מיילים מ-Gmail, היומן וקבצי Drive עובדים." });
+    // a bad value fails closed (and does not break the turn)
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "maybe");
+    expect(build().map((t) => t.name)).not.toContain("gmail_search_emails");
+    // back on (or unset with a real GOOGLE_CLIENT_ID) → the earlier grant reads again, no new consent
+    vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "");
+    expect(build().map((t) => t.name)).toContain("gmail_search_emails");
   });
 });
 
@@ -181,6 +204,28 @@ describe("Google executors — failures become Hebrew messages with the right li
 
     const none = googleExecutors(async () => null);
     expect((await none.send_mail(action("send_mail", {}), h.ctx)).message).toContain("לחבר את המייל");
+  });
+
+  it("a reconnect link after an approved action failed carries the 'unverified app' heads-up (real Google project only)", async () => {
+    const expiredEx = googleExecutors(async () => ({ google: new GoogleClient({ getAccessToken: async () => { throw new GoogleOAuthError("x", "invalid_grant"); } }), timeZone: TZ, connection: conn }));
+    const run = () => expiredEx.create_event(action("create_event", { title: "t", date: "2026-10-22", start: "10:00", end: "11:00", attendees: [] }), h.ctx);
+    const HEADS_UP = "גוגל תציג מסך 'אפליקציה לא מאומתת' — זה צפוי בשלב הזה, אפשר ללחוץ 'מתקדם' ואז 'המשך'.";
+    try {
+      expect((await run()).message).not.toContain(HEADS_UP); // fixtures / no Google project
+      vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
+      const expired = await run();
+      expect(expired.message).toContain("/api/auth/google/start?t=");
+      expect(expired.message.split("\n").at(-1)).toBe(HEADS_UP);
+
+      const fixture = createGoogleFixture();
+      fixture.state.denied.add("gmail");
+      const scopeEx = googleExecutors(async () => ({ google: new GoogleClient({ getAccessToken: async () => "t", fetchImpl: fixture.fetchImpl }), timeZone: TZ, connection: conn }));
+      const missing = await scopeEx.send_mail(action("send_mail", { to_email: "a@b.co", subject: "s", body: "b" }), h.ctx);
+      expect(missing.message).toContain("אין לי הרשאה לשלוח מיילים מ-Gmail");
+      expect(missing.message.split("\n").at(-1)).toBe(HEADS_UP);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("routes by payload tag, then by the active connection", async () => {

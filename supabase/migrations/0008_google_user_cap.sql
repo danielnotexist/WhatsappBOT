@@ -10,7 +10,8 @@
 --     נשמר גם אחרי ניתוק ומחיקת חשבון (user_id → null). הקוד: lib/google/user-cap.ts.
 --   * ops_flags — דגלי תפעול שנקבעים פעם אחת (למשל google_user_cap:80 / google_user_cap:95).
 --   * google_scope_account_count(scopes) — כמה חשבונות שונים אישרו אחד מה-scopes.
---   * מילוי ראשוני מחיבורי Google קיימים (כולל מנותקים).
+--   * google_scope_grants_backfill() — מילוי ראשוני מחיבורי Google קיימים (כולל מנותקים); רץ בסוף המיגרציה,
+--     ואפשר להריץ שוב (on conflict do nothing). נבדק ב-supabase/tests/google_user_cap.test.sql.
 -- שתי הטבלאות: שרת בלבד (service_role). RLS פעיל בלי policy — אף שורה ללקוח.
 -- =============================================================================
 
@@ -24,9 +25,9 @@ create table public.google_scope_grants (
 comment on table public.google_scope_grants is
   'כל חשבון Google שאישר אי-פעם scope ש-Google סופרת בתקרת 100 המשתמשים של אפליקציה לא מאומתת (gmail.readonly תמיד; calendar.events / gmail.send עד אימות ה-scopes הרגישים). לא נמחק בניתוק או במחיקת חשבון — Google ממשיכה לספור. שרת בלבד.';
 comment on column public.google_scope_grants.account_hash is
-  'sha256 (hex) של כתובת המייל של חשבון Google באותיות קטנות. לא נשמרת הכתובת עצמה.';
+  'sha256 (hex) של כתובת המייל של חשבון Google באותיות קטנות, בלי מלח: הכתובת עצמה לא נשמרת, אבל מי שיודע אותה יכול לחשב את הגיבוב — מידע פסבדונימי, לא אנונימי.';
 comment on column public.google_scope_grants.user_id is
-  'המשתמש שאישר (null אחרי מחיקת החשבון — השורה נשארת לספירה).';
+  'המשתמש שאישר. נשאר אחרי ניתוק; null רק אחרי מחיקת החשבון (השורה נשארת לספירה).';
 
 create index google_scope_grants_scope_idx on public.google_scope_grants (scope);
 
@@ -69,20 +70,51 @@ grant  execute on function public.google_scope_account_count(text[]) to service_
 
 -- -----------------------------------------------------------------------------
 -- מילוי ראשוני: חיבורי Google קיימים (גם מנותקים — Google כבר ספרה אותם)
+-- הגיבוב = googleAccountHash() ב-lib/google/user-cap.ts (sha256 hex של המייל אחרי trim ו-lower).
+-- מחזיר כמה שורות נוספו. ההתראות למפעיל (80 / התקרה) על ספירה שעברה סף כאן נשלחות מהבדיקה התקופתית
+-- ב-/api/jobs/run (maybeCheckGoogleUserCapAlerts), לא מכאן.
 -- -----------------------------------------------------------------------------
-insert into public.google_scope_grants (account_hash, scope, user_id, first_granted_at)
-select encode(sha256(convert_to(lower(c.account_email), 'UTF8')), 'hex'),
-       s.scope,
-       c.user_id,
-       c.created_at
-  from public.connections c
- cross join lateral unnest(c.scopes) as s(scope)
- where c.provider = 'google'
-   and c.account_email is not null
-   and s.scope in (
-     'https://www.googleapis.com/auth/gmail.readonly',
-     'https://www.googleapis.com/auth/gmail.modify',
-     'https://www.googleapis.com/auth/calendar.events',
-     'https://www.googleapis.com/auth/gmail.send'
-   )
-on conflict do nothing;
+create or replace function public.google_scope_grants_backfill()
+returns integer
+language sql
+volatile
+set search_path = ''
+as $$
+  with inserted as (
+    insert into public.google_scope_grants (account_hash, scope, user_id, first_granted_at)
+    select distinct on (h.account_hash, s.scope)
+           h.account_hash,
+           s.scope,
+           c.user_id,
+           c.created_at
+      from public.connections c
+     cross join lateral (select encode(sha256(convert_to(lower(btrim(c.account_email)), 'UTF8')), 'hex') as account_hash) h
+     cross join lateral unnest(c.scopes) as s(scope)
+     where c.provider = 'google'
+       and c.account_email is not null
+       and btrim(c.account_email) <> ''
+       and s.scope in (
+         'https://www.googleapis.com/auth/gmail.readonly',
+         'https://www.googleapis.com/auth/gmail.modify',
+         'https://www.googleapis.com/auth/calendar.events',
+         'https://www.googleapis.com/auth/gmail.send'
+       )
+     order by h.account_hash, s.scope, c.created_at
+    on conflict do nothing
+    returning 1
+  )
+  select count(*)::integer from inserted;
+$$;
+comment on function public.google_scope_grants_backfill() is
+  'מילוי google_scope_grants מחיבורי Google קיימים (כולל מנותקים). אידמפוטנטי. מחזיר כמה שורות נוספו. שרת בלבד.';
+
+revoke execute on function public.google_scope_grants_backfill() from public, anon, authenticated;
+grant  execute on function public.google_scope_grants_backfill() to service_role;
+
+do $$
+declare
+  v_added integer := public.google_scope_grants_backfill();
+begin
+  raise notice 'google_scope_grants: % rows backfilled from existing Google connections', v_added;
+end;
+$$;

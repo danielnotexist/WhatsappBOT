@@ -118,7 +118,7 @@ export interface RawFixtureGmailMessage {
   payload: RawFixtureGmailPart;
 }
 
-interface FixtureMailSpec {
+export interface FixtureMailSpec {
   id: string;
   threadId: string;
   labels: string[];
@@ -143,7 +143,8 @@ const encodeBody = (s: string, charset = "utf-8") => (charset.toLowerCase() === 
 /** Large text bodies served through the attachments endpoint, keyed `${messageId}:${attachmentId}`. */
 export const FIXTURE_GMAIL_ATTACHMENT_DATA = new Map<string, string>();
 
-function fixtureMail(s: FixtureMailSpec): RawFixtureGmailMessage {
+/** One raw Gmail message (format=full) as the API returns it — exported for tests that add a message to the mailbox. */
+export function fixtureMail(s: FixtureMailSpec): RawFixtureGmailMessage {
   const headers = [
     { name: "From", value: s.from },
     { name: "To", value: s.to ?? "דנה לוי <dana.levi@gmail.com>" },

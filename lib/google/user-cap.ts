@@ -80,10 +80,47 @@ export async function gmailReadAccess(db: Db, accountEmail: string | null, cfg: 
   return count < cfg.cap ? { allowed: true, reason: "under_cap", count, cap: cfg.cap } : { allowed: false, reason: "cap_reached", count, cap: cfg.cap };
 }
 
-/** The Google account of the user's latest non-revoked (else any) Google connection — the one a reconnect reuses. */
+/**
+ * The Google account of the user's latest non-revoked (else any) Google connection — the one a reconnect reuses.
+ * The start route decides the cap for this account AND sends it as login_hint, so the two always match.
+ */
 export function googleAccountOf(connections: ConnectionRow[]): string | null {
   const google = connections.filter((c) => c.provider === "google" && c.account_email);
   return (google.find((c) => c.status !== "revoked") ?? google[0])?.account_email ?? null;
+}
+
+export type GmailReadKeep =
+  | { keep: true; reason: "already_counted" | "requested" }
+  | { keep: false; reason: "not_granted" | "disabled" | "not_requested" | "cap_reached" | "error" };
+
+/**
+ * The callback side of the cap: may the connection keep the gmail.readonly Google just returned? The start route
+ * asks only within the cap, but the consent URL passes through the browser (its `scope=` can be edited), Google may
+ * hand back an earlier grant (include_granted_scopes), and the user may pick another account than the login_hint.
+ * So the grant is kept only while the feature is on, and when either
+ *   - Google already counted this account before this consent (no new slot), or
+ *   - the start route asked for it — and, when it asked only because ANOTHER account was already counted
+ *     (`startReason` "already_counted"), only while the count is still under the cap.
+ * A grant that is not kept is removed from the stored scopes (the gmail_* tools and the morning summary go by them).
+ * Call BEFORE recordGoogleGrants (which makes this account "counted"). Never throws: an error drops the grant.
+ */
+export async function keepGrantedGmailRead(
+  db: Db,
+  input: { accountEmail: string; granted: readonly string[]; requested: readonly string[]; startReason?: unknown },
+  cfg?: GoogleCapConfig,
+): Promise<GmailReadKeep> {
+  if (!hasScope(input.granted, GOOGLE_SCOPES.gmailReadonly)) return { keep: false, reason: "not_granted" };
+  try {
+    const c = cfg ?? googleCapConfig();
+    if (!c.gmailReadEnabled) return { keep: false, reason: "disabled" };
+    if (await db.hasGoogleScopeGrant(googleAccountHash(input.accountEmail), [...CAP_LEDGER_SCOPES])) return { keep: true, reason: "already_counted" };
+    if (!hasScope(input.requested, GOOGLE_SCOPES.gmailReadonly)) return { keep: false, reason: "not_requested" };
+    if (input.startReason === "already_counted" && (await countCapUsers(db)) >= c.cap) return { keep: false, reason: "cap_reached" };
+    return { keep: true, reason: "requested" };
+  } catch (e) {
+    console.error("[google:user-cap] gmail.readonly keep check failed — not kept:", (e as Error).message);
+    return { keep: false, reason: "error" };
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -115,6 +152,11 @@ export async function recordGoogleGrants(
   const recorded: string[] = [];
   for (const scope of scopes) if (await db.recordGoogleScopeGrant({ account_hash: hash, scope, user_id: input.userId })) recorded.push(scope);
   const count = await countCapUsers(db);
+  return { recorded, count, alerts: await raiseCapAlerts(db, count, cfg, { ...deps, userId: input.userId }) };
+}
+
+/** Raises each alert level `count` reached that was never raised before (ops flag, log, audit, operator email). */
+async function raiseCapAlerts(db: Db, count: number, cfg: GoogleCapConfig, deps: { notify?: CapNotifier; now?: Date; userId?: string | null }): Promise<number[]> {
   const alerts: number[] = [];
   for (const level of alertLevels(cfg.cap)) {
     if (count < level) continue;
@@ -123,10 +165,40 @@ export async function recordGoogleGrants(
     alerts.push(level);
     const alert: CapAlert = { level, count, cap: cfg.cap, sensitiveVerified: cfg.sensitiveVerified };
     console.warn(`[google:user-cap] ${count}/${cfg.cap} Google accounts counted toward the unverified-app cap (alert level ${level}).`);
-    await db.addAudit({ user_id: input.userId, action: "ops.google_user_cap", target: `level:${level}`, result: `count:${count}/${cfg.cap}` }).catch(() => undefined);
+    await db.addAudit({ user_id: deps.userId ?? null, action: "ops.google_user_cap", target: `level:${level}`, result: `count:${count}/${cfg.cap}` }).catch(() => undefined);
     await (deps.notify ?? emailOperator)(alert).catch((e) => console.error("[google:user-cap] operator email failed:", (e as Error).message));
   }
-  return { recorded, count, alerts };
+  return alerts;
+}
+
+/**
+ * The alert check without a new grant — so a count that crossed 80 / the cap some other way (the 0008 backfill,
+ * rows added by hand) alerts right away instead of at the next successful Google connect. Run by the job worker
+ * (app/api/jobs/run) at most once an hour per instance; idempotent (each level once ever).
+ */
+export async function checkGoogleUserCapAlerts(db: Db, deps: { cfg?: GoogleCapConfig; notify?: CapNotifier; now?: Date } = {}): Promise<{ count: number; alerts: number[] }> {
+  const cfg = deps.cfg ?? googleCapConfig();
+  const count = await countCapUsers(db);
+  return { count, alerts: await raiseCapAlerts(db, count, cfg, deps) };
+}
+
+const CAP_CHECK_EVERY_MS = 60 * 60_000;
+let lastCapCheck = 0;
+
+/** checkGoogleUserCapAlerts at most once per CAP_CHECK_EVERY_MS in this process; never throws. */
+export async function maybeCheckGoogleUserCapAlerts(db: Db, now: Date = new Date()): Promise<void> {
+  if (lastCapCheck && now.getTime() - lastCapCheck < CAP_CHECK_EVERY_MS) return;
+  lastCapCheck = now.getTime();
+  try {
+    await checkGoogleUserCapAlerts(db, { now });
+  } catch (e) {
+    console.error("[google:user-cap] periodic alert check failed:", (e as Error).message);
+  }
+}
+
+/** Tests: forget the last periodic check. */
+export function resetGoogleUserCapCheckForTests(): void {
+  lastCapCheck = 0;
 }
 
 export function alertLevels(cap: number): number[] {
@@ -174,15 +246,15 @@ export function unverifiedScreenExpected(cfg: Pick<GoogleCapConfig, "realGoogle"
   return cfg.realGoogle && (requestsGmailRead || !cfg.sensitiveVerified);
 }
 
-/**
- * For a chat message carrying a Google connect link: will the consent behind it show the unverified-app screen?
- * Mirrors the start route (gmail.readonly is added while the account may still get it). Never throws.
- */
 /** "\n<heads-up line>" to append to a chat message carrying a connect link for `provider`, or "". Never throws. */
 export async function connectHeadsUpSuffix(db: Db, connections: ConnectionRow[], provider: ConnectionProvider): Promise<string> {
   return provider === "google" && (await googleConnectShowsUnverified(db, connections)) ? `\n${gcopy["g.unverified_heads_up"]()}` : "";
 }
 
+/**
+ * For a chat message carrying a Google connect link: will the consent behind it show the unverified-app screen?
+ * Mirrors the start route (gmail.readonly is added while the account may still get it). Never throws.
+ */
 export async function googleConnectShowsUnverified(db: Db, connections: ConnectionRow[], cfg?: GoogleCapConfig): Promise<boolean> {
   try {
     const c = cfg ?? googleCapConfig();

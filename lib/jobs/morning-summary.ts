@@ -10,6 +10,7 @@
  * migration 0005) and by `scheduleMorningSummary()` here (after each run, and when the time changes).
  * The job re-checks everything at run time, so stale jobs (time changed, turned off) are harmless.
  */
+import { oneLineUntrusted } from "@/lib/ai/untrusted";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
 import type { GoogleClient, GoogleEvent } from "@/lib/google/client";
@@ -119,7 +120,15 @@ const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.atten
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
 const byStart = (a: DayEvent, b: DayEvent) => (a.allDay === b.allDay ? (a.allDay ? 0 : a.start.slice(11, 16).localeCompare(b.start.slice(11, 16))) : a.allDay ? -1 : 1);
 const meetingLine = (e: DayEvent) => (e.allDay ? `• כל היום — ${e.title || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.title || "(ללא כותרת)"}`);
-const emailLine = (m: Pick<MailLike, "from" | "subject">) => `• ${m.from?.name || m.from?.address || "?"} — ${m.subject || "(ללא נושא)"}`;
+/**
+ * Sender and subject come from outside (any sender, RFC 2047 can encode newlines) and land in the assistant's own
+ * message: one sanitized line each, capped — never extra lines that look like a section of the summary.
+ */
+const emailLine = (m: Pick<MailLike, "from" | "subject">) => {
+  const who = oneLineUntrusted(m.from?.name || m.from?.address || "", 60) || "?";
+  const subject = oneLineUntrusted(m.subject || "", 120) || "(ללא נושא)";
+  return `• ${who} — ${subject}`;
+};
 const capped = (lines: string[], max: number) => (lines.length > max ? [...lines.slice(0, max), `• ועוד ${lines.length - max}`] : lines);
 
 export interface MorningSummary {

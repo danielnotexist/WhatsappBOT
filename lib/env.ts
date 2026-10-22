@@ -60,7 +60,8 @@ export const serverSchema = z.object({
   GOOGLE_CLIENT_SECRET: nonEmpty,
   /**
    * קריאת Gmail (gmail.readonly, scope מוגבל) בלי CASA — ל-100 המשתמשים הראשונים של אפליקציה לא מאומתת.
-   * ריק = פעיל כש-GOOGLE_CLIENT_ID מוגדר (lib/google/oauth.ts gmailReadEnabled). "false" מכבה. ראו docs/google-setup.md §6.
+   * ריק = פעיל כש-GOOGLE_CLIENT_ID מוגדר (lib/google/oauth.ts gmailReadEnabled). "false" = מתג כיבוי לכולם: לא מבקשים,
+   * לא שומרים מאישור חדש, וגם מי שכבר אישר מפסיק לקרוא (כלי gmail_*, סיכום הבוקר). ראו docs/google-setup.md §6.
    */
   GOOGLE_GMAIL_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().optional()),
   /** תקרת המשתמשים (חשבונות Google שונים שאישרו אי-פעם scope לא מאומת). ברירת מחדל 95 — מרווח מתחת ל-100 של Google. */

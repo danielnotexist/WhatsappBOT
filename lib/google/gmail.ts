@@ -89,6 +89,21 @@ export function decodeMimeWords(value: string): string {
   });
 }
 
+const oneLine = (s: string) =>
+  s
+    .replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * A decoded header value as one line: RFC 2047 can carry CR/LF (`=0A` in a Q-word) and other controls, which would
+ * let a sender add fake lines wherever the subject or name is printed (e.g. the morning summary). Whitespace runs
+ * (newlines included) become one space; other C0/C1 controls are dropped.
+ */
+export function headerText(value: string): string {
+  return oneLine(decodeMimeWords(value));
+}
+
 export function decodeBytes(bytes: Uint8Array, charset = "utf-8"): string {
   try {
     return new TextDecoder(charset.trim().toLowerCase() || "utf-8").decode(bytes);
@@ -127,7 +142,7 @@ export function parseAddressList(value: string | null | undefined): GmailAddress
   }
   parts.push(cur);
   return parts
-    .map((p) => p.trim())
+    .map(oneLine)
     .filter(Boolean)
     .map((p) => {
       const m = p.match(/^(.*?)\s*<([^<>]+)>\s*$/);
@@ -194,31 +209,33 @@ export class GmailReader {
     const msg = mapMessage(raw);
     const all: RawPart[] = [];
     walk(raw.payload, (p) => all.push(p));
-    const attachments: GmailAttachmentInfo[] = all.filter((p) => isAttachment(p) && p.filename).map((p) => ({ filename: decodeMimeWords(p.filename!), mimeType: p.mimeType ?? "application/octet-stream", size: p.body?.size ?? 0 }));
+    const attachments: GmailAttachmentInfo[] = all.filter((p) => isAttachment(p) && p.filename).map((p) => ({ filename: headerText(p.filename!), mimeType: p.mimeType ?? "application/octet-stream", size: p.body?.size ?? 0 }));
     const inline = all.filter((p) => !isAttachment(p));
     const plain = inline.find((p) => p.mimeType === "text/plain") ?? null;
     const html = inline.find((p) => p.mimeType === "text/html") ?? null;
     const part = plain ?? html;
     let text = "";
+    // the body part exists but was not fetched (larger than maxBodyPartBytes): the text we hand over is incomplete
+    let skipped = false;
     if (part) {
-      const bytes = await this.partBytes(raw.id, part);
-      const decoded = bytes ? decodeBytes(bytes, charsetOf(part)) : "";
+      const got = await this.partBytes(raw.id, part);
+      skipped = got.skipped;
+      const decoded = got.bytes ? decodeBytes(got.bytes, charsetOf(part)) : "";
       text = part === html ? htmlToText(decoded.slice(0, GMAIL_LIMITS.maxHtmlChars)) : decoded.replace(/\r\n?/g, "\n").trim();
     } else if (!raw.payload?.parts?.length && raw.payload?.body?.data) {
       text = decodeBytes(b64url(raw.payload.body.data)).trim();
     }
     const max = opts.maxBodyChars ?? GMAIL_LIMITS.maxBodyChars;
-    return { ...msg, attachments, hasAttachments: attachments.length > 0, bodyText: text.slice(0, max), bodyTruncated: text.length > max };
+    return { ...msg, attachments, hasAttachments: attachments.length > 0, bodyText: text.slice(0, max), bodyTruncated: skipped || text.length > max };
   }
 
-  /** A body part's bytes: inline `data`, or (large parts) the attachments endpoint up to maxBodyPartBytes. */
-  private async partBytes(messageId: string, part: RawPart): Promise<Uint8Array | null> {
-    if (part.body?.data) return b64url(part.body.data);
-    if (part.body?.attachmentId && (part.body.size ?? 0) <= GMAIL_LIMITS.maxBodyPartBytes) {
-      const a = await this.g.json<{ data?: string }>("GET", this.url(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`));
-      return a.data ? b64url(a.data) : null;
-    }
-    return null;
+  /** A body part's bytes: inline `data`, or (large parts) the attachments endpoint up to maxBodyPartBytes; larger → skipped. */
+  private async partBytes(messageId: string, part: RawPart): Promise<{ bytes: Uint8Array | null; skipped: boolean }> {
+    if (part.body?.data) return { bytes: b64url(part.body.data), skipped: false };
+    if (!part.body?.attachmentId) return { bytes: null, skipped: false };
+    if ((part.body.size ?? 0) > GMAIL_LIMITS.maxBodyPartBytes) return { bytes: null, skipped: true };
+    const a = await this.g.json<{ data?: string }>("GET", this.url(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(part.body.attachmentId)}`));
+    return { bytes: a.data ? b64url(a.data) : null, skipped: false };
   }
 
   /** Search (Gmail `q`) → metadata of each hit, newest first. Empty query = the inbox. */
@@ -283,7 +300,7 @@ function mapMessage(r: RawMessage): GmailMessage {
     id: r.id,
     threadId: r.threadId ?? r.id,
     labelIds: labels,
-    subject: decodeMimeWords(header(h, "Subject") ?? "").trim(),
+    subject: headerText(header(h, "Subject") ?? ""),
     from: parseAddressList(header(h, "From"))[0] ?? null,
     to: parseAddressList(header(h, "To")),
     cc: parseAddressList(header(h, "Cc")),

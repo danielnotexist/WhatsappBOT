@@ -236,12 +236,29 @@ export function googleOAuthConfigFromEnv(fetchImpl?: typeof fetch): GoogleOAuthC
 }
 
 /**
- * Feature flag for the restricted Gmail read scope (owner decision 21.10.2026: the first users without CASA, under
- * Google's 100-user cap for unverified apps — lib/google/user-cap.ts, docs/google-setup.md §6).
+ * Feature flag (and kill switch) for the restricted Gmail read scope (owner decision 21.10.2026: the first users
+ * without CASA, under Google's 100-user cap for unverified apps — lib/google/user-cap.ts, docs/google-setup.md §6).
+ * Off means off for everyone: gmail.readonly is not requested, not kept from a consent, the gmail_* read tools are
+ * not offered and the morning summary has no Gmail part — also for connections that granted it earlier. Their grant
+ * stays at Google, so turning the flag back on restores reading without a new consent (a connection that reconnected
+ * while off lost the scope in the callback and is asked once more — no new cap slot, the account is counted).
  * Explicit `true`/`false` wins; unset/empty → on when GOOGLE_CLIENT_ID is set (a real Google project), off otherwise.
  * Anything else → Hebrew EnvError.
  */
 export function gmailReadEnabled(source: Record<string, string | undefined> = process.env): boolean {
   const parsed = requireEnv(["GOOGLE_GMAIL_READ_ENABLED"], source);
   return parsed.GOOGLE_GMAIL_READ_ENABLED ?? Boolean(source.GOOGLE_CLIENT_ID?.trim());
+}
+
+/**
+ * gmailReadEnabled() for the places that USE an existing grant (chat tools, morning summary): a bad value must not
+ * break the conversation or the job, so it logs the Hebrew EnvError and fails closed (no Gmail reading).
+ */
+export function gmailReadActive(source: Record<string, string | undefined> = process.env): boolean {
+  try {
+    return gmailReadEnabled(source);
+  } catch (e) {
+    console.error(`[google] Gmail reading is off: ${(e as Error).message}`);
+    return false;
+  }
 }

@@ -1,5 +1,5 @@
 import type { Tool } from "@/lib/ai/tools";
-import { UNTRUSTED_MAIL_NOTE, sanitizeUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
+import { UNTRUSTED_MAIL_NOTE, oneLineUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
 import { gcopy } from "@/lib/copy/bot-google";
 import type { Db } from "@/lib/db/types";
 import { emailsAwaitingReply } from "@/lib/jobs/awaiting-reply";
@@ -13,7 +13,8 @@ import { gmailReadAccess, googleCapConfig, unverifiedScreenExpected } from "./us
 /**
  * Gmail read tools (gmail.readonly) for the strong model — the Microsoft mail tools (lib/ms/tools.ts:
  * search_emails / get_email) with the gmail_ prefix, plus thread and "awaiting a reply" views. Read-only: replies
- * still go through gmail_draft_email → approval button. Every piece of mailbox text is wrapped as <data>.
+ * still go through gmail_draft_email → approval button. Bodies and previews are wrapped as <data>; header fields
+ * (subject, sender name and address, file names) are sanitized single lines — UNTRUSTED_MAIL_NOTE covers both.
  */
 export interface GmailToolDeps {
   google: () => Promise<GoogleClient>;
@@ -23,8 +24,8 @@ export interface GmailToolDeps {
 }
 
 const str = (description: string) => ({ type: "string", description });
-const addr = (a: GmailAddress | null) => (a ? (a.name ? `${sanitizeUntrusted(a.name)} <${a.address}>` : a.address) : "");
-const clean = (s: string, max: number) => sanitizeUntrusted(s).replace(/\s+/g, " ").trim().slice(0, max);
+const clean = oneLineUntrusted;
+const addr = (a: GmailAddress | null) => (a ? (a.name ? `${clean(a.name, 120)} <${clean(a.address, 200)}>` : clean(a.address, 200)) : "");
 
 function localTime(iso: string, tz: string): string {
   const t = Date.parse(iso);
@@ -79,10 +80,12 @@ export function gmailReadTools(deps: GmailToolDeps): Tool[] {
           const m = await r.getMessage(String(input.id ?? ""));
           return {
             ...compact(m),
-            to: m.to.map((a) => a.address),
-            cc: m.cc.map((a) => a.address),
-            attachment_files: (m.attachments ?? []).map((a) => ({ name: clean(a.filename, 120), type: a.mimeType, size_kb: Math.ceil(a.size / 1024) })),
-            body: wrapUntrusted(m.bodyText ?? m.snippet, { source: "gmail", id: m.id }),
+            to: m.to.map((a) => clean(a.address, 200)),
+            cc: m.cc.map((a) => clean(a.address, 200)),
+            attachment_files: (m.attachments ?? []).map((a) => ({ name: clean(a.filename, 120), type: clean(a.mimeType, 100), size_kb: Math.ceil(a.size / 1024) })),
+            // no body text (the part was too large to fetch, or no text part) → Gmail's preview, marked as such
+            body: wrapUntrusted(m.bodyText || m.snippet, { source: "gmail", id: m.id }),
+            ...(m.bodyText ? {} : { body_is_preview: true }),
             truncated: Boolean(m.bodyTruncated),
             note: UNTRUSTED_MAIL_NOTE,
           };

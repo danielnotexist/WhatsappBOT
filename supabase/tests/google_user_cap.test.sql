@@ -77,6 +77,52 @@ select pg_temp.check('user deleted → grants stay, user_id null',
 select pg_temp.check('user deleted → still counted',
   public.google_scope_account_count(array['https://www.googleapis.com/auth/gmail.readonly']) = 1);
 
+-- -----------------------------------------------------------------------------
+-- the 0008 backfill against real connection rows (google_scope_grants_backfill(), which the migration runs once):
+-- one account connected by two users in different case, one of them revoked; plus an unrelated non-Google row
+-- -----------------------------------------------------------------------------
+-- seed.sql runs after the migrations, so its Google connections are not in the ledger yet: take them in first
+select public.google_scope_grants_backfill();
+insert into public.users (id, email) values
+  ('73333333-3333-4333-8333-333333333333', 'bf-a@example.com'),
+  ('74444444-4444-4444-8444-444444444444', 'bf-b@example.com');
+insert into public.connections (user_id, provider, account_email, scopes, status, created_at) values
+  ('73333333-3333-4333-8333-333333333333', 'google', 'Backfill.Owner@Gmail.com',
+   array['openid', 'https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/gmail.readonly'],
+   'revoked', now() - interval '20 days'),
+  ('74444444-4444-4444-8444-444444444444', 'google', 'backfill.owner@gmail.com',
+   array['https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/gmail.send'],
+   'active', now() - interval '2 days'),
+  ('74444444-4444-4444-8444-444444444444', 'microsoft', 'backfill.owner@gmail.com',
+   array['https://www.googleapis.com/auth/gmail.readonly'], 'active', now());
+
+create temp table bf_before as select count(*) as n from public.google_scope_grants;
+select pg_temp.check('backfill: 3 rows added (readonly + calendar.events + gmail.send), drive.file / openid / microsoft skipped',
+  public.google_scope_grants_backfill() = 3);
+select pg_temp.check('backfill: one distinct account for both cases of the address (same hash as TypeScript)',
+  (select count(distinct account_hash) from public.google_scope_grants
+    where account_hash = encode(sha256(convert_to('backfill.owner@gmail.com', 'UTF8')), 'hex')) = 1
+  and (select count(*) from public.google_scope_grants
+    where account_hash = encode(sha256(convert_to('backfill.owner@gmail.com', 'UTF8')), 'hex')) = 3);
+select pg_temp.check('backfill: the revoked connection counts too (gmail.readonly from it, earliest grant time)',
+  (select user_id from public.google_scope_grants
+    where account_hash = encode(sha256(convert_to('backfill.owner@gmail.com', 'UTF8')), 'hex')
+      and scope = 'https://www.googleapis.com/auth/gmail.readonly') = '73333333-3333-4333-8333-333333333333'
+  and (select first_granted_at < now() - interval '19 days' from public.google_scope_grants
+    where account_hash = encode(sha256(convert_to('backfill.owner@gmail.com', 'UTF8')), 'hex')
+      and scope = 'https://www.googleapis.com/auth/calendar.events'));
+select pg_temp.check('backfill: idempotent — a second run adds nothing',
+  public.google_scope_grants_backfill() = 0
+  and (select count(*) from public.google_scope_grants) = (select n from bf_before) + 3);
+select pg_temp.check('backfill function: not callable by anon / authenticated',
+  not has_function_privilege('authenticated', 'public.google_scope_grants_backfill()', 'execute')
+  and not has_function_privilege('anon', 'public.google_scope_grants_backfill()', 'execute'));
+
+-- a disconnect keeps the link to the account; only deleting the account clears it
+update public.connections set status = 'revoked', revoked_at = now() where user_id = '74444444-4444-4444-8444-444444444444';
+select pg_temp.check('disconnect → user_id stays (gmail.send came from this user''s connection)',
+  (select count(*) from public.google_scope_grants where user_id = '74444444-4444-4444-8444-444444444444') = 1);
+
 -- ops_flags: set once
 insert into public.ops_flags (key, value) values ('google_user_cap:80', '{"count": 80, "cap": 95}');
 select pg_temp.expect_state('ops flag is set only once', '23505',
