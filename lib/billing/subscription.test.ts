@@ -4,7 +4,7 @@ import { MemoryDb } from "@/lib/db/memory";
 import { MockHypGateway } from "@/lib/hyp/client";
 import { createPayLinkToken, verifyPayLinkToken } from "./pay-link";
 import { addOneMonth } from "./plans";
-import { activateSubscription, chargeSubscription } from "./subscription";
+import { activateSubscription, chargeSubscription, resumeAfterCardUpdate, saveCardToken, scheduleCharge } from "./subscription";
 
 describe("billing", () => {
   beforeEach(() => vi.stubEnv("TOKEN_ENC_KEY", randomBytes(32).toString("base64")));
@@ -96,6 +96,62 @@ describe("billing", () => {
     expect(await chargeSubscription(db, hyp, user, new Date("2026-11-26T10:00:00Z"))).toMatchObject({ kind: "paused" });
   });
 
+  it("a card updated after a card failure is charged on the next attempt day instead of a pause on day 7", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("dana@example.com");
+    const hyp = new MockHypGateway("https://app.example.co.il");
+    await activateSubscription(db, user, { plan: "basic", transId: "T1", amountIls: 99, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, new Date("2026-10-20T10:00:00Z"));
+    hyp.chargeScript = ["997"]; // day 1 (20.11): the saved card is unusable
+    expect(await chargeSubscription(db, hyp, user, new Date("2026-11-20T10:00:00Z"))).toMatchObject({ kind: "card_invalid" });
+    // day 2: a new card → the attempt of day 3 runs with it
+    await saveCardToken(db, user.id, "9999999999999991111", "3112");
+    expect(await resumeAfterCardUpdate(db, user.id, new Date("2026-11-21T12:00:00Z"))).toEqual(new Date("2026-11-22T10:00:00Z"));
+    expect((await db.getSubscription(user.id))!.charge_failures).toBe(1);
+    expect(db.jobs.filter((j) => j.kind === "charge" && j.status === "queued").map((j) => j.run_at)).toEqual(["2026-11-22T10:00:00.000Z"]);
+    expect(await chargeSubscription(db, hyp, user, new Date("2026-11-22T10:00:00Z"))).toMatchObject({ kind: "charged", amountIls: 99 });
+    expect((hyp.calls.filter((c) => c.method === "chargeToken").at(-1)!.args as { token: string }).token).toBe("9999999999999991111");
+    expect(await db.getSubscription(user.id)).toMatchObject({ status: "active", charge_failures: 0, next_charge_at: "2026-12-20T10:00:00.000Z" });
+    // not waiting for a card → nothing to resume
+    expect(await resumeAfterCardUpdate(db, user.id, new Date("2026-11-23T10:00:00Z"))).toBeNull();
+  });
+
+  it("a card updated late in the wait still gets one attempt (day 7) before any pause", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("dana@example.com");
+    const hyp = new MockHypGateway("https://app.example.co.il");
+    await activateSubscription(db, user, { plan: "basic", transId: "T1", amountIls: 99, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, new Date("2026-10-20T10:00:00Z"));
+    hyp.chargeScript = ["997", "4"];
+    await chargeSubscription(db, hyp, user, new Date("2026-11-20T10:00:00Z"));
+    expect(await resumeAfterCardUpdate(db, user.id, new Date("2026-11-25T12:00:00Z"))).toEqual(new Date("2026-11-26T10:00:00Z")); // day 6 → day 7
+    expect((await db.getSubscription(user.id))!.charge_failures).toBe(3);
+    expect(await chargeSubscription(db, hyp, user, new Date("2026-11-26T10:00:00Z"))).toMatchObject({ kind: "paused" }); // tried, declined → paused
+    expect(hyp.calls.filter((c) => c.method === "chargeToken")).toHaveLength(2);
+  });
+
+  it("HYP approving a monthly charge without a transaction id leaves the lock unknown and changes nothing", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("dana@example.com");
+    const hyp = new MockHypGateway("https://app.example.co.il");
+    await activateSubscription(db, user, { plan: "basic", transId: "T1", amountIls: 99, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, new Date("2026-10-20T10:00:00Z"));
+    hyp.chargeScript = [{ ok: true, transId: null, ccode: "0", acode: null, response: { CCode: "0", Id: "0" } }];
+    await expect(chargeSubscription(db, hyp, user, new Date("2026-11-20T10:00:00Z"))).rejects.toThrow("without a transaction id");
+    expect(db.billingApprovals.find((a) => a.kind === "renewal")).toMatchObject({ status: "unknown", error: "approved without a transaction id" });
+    expect(await db.getSubscription(user.id)).toMatchObject({ charge_failures: 0, next_charge_at: "2026-11-20T10:00:00.000Z" }); // no failure counted, no retry scheduled
+    expect(await chargeSubscription(db, hyp, user, new Date("2026-11-20T11:00:00Z"))).toMatchObject({ kind: "skipped", reason: "another charge is open" });
+    expect(hyp.calls.filter((c) => c.method === "chargeToken")).toHaveLength(1);
+  });
+
+  it("scheduleCharge never leaves the subscription without a job when its key was used before", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("dana@example.com");
+    const at = new Date("2026-11-20T10:00:00Z");
+    await scheduleCharge(db, user.id, at, "resume");
+    await scheduleCharge(db, user.id, at, "resume"); // the same key again (cancel → resume twice)
+    await scheduleCharge(db, user.id, at); // and the plain key twice
+    await scheduleCharge(db, user.id, at);
+    expect(db.jobs.filter((j) => j.kind === "charge" && j.status === "queued").map((j) => j.run_at)).toEqual(["2026-11-20T10:00:00.000Z"]);
+  });
+
   it("a configuration error (901) is not the customer's failure; no answer from HYP leaves the lock unknown", async () => {
     const db = new MemoryDb();
     const user = await db.createUser("dana@example.com");
@@ -118,7 +174,11 @@ describe("billing", () => {
     const hyp = new MockHypGateway("https://app.example.co.il");
     await activateSubscription(db, user, { plan: "pro", transId: "T1", amountIls: 299, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, new Date("2026-10-20T10:00:00Z"));
     await db.upsertSubscription(user.id, { scheduled_plan: "basic" });
+    db.now = () => new Date("2026-11-20T10:00:00Z");
+    db.usage.push({ user_id: user.id, period_start: "2026-11-01", counted_messages: 100, free_remaining: 2900, plan_limit: 3000 });
     expect(await chargeSubscription(db, hyp, user, new Date("2026-11-20T10:00:00Z"))).toMatchObject({ kind: "charged", plan: "basic", amountIls: 99 });
     expect(await db.getSubscription(user.id)).toMatchObject({ plan: "basic", scheduled_plan: null });
+    // the month's quota follows the plan down at once (an upgrade raises it at once)
+    expect(db.usage.find((u) => u.user_id === user.id && u.period_start === "2026-11-01")).toMatchObject({ plan_limit: 750, free_remaining: 650 });
   });
 });

@@ -3,7 +3,7 @@
 -- (0006 שמור בכוונה למיגרציית הסוכנים שנבנית במקביל.)
 --
 --   * billing_approvals — הצעה שנשלחה בוואטסאפ עם כפתורים (שדרוג / ניסיון חוזר / חידוש / ביטול /
---     מעבר לבסיסי / המשך מנוי). כלל קשיח: חיוב רק מלחיצה על כפתור, מהמספר המקושר שאליו נשלחה
+--     מעבר לבסיסי / המשך מנוי / ביטול מעבר מתוכנן לבסיסי — keep_pro). כלל קשיח: חיוב רק מלחיצה על כפתור, מהמספר המקושר שאליו נשלחה
 --     ההצעה, תוך 10 דקות. ה-10 דקות אכוף כאן ב-CHECK (expires_at <= created_at + 10 min).
 --   * claim_billing_approval() — pending → processing באופן אטומי (בדיקת משתמש, מספר, תוקף).
 --     לחיצה כפולה / webhook כפול / שתי לחיצות במקביל → רק אחת מצליחה → חיוב אחד לכל אישור.
@@ -13,9 +13,10 @@
 --   * payments.approval_id — לכל אישור לכל היותר תשלום מוצלח אחד.
 --   * subscriptions.scheduled_plan — מעבר מסלול שנכנס לתוקף בחיוב הבא (פרו → בסיסי).
 --   * raise_plan_limit() — שדרוג באמצע החודש מגדיל מיד את מכסת ההודעות של החודש הנוכחי.
+--   * lower_plan_limit() — מעבר לבסיסי שנכנס לתוקף בחיוב החודשי מקטין מיד את מכסת החודש הנוכחי.
 -- =============================================================================
 
-create type public.billing_approval_kind   as enum ('upgrade', 'retry', 'renew', 'resume', 'cancel', 'downgrade', 'renewal');
+create type public.billing_approval_kind   as enum ('upgrade', 'retry', 'renew', 'resume', 'cancel', 'downgrade', 'keep_pro', 'renewal');
 create type public.billing_approval_status as enum ('pending', 'processing', 'succeeded', 'failed', 'declined', 'expired', 'unknown');
 
 -- -----------------------------------------------------------------------------
@@ -166,7 +167,40 @@ $$;
 comment on function public.raise_plan_limit(uuid, integer) is
   'מגדיל את המכסה של החודש הנוכחי (plan_limit והיתרה) למסלול החדש. null = אין שורה לחודש (count_trial_message ייצור אותה במכסה החדשה) או שהמכסה כבר גבוהה.';
 
+-- -----------------------------------------------------------------------------
+-- lower_plan_limit — מעבר לבסיסי שנכנס לתוקף: המכסה של החודש הנוכחי יורדת מיד
+-- -----------------------------------------------------------------------------
+create or replace function public.lower_plan_limit(p_user_id uuid, p_new_limit integer)
+returns integer
+language plpgsql
+set search_path = ''
+as $$
+declare
+  v_tz        text;
+  v_remaining integer;
+begin
+  select u.timezone into v_tz from public.users u where u.id = p_user_id and u.deleted_at is null;
+  if not found then
+    return null;
+  end if;
+
+  update public.usage u
+     set free_remaining = greatest(0, u.free_remaining - (u.plan_limit - p_new_limit)),
+         plan_limit     = p_new_limit
+   where u.user_id      = p_user_id
+     and u.period_start = date_trunc('month', now() at time zone v_tz)::date
+     and u.plan_limit   > p_new_limit
+  returning u.free_remaining into v_remaining;
+
+  return v_remaining;
+end;
+$$;
+comment on function public.lower_plan_limit(uuid, integer) is
+  'מקטין את המכסה של החודש הנוכחי למסלול החדש (מעבר פרו → בסיסי בחיוב החודשי); היתרה יורדת באותו הפרש ולא מתחת ל-0. null = אין שורה לחודש או שהמכסה כבר נמוכה.';
+
 revoke execute on function public.claim_billing_approval(uuid, uuid, text, text) from public, anon, authenticated;
 revoke execute on function public.raise_plan_limit(uuid, integer)                from public, anon, authenticated;
+revoke execute on function public.lower_plan_limit(uuid, integer)                from public, anon, authenticated;
 grant  execute on function public.claim_billing_approval(uuid, uuid, text, text) to service_role;
 grant  execute on function public.raise_plan_limit(uuid, integer)                to service_role;
+grant  execute on function public.lower_plan_limit(uuid, integer)                to service_role;

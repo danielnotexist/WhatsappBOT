@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { BRAND } from "@/lib/brand";
 import { OFFER_LABELS, billButtons, billCopy } from "@/lib/copy/bot-billing";
 import { classifyHypFailure, tokefExpired, tokenLast4 } from "@/lib/hyp/codes";
 import { formatHeshDesc } from "@/lib/hyp/sign";
@@ -20,7 +21,8 @@ describe("billing commands typed in the chat", () => {
     ["תשלחי לי את הקבלה בבקשה", "invoice"],
     ["איפה הקבלה?", "invoice"],
     ["קבלה על התשלום", "invoice"],
-    ["עלזה, קבלה בבקשה", "invoice"],
+    [`${BRAND.name}, קבלה בבקשה`, "invoice"],
+    [`היי ${BRAND.name} שדרוג`, "upgrade"],
     // "חשבונית" is accepted as a synonym
     ["חשבונית", "invoice"],
     ["החשבוניות האחרונות", "invoice"],
@@ -134,13 +136,19 @@ describe("billing copy", () => {
     expect([...documented].filter((id) => !(id! in billCopy))).toEqual([]);
   });
 
+  it("the neutral-phrasing check catches slash forms (Hebrew letters are not \\w, so \\b never matched them)", () => {
+    const slashForm = /\/[יהת](?![א-ת])/u;
+    for (const t of ["שלח/י לי", "שלח/י", "תרצה/י?", "מוכן/ה.", "את/ה"]) expect(t).toMatch(slashForm);
+    for (const t of ["https://x.co/pay/abc", "ו/או", "1/2"]) expect(t).not.toMatch(slashForm);
+  });
+
   it("neutral phrasing, no placeholders left, WhatsApp button limits", () => {
     const sample = { amount: "99", vat: "15.10", daysLeft: 3, periodEnd: "יום ג׳ 10.11", nextAmount: "299", last4: "4580", plan: "בסיסי", nextDate: "יום ג׳ 10.11", nextTry: "יום א׳ 22.11", lastTry: "יום ה׳ 26.11", until: "יום ה׳ 26.11", code: "4", resendHint: true, date: "20.10.2026", link: "https://x" };
     for (const [id, fn] of Object.entries(billCopy)) {
       const f = fn as (...a: unknown[]) => string;
       const takesObject = /^\(o[,:)]|^o\s*=>/.test(f.toString());
       const text = id === "bill.invoice_list" ? f([{ date: "20.10.2026", amount: "99", desc: "מנוי", link: "https://x" }]) : takesObject ? f(sample) : f("x");
-      expect(text, id).not.toMatch(/\/[יה]\b/);
+      expect(text, id).not.toMatch(/\/[יהת](?![א-ת])/u);
       expect(text, id).not.toContain("undefined");
       expect(text, id).not.toMatch(/\{[a-z_]+\}/);
     }

@@ -648,6 +648,16 @@ export class MemoryDb implements Db {
     return row.free_remaining;
   }
 
+  /** Mirrors public.lower_plan_limit(). */
+  async lowerUsageLimit(userId: string, newLimit: number): Promise<number | null> {
+    const period = iso(this.now()).slice(0, 7) + "-01";
+    const row = this.usage.find((u) => u.user_id === userId && u.period_start === period);
+    if (!row || row.plan_limit <= newLimit) return null;
+    row.free_remaining = Math.max(0, row.free_remaining - (row.plan_limit - newLimit));
+    row.plan_limit = newLimit;
+    return row.free_remaining;
+  }
+
   // ---- test helpers ----
   seedConnection(userId: string, provider: ConnectionRow["provider"], accountEmail: string): ConnectionRow {
     const row: ConnectionRow = {

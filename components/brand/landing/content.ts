@@ -145,7 +145,7 @@ const vatPercent = Math.round(VAT_RATE * 100);
 
 export const PRICING = {
   trial: TRIAL_MESSAGES,
-  vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, חשבונית מס-קבלה במייל, ביטול בכל רגע מהאזור האישי.`,
+  vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
   plans: [
     {
       id: "basic" as const,

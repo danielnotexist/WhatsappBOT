@@ -10,7 +10,7 @@ import { formatIls, vatOf } from "./money";
 import { activePhone, deliver, isWindowOpen, sendInvoice } from "./notify";
 import { payLinkFor } from "./pay-link";
 import { PLANS, isPaidPlan, type PaidPlan } from "./plans";
-import { activateSubscription, chargeSubscription, saveCardToken, type ChargeOutcome } from "./subscription";
+import { activateSubscription, chargeSubscription, nextChargeRun, resumeAfterCardUpdate, saveCardToken, type ChargeOutcome } from "./subscription";
 import { createRetryApproval, dayLabel } from "./whatsapp";
 
 export type { BillingContext } from "./context";
@@ -65,7 +65,7 @@ export async function startCardUpdate(ctx: BillingContext, user: UserRow): Promi
 
 export type PaymentReturn =
   | { ok: true; userId: string; plan: PaidPlan; transId: string; firstTime: boolean; mode: "payment" | "card" }
-  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription"; userId?: string; message: string; mode?: "payment" | "card" };
+  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription" | "charged_not_checked"; userId?: string; message: string; mode?: "payment" | "card" };
 
 /**
  * The HYP success/error redirect (PLAN §4): VERIFY the whole query → parse Order → getToken → activate → notify in WhatsApp.
@@ -114,15 +114,25 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
 }
 
 /**
- * Card update (J2): VERIFY → CCode 600 (or 0) → getToken(allowFalse) → replace the token. Never charges: when a renewal
- * is overdue, WhatsApp gets the one-tap retry offer (amount + [חיוב עכשיו]) — the charge needs the press.
+ * Card update (J2): VERIFY → CCode 600 → getToken(allowFalse) → replace the token. Never charges: when a renewal is
+ * overdue, WhatsApp gets the one-tap retry offer (amount + [חיוב עכשיו] in the window; outside it the payment_failed /
+ * account_paused template with [ניסיון חוזר]) — the charge needs the press. A renewal that was waiting for a card
+ * update (a "card" failure) goes back to automatic attempts on the next attempt day, with the new card.
  */
 async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQuery: string, params: Record<string, string>): Promise<PaymentReturn> {
   const sub = await ctx.db.getSubscription(user.id);
   if (!sub || !isPaidPlan(sub.plan)) return { ok: false, reason: "no_subscription", userId: user.id, message: "אין מנוי פעיל לעדכון כרטיס.", mode: "card" };
   const verified = await ctx.hyp.verifyRedirect(redirectQuery);
   const transId = params.Id ?? "";
-  if (!verified.ok || !(params.CCode === "600" || params.CCode === "0")) {
+  if (verified.ok && params.CCode === "0") {
+    // The page is a J2 check (success = 600). CCode 0 is a real 1 ₪ charge: the terminal is not set up for J2. Nothing
+    // is saved; the operator refunds it by hand (no payments row and no receipt exist for it).
+    console.error(`[billing] card update ${transId} of user ${user.id} returned CCode 0 — a real 1 ₪ charge, not a J2 check. Refund it in the HYP portal and enable J2 on the terminal (docs/hyp-setup.md §1, §8)`);
+    await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: "charged_not_checked" });
+    await deliver(ctx, user, { text: billCopy["bill.card_update_charged"]() });
+    return { ok: false, reason: "charged_not_checked", userId: user.id, message: "הכרטיס לא עודכן בגלל תקלה בהגדרות התשלום אצלנו. אם הופיע חיוב של 1 ₪ — הוא יבוטל.", mode: "card" };
+  }
+  if (!verified.ok || params.CCode !== "600") {
     await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: verified.ok ? `declined:${params.CCode}` : "invalid_signature" });
     await deliver(ctx, user, { text: billCopy["bill.card_update_failed"](cardLinkFor(ctx.appUrl, user.id)) });
     return verified.ok
@@ -137,16 +147,27 @@ async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQu
     return { ok: false, reason: "token_failed", userId: user.id, message: "הכרטיס אומת אבל שמירתו נכשלה. הכרטיס הקודם נשאר — נטפל בזה.", mode: "card" };
   }
   await saveCardToken(ctx.db, user.id, token.token, token.tokef);
-  await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: "ok" });
+  // a renewal that waited for a new card: automatic attempts resume (otherwise day 7 would pause without trying it)
+  const resumedAt = await resumeAfterCardUpdate(ctx.db, user.id, ctx.now());
+  await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: resumedAt ? `ok:next_attempt=${resumedAt.toISOString()}` : "ok" });
 
   const text = billCopy["bill.card_updated"](tokenLast4(token.token) ?? "????");
-  const phone = await activePhone(ctx, user.id);
-  const windowOpen = phone ? await isWindowOpen(ctx, user.id) : false;
-  const overdue = sub.status === "past_due" || (sub.status === "active" && sub.charge_failures > 0);
-  const approval = phone && windowOpen && overdue ? await createRetryApproval(ctx, user, phone) : null;
+  const fresh = (await ctx.db.getSubscription(user.id)) ?? sub;
+  const overdue = fresh.status === "past_due" || (fresh.status === "active" && !fresh.cancelled_at && fresh.charge_failures > 0);
+  const phone = overdue ? await activePhone(ctx, user.id) : null;
+  const approval = phone ? await createRetryApproval(ctx, user, phone) : null;
   if (approval) {
-    const offer = billCopy["bill.retry_offer"]({ amount: formatIls(approval.amount_ils), vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? "") });
-    await deliver(ctx, user, { text: `${text}\n\n${offer}`, buttons: billButtons.offer(approval.id, "חיוב עכשיו") }, { phone: phone!, windowOpen });
+    const windowOpen = await isWindowOpen(ctx, user.id);
+    const amount = formatIls(approval.amount_ils);
+    const offer = billCopy["bill.retry_offer"]({ amount, vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? "") });
+    const cardToken = createCardLinkToken(user.id);
+    const nextTry = nextChargeRun(fresh, ctx.now());
+    // outside the window the user (who just left the HYP page) still gets [ניסיון חוזר]: the matching template
+    const template =
+      fresh.status === "past_due" || !nextTry
+        ? accountPausedTemplate({ amount, approvalId: approval.id, cardToken })
+        : paymentFailedTemplate({ amount, nextTry: dayLabel(nextTry), approvalId: approval.id, cardToken });
+    await deliver(ctx, user, { text: `${text}\n\n${offer}`, buttons: billButtons.offer(approval.id, "חיוב עכשיו"), template }, { phone: phone!, windowOpen });
   } else {
     await deliver(ctx, user, { text });
   }

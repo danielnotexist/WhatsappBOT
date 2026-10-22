@@ -7,7 +7,9 @@
  *   only a press of [approve] from that same number, by the account's owner, within 10 minutes (DB CHECK), claims it
  *   atomically (pending → processing). One approval → at most one HYP charge (claim + payments unique index), and
  *   never two open charges per user (unique index, shared with the monthly renewal). An expired press gets a fresh
- *   offer, not a charge. The amount charged is the amount that was shown.
+ *   offer, not a charge. The amount charged is the amount that was shown, and only for the billing cycle it was priced
+ *   for (a renewal in between makes the offer stale). The subscription is updated before the approval leaves
+ *   `processing`, so the per-user charge lock is held until the new state is visible to the next charge.
  */
 import { copy } from "@/lib/copy/bot";
 import { OFFER_LABELS, billButtons, billCopy } from "@/lib/copy/bot-billing";
@@ -107,7 +109,8 @@ function quoteFor(kind: OfferKind, st: SubState, now: Date, last4: string): Quot
     if (!(st.inGrace || st.paused) || !sub.next_charge_at) return null;
     const from = st.paused ? now : new Date(sub.next_charge_at);
     const to = addOneMonth(from);
-    return { plan, amountIls: PLANS[plan].priceIls, details: { item: renewalItem(plan, from, to), vat: vatOf(PLANS[plan].priceIls), period_end: to.toISOString(), last4 } };
+    // `due` + `paused`: the overdue cycle this offer settles — a press after it changed is stale
+    return { plan, amountIls: PLANS[plan].priceIls, details: { item: renewalItem(plan, from, to), vat: vatOf(PLANS[plan].priceIls), period_end: to.toISOString(), due: sub.next_charge_at, paused: st.paused, last4 } };
   }
   if (kind === "renew") {
     if (!(st.paused || (st.cancelled && st.periodOver))) return null;
@@ -183,16 +186,18 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
       }
       if (sub.plan === "pro") {
         if (sub.scheduled_plan === "basic") {
-          await ctx.db.upsertSubscription(user.id, { scheduled_plan: null });
-          await ctx.db.addAudit({ user_id: user.id, action: "subscription.downgrade_cleared", result: "ok" });
-          await reply(ctx, user, to, billCopy["bill.downgrade_cleared"]());
-        } else {
-          await reply(ctx, user, to, billCopy["bill.already_pro"]());
+          // staying on pro changes the next charge (299 instead of 99) — only from a press, like every change
+          const a = await createApproval(ctx, user, to, "keep_pro", "pro", 0, { period_end: sub.next_charge_at });
+          await reply(ctx, user, to, billCopy["bill.keep_pro_confirm"]({ periodEnd, amount: formatIls(PLANS.pro.priceIls) }), billButtons.offer(a.id, OFFER_LABELS.keep_pro.yes, OFFER_LABELS.keep_pro.no));
+          return a;
         }
+        await reply(ctx, user, to, billCopy["bill.already_pro"]());
         return null;
       }
       break;
     }
+    case "keep_pro":
+      return presentOffer(ctx, user, to, "upgrade", opts);
     case "retry":
     case "renew": {
       if (st.cancelled && !st.periodOver) return presentOffer(ctx, user, to, "resume");
@@ -295,7 +300,7 @@ export async function handleBillingButton(ctx: BillingContext, user: UserRow, fr
     const declined = await ctx.db.updateBillingApproval(a.id, { status: "declined" }, ["pending"]);
     await ctx.db.addAudit({ user_id: user.id, action: `billing.decline.${kind}`, target: a.id, approved_by_msg_id: waMessageId, result: declined ? "declined" : `noop:${a.status}` });
     if (!declined) await reply(ctx, user, from, billCopy["bill.approval_used"]());
-    else await reply(ctx, user, from, kind === "cancel" ? copy["bill.cancel_kept"]() : kind === "downgrade" ? billCopy["bill.downgrade_kept"]() : billCopy["bill.offer_declined"]());
+    else await reply(ctx, user, from, kind === "cancel" ? copy["bill.cancel_kept"]() : kind === "downgrade" ? billCopy["bill.downgrade_kept"]() : kind === "keep_pro" ? billCopy["bill.keep_pro_declined"]() : billCopy["bill.offer_declined"]());
     return;
   }
 
@@ -332,6 +337,33 @@ async function finish(ctx: BillingContext, a: BillingApprovalRow, patch: Partial
   await ctx.db.updateBillingApproval(a.id, patch, ["processing"]);
 }
 
+const sameInstant = (a: unknown, b: string | null | undefined): boolean => typeof a === "string" && typeof b === "string" && Date.parse(a) === Date.parse(b);
+
+/**
+ * Why a claimed charge approval no longer matches the subscription (null = charge it). An offer is priced for one
+ * billing cycle: an upgrade for the days left until `period_end`, a retry for the overdue cycle `due`. A renewal, a
+ * pause or a plan change since the offer makes it stale — the user asks again and gets a fresh quote.
+ */
+function chargeStaleReason(a: BillingApprovalRow, st: SubState, now: Date): string | null {
+  const sub = st.sub;
+  if (!sub) return "no subscription";
+  if (a.kind === "upgrade") {
+    if (sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0) return "not an active basic plan";
+    if (!sameInstant(a.details.period_end, sub.next_charge_at)) return "another billing cycle";
+    if (Date.parse(sub.next_charge_at!) <= now.getTime()) return "the billing cycle ended";
+    return null;
+  }
+  if (a.kind === "retry") {
+    if (!st.inGrace && !st.paused) return "nothing overdue";
+    if (!sameInstant(a.details.due, sub.next_charge_at) || a.details.paused !== st.paused) return "another billing cycle";
+    if (a.plan !== renewalPlan(sub)) return "the plan changed";
+    return null;
+  }
+  if (!st.paused && !(st.cancelled && st.periodOver)) return "nothing to renew";
+  if (a.plan !== renewalPlan(sub)) return "the plan changed";
+  return null;
+}
+
 async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a: BillingApprovalRow, waMessageId: string): Promise<void> {
   const now = ctx.now();
   const st = stateOf(await ctx.db.getSubscription(user.id), now);
@@ -362,11 +394,20 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     await reply(ctx, user, to, billCopy["bill.downgrade_scheduled"](periodEnd));
     return;
   }
+  if (a.kind === "keep_pro") {
+    if (!sub || sub.plan !== "pro" || sub.scheduled_plan !== "basic" || st.cancelled) return stale("no downgrade scheduled");
+    await ctx.db.upsertSubscription(user.id, { scheduled_plan: null });
+    await finish(ctx, a, { status: "succeeded" });
+    await audit("ok", "subscription.downgrade_cleared");
+    await reply(ctx, user, to, billCopy["bill.downgrade_cleared"]());
+    return;
+  }
   if (a.kind === "resume") {
     if (!sub || !st.cancelled || st.periodOver) return stale("not resumable");
     await ctx.db.upsertSubscription(user.id, { status: "active", cancelled_at: null });
     const run = nextChargeRun(sub, now);
-    if (run) await scheduleCharge(ctx.db, user.id, run, "resume");
+    // a key of its own per resume: cancel → resume → cancel → resume in one cycle must still leave a queued job
+    if (run) await scheduleCharge(ctx.db, user.id, run, `resume:${a.id}`);
     await finish(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.resume");
     await reply(ctx, user, to, billCopy["bill.resumed"]({ periodEnd, amount: formatIls(PLANS[renewalPlan(sub) ?? "basic"].priceIls) }));
@@ -374,18 +415,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
   }
 
   // ---- charges: upgrade / retry / renew ----
-  const staleReason =
-    a.kind === "upgrade"
-      ? !sub || sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0
-        ? "not an active basic plan"
-        : null
-      : a.kind === "retry"
-        ? !st.inGrace && !st.paused
-          ? "nothing overdue"
-          : null
-        : !st.paused && !(st.cancelled && st.periodOver)
-          ? "nothing to renew"
-          : null;
+  const staleReason = chargeStaleReason(a, st, now);
   if (staleReason || !sub) return stale(staleReason ?? "no subscription");
 
   const card = await savedCard(ctx, user.id);
@@ -430,6 +460,16 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     return;
   }
 
+  if (result.ok && !result.transId) {
+    // approved without a transaction id: it cannot be matched to a receipt or told apart from a decline — treat it as
+    // "unknown" (blocks further charges until reconciled), never as a decline that invites another charge
+    await finish(ctx, a, { status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
+    await audit("unknown:no_trans_id");
+    console.error(`[billing] ${a.kind} ${a.id}: HYP approved without a transaction id — reconcile manually`);
+    await reply(ctx, user, to, billCopy["bill.charge_unknown"]());
+    return;
+  }
+
   if (result.transId) {
     await ctx.db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: a.amount_ils, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: a.id });
   }
@@ -456,14 +496,14 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     return;
   }
 
-  // ---- success ----
-  await finish(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
+  // ---- success: the subscription first, then the approval leaves `processing` (that releases the charge lock) ----
   const amount = formatIls(a.amount_ils);
   let nextChargeAt: Date;
   if (a.kind === "upgrade") {
     nextChargeAt = new Date(sub.next_charge_at!);
     await ctx.db.upsertSubscription(user.id, { plan: "pro", scheduled_plan: null });
     await ctx.db.raiseUsageLimit(user.id, PLANS.pro.messages);
+    await finish(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
     await audit("ok", "subscription.upgrade");
     // the upgrade came from the 750 limit within the last day → the message that hit it was not handled
     const offerAt = typeof user.profile.limit_offer_at === "string" ? Date.parse(user.profile.limit_offer_at) : 0;
@@ -483,6 +523,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
       started_at: sub.started_at ?? now.toISOString(),
     });
     await scheduleCharge(ctx.db, user.id, nextChargeAt);
+    await finish(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
     await audit("ok", a.kind === "retry" ? "subscription.charge" : "subscription.renew");
     await reply(ctx, user, to, a.kind === "renew" ? billCopy["bill.renewed"]({ plan: PLANS[a.plan].nameHe, amount, nextDate: dayLabel(nextChargeAt) }) : billCopy["bill.charge_ok_resumed"]({ amount, nextDate: dayLabel(nextChargeAt) }));
   }
@@ -557,11 +598,15 @@ export async function handleBillingCommand(ctx: BillingContext, user: UserRow, t
     case "status":
       await sendStatus(ctx, user, to);
       break;
-    case "refund":
-      // Placeholder (docs/hyp-setup.md §refunds): refunds are handled manually by the operator.
-      await ctx.db.addAudit({ user_id: user.id, action: "billing.refund_request", result: "manual" });
+    case "refund": {
+      // Refunds are manual (docs/hyp-setup.md §8): the request is recorded and the operator is alerted (the error log),
+      // who answers by email — the reply promises nothing more than that.
+      const lastCharge = (await ctx.db.listPayments(user.id, 30)).find((p) => p.ccode === "0");
+      await ctx.db.addAudit({ user_id: user.id, action: "billing.refund_request", target: lastCharge?.hyp_trans_id ?? null, result: "manual" });
+      console.error(`[billing] refund request from user ${user.id} (last charge: ${lastCharge?.hyp_trans_id ?? "none"}) — handle it in the HYP portal and answer by email (docs/hyp-setup.md §8)`);
       await reply(ctx, user, to, billCopy["bill.refund_request"]());
       break;
+    }
     default:
       await presentOffer(ctx, user, to, cmd);
   }
@@ -575,15 +620,14 @@ export async function handleBillingCommand(ctx: BillingContext, user: UserRow, t
 const LIMIT_OFFER_EVERY_MS = 6 * 3_600_000;
 
 /**
- * The basic plan's 750 messages are used up: the one-tap upgrade offer (prorated, VAT shown) instead of a web link.
- * Without a saved card → the previous message with the payment link. At most once per 6 hours; the message that hit
- * the limit is kept (pending_input) and the upgrade reply says it can be sent again.
+ * The basic plan's 750 messages are used up. Every message gets an answer: the one-tap upgrade offer (prorated, VAT
+ * shown) at most once per 6 hours and a one-line note in between (no new approval); without a usable card (or while
+ * the cycle is being renewed) the message with the payment link, as before. The latest message that hit the limit is
+ * kept (pending_input), and the upgrade reply says it can be sent again.
  */
 export async function handlePlanLimit(ctx: BillingContext, user: UserRow, to: string, text: string): Promise<void> {
   const now = ctx.now();
-  const last = typeof user.profile.limit_offer_at === "string" ? Date.parse(user.profile.limit_offer_at) : 0;
-  if (now.getTime() - last < LIMIT_OFFER_EVERY_MS) return;
-  await ctx.db.mergeUserProfile(user.id, { limit_offer_at: now.toISOString(), pending_input: text });
+  await ctx.db.mergeUserProfile(user.id, { pending_input: text });
   const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
   const resetDate = `${reset.getUTCDate()}.${reset.getUTCMonth() + 1}`;
   const card = await savedCard(ctx, user.id);
@@ -593,7 +637,14 @@ export async function handlePlanLimit(ctx: BillingContext, user: UserRow, to: st
     await reply(ctx, user, to, copy["bill.plan_limit_reached"](resetDate, payLinkFor(ctx.appUrl, user.id)));
     return;
   }
-  await presentOffer(ctx, user, to, "upgrade", { lead: billCopy["bill.limit_lead"](resetDate) });
+  const last = typeof user.profile.limit_offer_at === "string" ? Date.parse(user.profile.limit_offer_at) : 0;
+  if (now.getTime() - last < LIMIT_OFFER_EVERY_MS) {
+    await reply(ctx, user, to, billCopy["bill.limit_reminder"](resetDate));
+    return;
+  }
+  const offer = await presentOffer(ctx, user, to, "upgrade", { lead: billCopy["bill.limit_lead"](resetDate) });
+  // only once the offer went out: a failed send leaves the next message to try again
+  if (offer) await ctx.db.mergeUserProfile(user.id, { limit_offer_at: now.toISOString() });
 }
 
 /** A message while the account is paused (past_due): one tap to settle, at most once per 24 hours. */

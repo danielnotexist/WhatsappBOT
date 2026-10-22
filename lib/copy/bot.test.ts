@@ -29,7 +29,7 @@ describe("bot copy", () => {
       } catch {
         text = f(sample);
       }
-      expect(text, id).not.toMatch(/\/[יה]\b/);
+      expect(text, id).not.toMatch(/\/[יהת](?![א-ת])/u);
     }
   });
 

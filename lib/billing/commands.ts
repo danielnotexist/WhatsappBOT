@@ -5,9 +5,14 @@
  * accepted as a synonym. A false positive is harmless anyway: every change is an
  * offer with buttons, nothing happens without a press.
  */
+import { PRODUCT_NAME } from "@/lib/brand";
+
 export type BillingCommand = "invoice" | "upgrade" | "downgrade" | "cancel" | "renew" | "card" | "retry" | "status" | "refund";
 
-const LEAD = /^(?:(?:אני|רוצה|רוצים|צריך|צריכה|צריכים|אפשר|בבקשה|אשמח|נא|עלזה|היי|הי|שלום)[,\s]+)+/;
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Polite fillers before the command — including the assistant's name (lib/brand.ts), e.g. "<name>, קבלה בבקשה". */
+const LEAD = new RegExp(`^(?:(?:אני|רוצה|רוצים|צריך|צריכה|צריכים|אפשר|בבקשה|אשמח|נא|${escapeRegExp(PRODUCT_NAME.toLowerCase())}|היי|הי|שלום)[,\\s]+)+`);
 const TAIL = /(?:[,\s]+(?:בבקשה|תודה|שלי|עכשיו|אצלך|פה|כאן|רבה))+$/;
 
 export function normalizeCommand(text: string): string {

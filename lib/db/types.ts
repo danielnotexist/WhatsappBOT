@@ -249,7 +249,7 @@ export interface PendingActionRow {
 
 // ---- billing approvals (migration 0007): one-tap charges / subscription changes from WhatsApp ----
 /** `renewal` = the automatic monthly charge taking the per-user charge lock (no phone, never pending) */
-export type BillingApprovalKind = "upgrade" | "retry" | "renew" | "resume" | "cancel" | "downgrade" | "renewal";
+export type BillingApprovalKind = "upgrade" | "retry" | "renew" | "resume" | "cancel" | "downgrade" | "keep_pro" | "renewal";
 export type BillingApprovalStatus = "pending" | "processing" | "succeeded" | "failed" | "declined" | "expired" | "unknown";
 
 /** An offer sent with buttons. Executed only from a press by `phone_e164` within 10 minutes (expires_at). */
@@ -421,4 +421,6 @@ export interface Db {
   listBillingApprovals(userId: string, opts?: { statuses?: BillingApprovalStatus[]; kinds?: BillingApprovalKind[]; limit?: number }): Promise<BillingApprovalRow[]>;
   /** SQL raise_plan_limit(): the current month's quota → newLimit (upgrade mid-month). Remaining after, or null when unchanged. */
   raiseUsageLimit(userId: string, newLimit: number): Promise<number | null>;
+  /** SQL lower_plan_limit(): the current month's quota → newLimit (a downgrade taking effect), remaining clamped at 0. Remaining after, or null when unchanged. */
+  lowerUsageLimit(userId: string, newLimit: number): Promise<number | null>;
 }

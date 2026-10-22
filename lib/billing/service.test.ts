@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryDb } from "@/lib/db/memory";
 import { MockHypGateway } from "@/lib/hyp/client";
 import { RecordingWaSender } from "@/lib/wa/sender";
 import { verifyCardLinkToken, verifyInvoiceToken } from "./links";
 import { completePayment, runChargeJob, startPayment, type BillingContext } from "./service";
+import { loadCardToken } from "./subscription";
 
 function setup(start = new Date("2026-10-20T10:00:00Z")) {
   let now = start;
@@ -117,5 +118,68 @@ describe("billing service", () => {
     expect(t.template!.name).toBe("payment_receipt");
     expect(t.template!.params.map((p) => p.text)).toEqual(["99", "בסיסי", "20.12.2026"]);
     expect(verifyInvoiceToken(t.template!.buttons[0]!.text)).toEqual({ userId: user.id, transId: (r as { transId: string }).transId });
+  });
+
+  it("card failure → the card is updated from the template's link (window closed) → [ניסיון חוזר] in a template, and day 3 charges the new card", async () => {
+    const { ctx, db, wa, hyp, advance } = setup();
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    await completePayment(ctx, `Id=1&CCode=0&Amount=99&Order=${user.id}%3Abasic&Sign=x`);
+    advance(31 * 86_400_000); // 20.11 — due, window closed
+    hyp.chargeScript = ["997"];
+    expect(await runChargeJob(ctx, user.id)).toMatchObject({ kind: "card_invalid" });
+    expect(wa.sent.at(-1)!.template!.name).toBe("card_update_needed");
+    advance(86_400_000); // day 2: the user taps the template's URL button — no WhatsApp message, so the window stays closed
+    const r = await completePayment(ctx, `Id=777&CCode=600&Order=${user.id}%3Acard&Sign=x`);
+    expect(r).toMatchObject({ ok: true, mode: "card" });
+    expect((await loadCardToken(db, user.id))!.token).toBe("0000000000007774580");
+    const t = wa.sent.at(-1)!;
+    expect(t.kind).toBe("template");
+    expect(t.template!.name).toBe("payment_failed");
+    expect(t.template!.params.map((p) => p.text)).toEqual(["99", "יום א׳ 22.11"]);
+    const quick = t.template!.buttons.find((b) => b.subType === "quick_reply")!;
+    expect(await db.getBillingApproval(quick.text.replace("bill:ok:", ""))).toMatchObject({ kind: "retry", status: "pending", amount_ils: 99 });
+    expect(hyp.calls.filter((c) => c.method === "chargeToken")).toHaveLength(1); // the card update itself never charges
+    // day 3: the automatic attempt runs with the new card (not a pause on day 7)
+    advance(86_400_000);
+    expect(await runChargeJob(ctx, user.id)).toMatchObject({ kind: "charged", amountIls: 99 });
+    expect((hyp.calls.filter((c) => c.method === "chargeToken").at(-1)!.args as { token: string }).token).toBe("0000000000007774580");
+    expect(await db.getSubscription(user.id)).toMatchObject({ status: "active", charge_failures: 0, next_charge_at: "2026-12-20T10:00:00.000Z" });
+  });
+
+  it("a paused account whose card is updated outside the window gets the account_paused template with [ניסיון חוזר]", async () => {
+    const { ctx, db, wa } = setup();
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    await completePayment(ctx, `Id=1&CCode=0&Amount=99&Order=${user.id}%3Abasic&Sign=x`);
+    await db.upsertSubscription(user.id, { status: "past_due", charge_failures: 4 });
+    const now = ctx.now;
+    ctx.now = () => new Date(now().getTime() + 2 * 86_400_000);
+    await completePayment(ctx, `Id=778&CCode=600&Order=${user.id}%3Acard&Sign=x`);
+    const t = wa.sent.at(-1)!;
+    expect(t.template!.name).toBe("account_paused");
+    expect(t.template!.buttons.map((b) => b.subType)).toEqual(["quick_reply", "url"]);
+    expect((await db.getSubscription(user.id))!.status).toBe("past_due"); // nothing changes without the press
+  });
+
+  it("a card-update page that comes back with CCode 0 (a real charge, not a J2 check) saves nothing and alerts the operator", async () => {
+    const { ctx, db, wa } = setup();
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    await completePayment(ctx, `Id=1&CCode=0&Amount=99&Order=${user.id}%3Abasic&Sign=x`);
+    const before = (await loadCardToken(db, user.id))!.token;
+    await db.insertMessage({ user_id: user.id, wa_message_id: "w-in", direction: "in", text: "עדכון כרטיס" }); // window open
+    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const r = await completePayment(ctx, `Id=779&CCode=0&Amount=1&Order=${user.id}%3Acard&Sign=x`);
+      expect(r).toMatchObject({ ok: false, reason: "charged_not_checked", mode: "card" });
+      expect(err.mock.calls.some((c) => String(c[0]).includes("returned CCode 0"))).toBe(true);
+    } finally {
+      err.mockRestore();
+    }
+    expect((await loadCardToken(db, user.id))!.token).toBe(before);
+    expect(db.audit.some((a) => a.action === "billing.card_update" && a.result === "charged_not_checked")).toBe(true);
+    expect(wa.sent.at(-1)!.body).toContain("עדכון הכרטיס לא הושלם בגלל תקלה בהגדרות התשלום");
+    expect(await db.listPayments(user.id, 10)).toHaveLength(1); // no payment row for the 1 ₪
   });
 });

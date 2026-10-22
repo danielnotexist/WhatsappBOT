@@ -689,4 +689,10 @@ export class SupabaseDb implements Db {
     if (error) this.fail("raiseUsageLimit", error);
     return typeof data === "number" ? data : null;
   }
+
+  async lowerUsageLimit(userId: string, newLimit: number): Promise<number | null> {
+    const { data, error } = await this.client.rpc("lower_plan_limit", { p_user_id: userId, p_new_limit: newLimit });
+    if (error) this.fail("lowerUsageLimit", error);
+    return typeof data === "number" ? data : null;
+  }
 }

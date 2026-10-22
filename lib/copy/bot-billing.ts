@@ -34,11 +34,13 @@ export const billCopy = {
   "bill.upgrade_offer": (o: UpgradeOfferParts) =>
     `${o.lead ? `${o.lead}\n\n` : ""}*שדרוג למסלול פרו*\nעד 3,000 הודעות בחודש, סוכנים מובנים ואוטומציות — מיד.\n\nלתשלום עכשיו: ${o.amount} ₪ (כולל מע״מ ${o.vat} ₪)\nזה ההפרש היחסי עד סוף התקופה הנוכחית (${daysHe(o.daysLeft)}, עד ${o.periodEnd}).\nמ-${o.periodEnd}: ${o.nextAmount} ₪ לחודש.\nהחיוב בכרטיס המסתיים ב-${o.last4}. הקבלה תגיע לכאן ולמייל.\n\nלשדרג?`,
   "bill.limit_lead": (resetDate: string) => `הגעת ל-750 ההודעות של המסלול הבסיסי החודש. המכסה מתחדשת ב-${resetDate}, ותזכורות וסיכום הבוקר ממשיכים כרגיל.`,
+  "bill.limit_reminder": (resetDate: string) => `המכסה של המסלול הבסיסי לחודש הזה נוצלה (מתחדשת ב-${resetDate}), ולכן ההודעה הזו לא טופלה. לשדרוג למסלול פרו — לכתוב "שדרוג".`,
   "bill.retry_offer": (o: { amount: string; vat: string; last4: string }) => `*ניסיון חוזר לחיוב*\nהחיוב החודשי שלא עבר: ${o.amount} ₪ (כולל מע״מ ${o.vat} ₪), בכרטיס המסתיים ב-${o.last4}.\n\nלחייב עכשיו?`,
   "bill.renew_offer": (o: { plan: string; amount: string; vat: string; periodEnd: string; last4: string }) =>
     `*חידוש מנוי ${o.plan}*\nלתשלום עכשיו: ${o.amount} ₪ (כולל מע״מ ${o.vat} ₪) — חודש, עד ${o.periodEnd}.\nהחיוב בכרטיס המסתיים ב-${o.last4}. הקבלה תגיע לכאן ולמייל.\n\nלחדש?`,
   "bill.resume_offer": (o: { periodEnd: string; amount: string }) => `המנוי מבוטל ופעיל עד ${o.periodEnd}. להמשיך אותו? עכשיו לא יבוצע חיוב — החיוב הבא (${o.amount} ₪) יהיה ב-${o.periodEnd}, כרגיל.`,
   "bill.cancel_confirm_paused": () => "לבטל את המנוי? לא יהיו יותר ניסיונות חיוב, וההגדרות נשמרות 90 יום למקרה שתרצו לחזור.",
+  "bill.keep_pro_confirm": (o: { periodEnd: string; amount: string }) => `המעבר למסלול הבסיסי מתוכנן ל-${o.periodEnd}. לבטל אותו ולהישאר בפרו? עכשיו לא יבוצע חיוב — החיוב הבא, ב-${o.periodEnd}, יהיה ${o.amount} ₪ (במקום 99 ₪).`,
   "bill.downgrade_confirm": (periodEnd: string) => `לעבור למסלול הבסיסי? השינוי ייכנס לתוקף ב-${periodEnd}: עד אז נשארות כל היכולות של פרו, ומשם 99 ₪ לחודש (עד 750 הודעות). על התקופה הנוכחית אין החזר.`,
 
   // ---- results ----
@@ -50,6 +52,7 @@ export const billCopy = {
   "bill.downgrade_scheduled": (periodEnd: string) => `נקבע. מ-${periodEnd} המסלול יהיה בסיסי, 99 ₪ לחודש. עד אז הכול נשאר כמו שהוא. כדי להישאר בפרו — לכתוב "שדרוג".`,
   "bill.downgrade_kept": () => "נשארים במסלול פרו. לא שיניתי כלום.",
   "bill.downgrade_cleared": () => "המעבר לבסיסי בוטל — נשארים במסלול פרו, והחיוב הבא כרגיל.",
+  "bill.keep_pro_declined": () => "בסדר, המעבר לבסיסי נשאר כמתוכנן. לא שיניתי כלום.",
   "bill.offer_declined": () => "בסדר, לא בוצע חיוב ולא שיניתי כלום.",
   "bill.renewal_charged": (o: { plan: string; amount: string; nextDate: string }) => `החיוב החודשי עבר: ${o.amount} ₪, מסלול ${o.plan}. החיוב הבא: ${o.nextDate}.\nהקבלה בהודעה הבאה.`,
 
@@ -94,10 +97,11 @@ export const billCopy = {
   "bill.invoice_link": (o: { amount: string; date: string; link: string }) => `קבלה — ${o.amount} ₪, ${o.date}:\n${o.link}`,
   "bill.invoice_list": (lines: InvoiceLine[]) => `*הקבלות האחרונות*\n${lines.map((l) => `• ${l.date} — ${l.amount} ₪ — ${l.desc}\n${l.link}`).join("\n")}\n\nהקישורים תקפים ל-90 יום; כל הקבלות נשלחות גם למייל.`,
   "bill.invoice_none": () => "עדיין אין קבלות. אחרי החיוב הראשון הקבלה תגיע לכאן ולמייל.",
-  "bill.card_update_link": (link: string) => `הנה דף מאובטח של HYP לעדכון הכרטיס — רק אימות, בלי חיוב:\n${link}\nהקישור תקף ל-7 ימים. אחרי העדכון אעדכן כאן.`,
+  "bill.card_update_link": (link: string) => `הנה דף מאובטח של HYP לעדכון הכרטיס — רק אימות, בלי חיוב:\n${link}\nהקישור תקף ל-7 ימים. בסיום העדכון יופיע אישור בדף.`,
   "bill.card_updated": (last4: string) => `הכרטיס עודכן (מסתיים ב-${last4}). החיובים הבאים יהיו בכרטיס הזה.`,
   "bill.card_update_failed": (link: string) => `עדכון הכרטיס לא הושלם, והכרטיס הקודם נשאר. אפשר לנסות שוב:\n${link}`,
-  "bill.refund_request": () => `בקשות להחזר כספי מטופלות ידנית, מול הקבלה. אפשר לכתוב "תמיכה" ומישהו מהצוות יחזור.`,
+  "bill.card_update_charged": () => "עדכון הכרטיס לא הושלם בגלל תקלה בהגדרות התשלום אצלנו, והכרטיס הקודם נשאר. אם הופיע חיוב של 1 ₪ על האימות — הוא יבוטל. כבר מטפלים בזה.",
+  "bill.refund_request": () => "בקשות להחזר כספי מטופלות ידנית, מול הקבלה. הבקשה נרשמה, והתשובה תישלח למייל של החשבון.",
 } as const;
 
 export type BillCopyId = keyof typeof billCopy;
@@ -125,4 +129,5 @@ export const OFFER_LABELS = {
   resume: { yes: "המשך מנוי", no: "לא עכשיו" },
   cancel: { yes: "בטל מנוי", no: "השאר פעיל" },
   downgrade: { yes: "מעבר לבסיסי", no: "להישאר בפרו" },
+  keep_pro: { yes: "להישאר בפרו", no: "לא עכשיו" },
 } as const;

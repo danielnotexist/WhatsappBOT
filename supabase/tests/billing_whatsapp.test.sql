@@ -1,5 +1,5 @@
 -- =============================================================================
--- billing_whatsapp.test.sql — 0007: billing_approvals / claim_billing_approval() / raise_plan_limit()
+-- billing_whatsapp.test.sql — 0007: billing_approvals / claim_billing_approval() / raise_plan_limit() / lower_plan_limit()
 -- טרנזקציה אחת + ROLLBACK. הצלחה = "BILLING WA: ALL CHECKS PASSED".
 -- =============================================================================
 \set ON_ERROR_STOP on
@@ -186,16 +186,38 @@ select pg_temp.check('raise_plan_limit: no row this month → null',
 select pg_temp.check('count_trial_message counts against the raised limit',
   public.count_trial_message('71111111-1111-4111-8111-111111111111') = 2249);
 
+-- ---------- lower_plan_limit (pro → basic at the monthly charge) ----------
+-- 751 counted of 3,000 → 2,249 left; back to 750 → nothing left (never below 0)
+select pg_temp.check('lower_plan_limit: 751 used, 3,000 → 750 → 0 left',
+  public.lower_plan_limit('71111111-1111-4111-8111-111111111111', 750) = 0);
+select pg_temp.check('lower_plan_limit: plan_limit is 750',
+  (select plan_limit from public.usage where user_id = '71111111-1111-4111-8111-111111111111') = 750);
+select pg_temp.check('lower_plan_limit: idempotent (already 750) → null',
+  public.lower_plan_limit('71111111-1111-4111-8111-111111111111', 750) is null);
+insert into public.usage (user_id, period_start, counted_messages, free_remaining, plan_limit) values
+  ('72222222-2222-4222-8222-222222222222', date_trunc('month', now() at time zone 'Asia/Jerusalem')::date, 100, 2900, 3000);
+select pg_temp.check('lower_plan_limit: 100 used of 3,000 → 650 left of 750',
+  public.lower_plan_limit('72222222-2222-4222-8222-222222222222', 750) = 650);
+
+-- ---------- keep_pro: a confirmation offer without an amount, not a charge ----------
+insert into public.billing_approvals (id, user_id, kind, plan, phone_e164) values
+  ('a7777777-7777-4777-8777-777777777777', '72222222-2222-4222-8222-222222222222', 'keep_pro', 'pro', '+972500000072');
+select pg_temp.check('keep_pro: claimable (no amount, not blocked by the charge lock)',
+  (select status::text from public.claim_billing_approval('a7777777-7777-4777-8777-777777777777', '72222222-2222-4222-8222-222222222222', '+972500000072', 'wamid.z1')) = 'processing');
+
 -- ---------- privileges ----------
 select pg_temp.check('billing_approvals: RLS on',
   (select relrowsecurity from pg_class where oid = 'public.billing_approvals'::regclass));
 select pg_temp.check('billing_approvals: no access for authenticated / anon',
   not has_table_privilege('authenticated', 'public.billing_approvals', 'select')
   and not has_table_privilege('anon', 'public.billing_approvals', 'select'));
-select pg_temp.check('claim_billing_approval / raise_plan_limit: service_role only',
+select pg_temp.check('claim_billing_approval / raise_plan_limit / lower_plan_limit: service_role only',
   not has_function_privilege('authenticated', 'public.claim_billing_approval(uuid, uuid, text, text)', 'execute')
   and not has_function_privilege('anon', 'public.raise_plan_limit(uuid, integer)', 'execute')
-  and has_function_privilege('service_role', 'public.claim_billing_approval(uuid, uuid, text, text)', 'execute'));
+  and not has_function_privilege('authenticated', 'public.lower_plan_limit(uuid, integer)', 'execute')
+  and not has_function_privilege('anon', 'public.lower_plan_limit(uuid, integer)', 'execute')
+  and has_function_privilege('service_role', 'public.claim_billing_approval(uuid, uuid, text, text)', 'execute')
+  and has_function_privilege('service_role', 'public.lower_plan_limit(uuid, integer)', 'execute'));
 
 select 'BILLING WA: ALL CHECKS PASSED';
 rollback;

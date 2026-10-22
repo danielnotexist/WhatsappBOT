@@ -197,8 +197,8 @@ export class MockHypGateway implements HypGateway {
   chargeOk = true;
   /** CCode for a declined charge when nothing is scripted ("4" = not approved → a retryable decline) */
   declineCode = "4";
-  /** scripted outcomes for the next chargeToken calls, in order: a CCode ("0" = approved) or an Error (no answer from HYP) */
-  chargeScript: (string | Error)[] = [];
+  /** scripted outcomes for the next chargeToken calls, in order: a CCode ("0" = approved), an Error (no answer from HYP) or a whole result */
+  chargeScript: (string | Error | HypChargeResult)[] = [];
   private n = 500_000_000;
 
   constructor(private readonly appUrl: string) {}
@@ -225,6 +225,7 @@ export class MockHypGateway implements HypGateway {
     this.calls.push({ method: "chargeToken", args: input });
     const scripted = this.chargeScript.shift();
     if (scripted instanceof Error) throw scripted;
+    if (typeof scripted === "object") return scripted;
     const code = scripted ?? (this.chargeOk ? "0" : this.declineCode);
     const transId = String(++this.n);
     return code === "0"

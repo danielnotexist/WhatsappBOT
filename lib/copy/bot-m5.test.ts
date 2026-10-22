@@ -28,7 +28,7 @@ describe("bot copy — Milestone 5", () => {
     };
     for (const [id, fn] of Object.entries(copyM5)) {
       const text = (fn as (...a: unknown[]) => string)(...(args[id as keyof typeof copyM5] ?? ["x", "y", "z"]));
-      expect(text, id).not.toMatch(/\/[יה]\b/);
+      expect(text, id).not.toMatch(/\/[יהת](?![א-ת])/u);
       expect(text, id).not.toContain("undefined");
     }
     for (const b of reminderButtons.fired("00000000-0000-4000-8000-000000000000")) {
