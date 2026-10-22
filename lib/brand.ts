@@ -12,7 +12,7 @@ export const BRAND = {
   /** One line under the logo / in metadata. */
   tagline: "העוזרת האישית שלך, בוואטסאפ.",
   /** Short description for metadata and link previews. */
-  description: "עוזרת אישית בוואטסאפ שמטפלת במייל, ביומן ובקבצים של העסק שלך — בעברית, עם חיבור ל-Microsoft 365 ול-Google.",
+  description: "עוזרת אישית בוואטסאפ שמטפלת במייל, ביומן ובקבצים של העסק שלך - בעברית, עם חיבור ל-Microsoft 365 ול-Google.",
   /** Placeholder until the domain is purchased ("probably free" by DNS — verify with the registrar). */
   domain: "alze.ai",
 } as const;

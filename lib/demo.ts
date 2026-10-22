@@ -105,7 +105,7 @@ export function isDemo(source: EnvSource = process.env): boolean {
 
 /** The demo's words: the strip on every page, the note on the code card, and the robots rule. */
 export const DEMO_COPY = {
-  strip: "גרסת הדגמה — שום דבר לא נשלח באמת",
+  strip: "גרסת הדגמה - שום דבר לא נשלח באמת",
   codeNote: `בגרסת ההדגמה הקוד הוא ${DEMO_OTP_CODE}`,
   robots: "noindex, nofollow",
 } as const;

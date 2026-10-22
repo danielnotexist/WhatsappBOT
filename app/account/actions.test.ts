@@ -82,7 +82,7 @@ describe("agent server actions", () => {
     expect(db.audit.find((a) => a.action === "agent.create")).toMatchObject({ user_id: user.id, reason: "account" });
 
     const second = await submit(createAgentAction, { name: "לקוחות", template: "", instructions: "לסכם מיילים.", capabilities: "mail.read" });
-    expect(second).toMatchObject({ notice: null, error: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו — עד שלושה.", at: "agents" });
+    expect(second).toMatchObject({ notice: null, error: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו - עד שלושה.", at: "agents" });
     expect(db.agents).toHaveLength(1);
   });
 

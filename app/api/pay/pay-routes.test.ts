@@ -13,12 +13,16 @@ import { POST as jobsPost } from "../jobs/run/route";
 
 // the mock payment page marks itself request-time with connection(), which needs a request scope outside Next
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
+// whether this browser is signed in: the result lands on /account (signed in) or on /pay/done (a link opened on the phone)
+const session = vi.hoisted(() => ({ signedIn: true }));
+vi.mock("@/lib/auth/current-user", async (orig) => ({ ...(await orig<typeof import("@/lib/auth/current-user")>()), hasSession: async () => session.signedIn }));
 
 describe("/api/pay/* and /api/jobs/run", () => {
   let db: MemoryDb;
   let hyp: MockHypGateway;
   let wa: RecordingWaSender;
   beforeEach(() => {
+    session.signedIn = true;
     vi.stubEnv("DATA_MODE", "memory");
     vi.stubEnv("APP_URL", "https://app.example.co.il");
     vi.stubEnv("TOKEN_ENC_KEY", randomBytes(32).toString("base64"));
@@ -52,6 +56,17 @@ describe("/api/pay/* and /api/jobs/run", () => {
     expect((await db.getSubscription(user.id))).toMatchObject({ plan: "basic", status: "active" });
     const declined = await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=2&CCode=6&Amount=99&Order=${user.id}%3Abasic&Sign=x`));
     expect(new URL(declined.headers.get("location")!).searchParams.get("error")).toContain("לא עבר");
+  });
+
+  it("a browser that is not signed in lands on /pay/done with a result code, never with text from the URL", async () => {
+    session.signedIn = false;
+    const user = await db.createUser("dana@example.com");
+    const paid = new URL((await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=3&CCode=0&Amount=99&Order=${user.id}%3Abasic&Sign=x`))).headers.get("location")!);
+    expect(paid.pathname).toBe("/pay/done");
+    expect([...paid.searchParams.entries()]).toEqual([["r", "paid"]]);
+    expect((await db.getSubscription(user.id))).toMatchObject({ plan: "basic", status: "active" });
+    const declined = new URL((await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=4&CCode=6&Amount=99&Order=${user.id}%3Abasic&Sign=x`))).headers.get("location")!);
+    expect(declined.pathname + declined.search).toBe("/pay/done?r=declined");
   });
 
   it("jobs worker requires auth, runs a charge job and finishes it", async () => {

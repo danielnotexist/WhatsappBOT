@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { authPaths, type AuthMode } from "./email-step";
 import { StepHeading } from "./step-heading";
 import { StepAside, StepBody, StepMascot } from "./step-slots";
+import { useMarkSignedIn } from "./shell-session";
 
 export { CODE_LENGTH, RESEND_SECONDS };
 
@@ -108,6 +109,7 @@ export function CodeStep({
   autoFocus?: boolean;
 }) {
   const router = useRouter();
+  const markSignedIn = useMarkSignedIn();
   const reduce = useReducedMotion();
   const labelId = useId();
   const errorId = useId();
@@ -153,6 +155,7 @@ export function CodeStep({
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; next?: string; message?: string; attemptsLeft?: number };
         if (data.ok && data.next) {
+          markSignedIn(); // the shell header switches to "לאזור האישי" (the layout's cookie check ran before the code)
           router.replace(data.next as Route);
           return;
         }
@@ -170,7 +173,7 @@ export function CodeStep({
       }
       setBusy(false);
     },
-    [animateCells, busy, cells, email, reduce, router, updates],
+    [animateCells, busy, cells, email, markSignedIn, reduce, router, updates],
   );
 
   async function resend() {

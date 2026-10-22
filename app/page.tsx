@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
+import { BySession } from "@/components/auth/by-session";
 import { DaySection } from "@/components/brand/landing/day-scenes";
 import { Faq } from "@/components/brand/landing/faq";
 import { FinalCta } from "@/components/brand/landing/final-cta";
 import { LandingFooter } from "@/components/brand/landing/footer";
-import { LandingHeader } from "@/components/brand/landing/header";
-import { Hero } from "@/components/brand/landing/hero";
+import { AccountCta, LandingHeader } from "@/components/brand/landing/header";
+import { Hero, SignInCta } from "@/components/brand/landing/hero";
 import { Pricing } from "@/components/brand/landing/pricing";
 import { Professions } from "@/components/brand/landing/professions";
 import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
@@ -13,23 +14,24 @@ import { BRAND } from "@/lib/brand";
 import "@/components/brand/landing/landing.css";
 
 export const metadata: Metadata = {
-  title: { absolute: `${BRAND.name} — ${BRAND.tagline}` },
+  title: { absolute: `${BRAND.name} - ${BRAND.tagline}` },
   description: BRAND.description,
-  openGraph: { title: `${BRAND.name} — ${BRAND.tagline}`, description: BRAND.description },
+  openGraph: { title: `${BRAND.name} - ${BRAND.tagline}`, description: BRAND.description },
 };
 
 /**
  * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo → one working day in a pinned phone →
  * by profession → trust → pricing → FAQ → end card → footer. Static (prerendered); the client islands are the chat
- * demo, the day scene's switch (pinned version lazy-loaded on large screens) and Lenis.
+ * demo, the day scene's switch (pinned version lazy-loaded on large screens) and Lenis. The only request-time parts
+ * are two small holes that read the session cookie: "לאזור האישי" in the header and the hero's "כניסה" (BySession).
  */
 export default function HomePage() {
   return (
     <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
       <SmoothScroll />
-      <LandingHeader />
+      <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
       <main id="main" className="flex-1">
-        <Hero />
+        <Hero signIn={<BySession signedIn={null} signedOut={<SignInCta />} />} />
         <DaySection />
         <Professions />
         <Trust />

@@ -11,6 +11,7 @@ import { DaySwitch } from "./day-switch";
 import { Faq } from "./faq";
 import { FinalCta } from "./final-cta";
 import { LandingFooter } from "./footer";
+import { AccountCta, LandingHeader } from "./header";
 import { Hero } from "./hero";
 import { THREAD } from "./phone-parts";
 import { Pricing } from "./pricing";
@@ -102,7 +103,7 @@ describe("hero", () => {
     await act(async () => {});
     const h1 = screen.getByRole("heading", { level: 1 });
     expect(h1).toHaveTextContent(`מה שהבטחת לעשות.${BRAND.name} על זה.`);
-    expect(screen.getByRole("link", { name: "בואו נתחיל — לוקח דקה" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" })).toHaveAttribute(
       "href",
       "/start",
     );
@@ -113,6 +114,37 @@ describe("hero", () => {
     expect(
       screen.getByText(`${TRIAL_MESSAGES} הודעות ראשונות בחינם, בלי כרטיס אשראי.`),
     ).toBeInTheDocument();
+  });
+});
+
+describe("signed-in awareness (Daniel, 22.10.2026)", () => {
+  it("signed in: 'לאזור האישי' in the header as the hero's honey pill, at the inline end; the hero drops 'כניסה'", async () => {
+    render(
+      <>
+        <LandingHeader account={<AccountCta />} />
+        <Hero signIn={null} />
+      </>,
+    );
+    await act(async () => {});
+    const account = screen.getByRole("link", { name: "לאזור האישי" });
+    expect(account).toHaveAttribute("href", "/account");
+    const start = screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" });
+    expect(account.className).toBe(start.className.replace(/\s*max-sm:flex-1|\s*sm:min-w-64/g, ""));
+    // the last thing in the header: inline end (left in RTL)
+    const header = screen.getByRole("banner");
+    expect(header.querySelectorAll("a")[header.querySelectorAll("a").length - 1]).toBe(account);
+    expect(screen.queryByRole("link", { name: "כניסה" })).toBeNull();
+  });
+
+  it("signed out (the prerendered shell): no button in the header, 'כניסה' beside the hero's call to action", () => {
+    render(
+      <>
+        <LandingHeader />
+        <Hero />
+      </>,
+    );
+    expect(within(screen.getByRole("banner")).queryByRole("link", { name: "לאזור האישי" })).toBeNull();
+    expect(screen.getByRole("link", { name: "כניסה" })).toHaveAttribute("href", "/login");
   });
 });
 
@@ -193,7 +225,7 @@ describe("sections", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: `${BRAND.name} על זה.` }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "בואו נתחיל — לוקח דקה" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" })).toHaveAttribute(
       "href",
       "/start",
     );

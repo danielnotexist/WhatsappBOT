@@ -21,7 +21,7 @@ export async function qrSvg(value: string, opts: { dark?: string; light?: string
  */
 export async function QrCode({ value, label, className }: { value: string; label: string; className?: string }) {
   // DEMO_MODE: a harmless text QR instead of the wa.me link (the placeholder number is not ours).
-  const svg = await qrSvg(isDemo() ? `${BRAND.name} — גרסת הדגמה. בגרסה האמיתית הסריקה פותחת את וואטסאפ.` : value);
+  const svg = await qrSvg(isDemo() ? `${BRAND.name} - גרסת הדגמה. בגרסה האמיתית הסריקה פותחת את וואטסאפ.` : value);
   return (
     <figure className={cn("m-0", className)}>
       <div role="img" aria-label={label} className="overflow-hidden rounded-2xl [&>svg]:block [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: svg }} />

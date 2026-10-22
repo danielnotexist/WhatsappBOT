@@ -44,7 +44,23 @@ test.describe("personal area — same server actions, new design", () => {
 
     await page.getByRole("link", { name: "קישור מספר" }).click();
     await expect(page).toHaveURL(/\/start\/ready$/);
+    // signed in: the shell offers the way back instead of "כבר יש לך חשבון? כניסה"
+    await expect(page.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account");
+    await expect(page.getByText("כבר יש לך חשבון? כניסה")).toHaveCount(0);
+    // and the landing: the honey pill at the header's inline end, no "כניסה" beside the hero's call to action
+    await page.goto("/");
+    await expect(page.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account");
+    await expect(page.getByRole("main").getByRole("link", { name: "כניסה", exact: true })).toHaveCount(0);
     await ctx.close();
+    // a visitor without a session sees the prerendered header: no pill, "כניסה" in the hero
+    const anon = await newContext(browser);
+    const landing = await anon.newPage();
+    await landing.goto("/");
+    await expect(landing.getByRole("main").getByRole("link", { name: "כניסה", exact: true })).toBeVisible();
+    await expect(landing.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toHaveCount(0);
+    await landing.goto("/start/email");
+    await expect(landing.getByRole("link", { name: "כבר יש לך חשבון? כניסה" })).toBeVisible();
+    await anon.close();
   });
 
   test("connect and disconnect Microsoft, unlink the number, cancel a paid plan", async ({ browser }) => {

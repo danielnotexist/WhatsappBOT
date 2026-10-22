@@ -117,6 +117,10 @@ export const contrastPairs: { label: string; fg: string; bg: string; min: number
     { label: `input border / focus ring on ${tone}`, fg: palette.inkMuted, bg: palette[tone], min: 3 },
     { label: `ink CTA label on ${tone}`, fg: palette.cream, bg: palette.ink, min: 4.5 },
   ]),
+  // the pro plan card on /pay (a honey paper)
+  { label: "ink on honey (pro plan card)", fg: palette.ink, bg: palette.honey, min: 4.5 },
+  { label: "ink muted on honey (pro plan card)", fg: palette.inkMuted, bg: palette.honey, min: 4.5 },
+  { label: "focus ring / outline on honey", fg: palette.inkMuted, bg: palette.honey, min: 3 },
   // WhatsApp mockups (bubbles, timestamps, buttons)
   { label: "wa text on incoming", fg: waMockup.fg, bg: waMockup.in, min: 4.5 },
   { label: "wa text on outgoing", fg: waMockup.fg, bg: waMockup.out, min: 4.5 },

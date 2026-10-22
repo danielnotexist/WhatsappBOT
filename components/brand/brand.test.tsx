@@ -167,7 +167,7 @@ describe("frames and type", () => {
         <Handwritten>קודם כל</Handwritten>
       </>,
     );
-    expect(screen.getByRole("link", { name: "עלזה — לדף הבית" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "עלזה - לדף הבית" })).toHaveAttribute("href", "/");
     expect(screen.getByText("קודם כל").className).toContain("font-hand");
   });
 

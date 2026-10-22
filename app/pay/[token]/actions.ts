@@ -14,7 +14,7 @@ export async function startPaymentAction(formData: FormData): Promise<void> {
   const token = String(formData.get("token") ?? "");
   const plan = String(formData.get("plan") ?? "");
   const link = verifyPayLinkToken(token);
-  if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent("הקישור לא בתוקף — אפשר לבקש קישור חדש בשיחה.")}` as Route);
+  if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent("הקישור לא בתוקף - אפשר לבקש קישור חדש בשיחה.")}` as Route);
   const ctx = getBillingContext();
   await ensureDemoSessionUser();
   const user = await ctx.db.getUser(link.userId);

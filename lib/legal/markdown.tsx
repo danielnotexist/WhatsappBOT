@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import type { ReactNode } from "react";
+import { siteDashes } from "@/lib/design/typography";
 
 /**
  * A deliberately small Markdown → React renderer for the legal drafts in docs/legal (headings, paragraphs, lists,
@@ -132,8 +133,9 @@ export function renderInline(text: string, keyPrefix = "i"): ReactNode[] {
   return out;
 }
 
+/** Renders a legal draft. Its long dashes become the site's short hyphen (lib/design/typography.ts); the wording stays. */
 export function Markdown({ source }: { source: string }) {
-  const blocks = parseMarkdown(source);
+  const blocks = parseMarkdown(siteDashes(source));
   return (
     <>
       {blocks.map((b, i) => {

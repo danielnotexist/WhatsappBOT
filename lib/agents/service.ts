@@ -43,8 +43,8 @@ export type AgentResult =
 /** Site-facing text for each failure (the WhatsApp flow maps the codes to its own copy, with the pay link). */
 export const AGENT_FAIL_MESSAGES: Record<AgentFailCode, string> = {
   limit_trial: "סוכן משלך נפתח עם מנוי: במסלול הבסיסי סוכן אחד, ובמסלול פרו עד שלושה.",
-  limit_basic: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו — עד שלושה.",
-  limit_pro: "יש כבר שלושה סוכנים משלך — המקסימום במסלול פרו. אפשר למחוק אחד כדי לפנות מקום.",
+  limit_basic: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו - עד שלושה.",
+  limit_pro: "יש כבר שלושה סוכנים משלך - המקסימום במסלול פרו. אפשר למחוק אחד כדי לפנות מקום.",
   builtin_needs_pro: "התאמה והשבתה של הסוכנים המובנים כלולות במסלול פרו.",
   trial_builtin_edit: "בתקופת הניסיון אפשר לנסות את הסוכנים המובנים כמו שהם. התאמה אישית נפתחת במסלול פרו.",
   builtin_no_delete: "סוכן מובנה אי אפשר למחוק, אבל אפשר להשבית אותו.",
@@ -54,7 +54,7 @@ export const AGENT_FAIL_MESSAGES: Record<AgentFailCode, string> = {
   name_reserved: "השם הזה שמור לסוכן מובנה או לפקודה. אפשר לבחור שם אחר.",
   name_taken: "כבר יש סוכן בשם הזה. אפשר לבחור שם אחר.",
   instructions_empty: "חסרות הנחיות: מה הסוכן עושה ואיך.",
-  instructions_too_long: `ההנחיות ארוכות מדי — עד ${MAX_INSTRUCTIONS.toLocaleString("he-IL")} תווים.`,
+  instructions_too_long: `ההנחיות ארוכות מדי - עד ${MAX_INSTRUCTIONS.toLocaleString("he-IL")} תווים.`,
   no_capabilities: "צריך לבחור לפחות יכולת אחת.",
   recipients_invalid: "אחת הכתובות לא נראית תקינה.",
   recipients_too_many: `אפשר עד ${MAX_RECIPIENTS} כתובות.`,

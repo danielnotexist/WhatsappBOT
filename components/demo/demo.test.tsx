@@ -28,7 +28,7 @@ afterEach(() => {
 describe("demo strip and code note", () => {
   it("the strip says nothing is really sent", () => {
     render(<DemoStrip />);
-    expect(screen.getByRole("note")).toHaveTextContent("גרסת הדגמה — שום דבר לא נשלח באמת");
+    expect(screen.getByRole("note")).toHaveTextContent("גרסת הדגמה - שום דבר לא נשלח באמת");
   });
 
   it("the code card names the demo code", () => {

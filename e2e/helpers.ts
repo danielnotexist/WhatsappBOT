@@ -104,17 +104,18 @@ export async function enterCode(page: Page, code: string): Promise<void> {
 /**
  * On /pay/<token>: choose a plan (basic by default) and let the memory-mode HYP stand-in approve it. The stand-in is
  * same-origin, so the server action's redirect is soft-navigated by the router and stops on /api/pay/mock; load it for
- * real (real HYP is another origin, so the browser navigates there normally). Ends on /account with the paid plan.
+ * real (real HYP is another origin, so the browser navigates there normally). Ends on /account with the paid plan
+ * (a signed-in browser), or on `landing` (e.g. /pay/done for a link opened without a session).
  */
-export async function payWithMock(page: Page, plan: "basic" | "pro" = "basic"): Promise<void> {
+export async function payWithMock(page: Page, plan: "basic" | "pro" = "basic", landing: RegExp = /\/account(\?|$)/): Promise<void> {
   await page
-    .locator("form")
-    .filter({ hasText: plan === "basic" ? "בסיסי —" : "פרו —" })
+    .getByRole("form", { name: plan === "basic" ? "בסיסי" : "פרו", exact: true })
     .getByRole("button", { name: "לתשלום" })
     .click();
-  await page.waitForURL(/\/api\/pay\/mock\?|\/account\?/);
+  await page.waitForURL(/\/api\/pay\/mock\?|\/account\?|\/pay\/done\?/);
   if (/\/api\/pay\/mock\?/.test(page.url())) await page.goto(page.url());
-  await expect(page).toHaveURL(/\/account(\?|$)/);
+  await expect(page).toHaveURL(landing);
+  if (!landing.test("/account")) return;
   await page.goto("/account");
   await expect(page.getByRole("meter", { name: "הודעות החודש" })).toBeVisible();
 }

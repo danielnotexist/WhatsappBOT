@@ -17,7 +17,7 @@
 | תשלום | `/pay/<token>` → `/api/pay/mock` (במקום HYP) → `/api/pay/return` → `/account` עם מנוי פעיל. אין חיוב. |
 | AI, תמלול, מייל, תור | תמיד המימוש המדומה (`MockProvider`, `MockStt`, `ConsoleMailer`, `LocalQueue`), גם אם יש מפתחות. |
 | מנועי חיפוש | `X-Robots-Tag: noindex, nofollow` בכל תשובה (`proxy.ts`, נבדק בכל בקשה) + `<meta name="robots" content="noindex, nofollow">` (נקבע ב-build). |
-| בכל עמוד | פס דק למעלה: "גרסת הדגמה — שום דבר לא נשלח באמת" (נקבע בכל בקשה). |
+| בכל עמוד | פס דק למעלה: "גרסת הדגמה - שום דבר לא נשלח באמת" (נקבע בכל בקשה). |
 
 **ההדגמה מסרבת לעלות** (שגיאה בעברית עם שמות המשתנים, בלי ערכים) אם לידה מוגדר אחד מאלה — כל אחד מהם מאפשר לשלוח משהו באמת:
 `WA_ACCESS_TOKEN`, `HYP_KEY`, `HYP_PASSP`, `MS_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET`, `RESEND_API_KEY`, `QSTASH_TOKEN`.

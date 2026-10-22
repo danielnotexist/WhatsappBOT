@@ -26,7 +26,7 @@ export function Wordmark({ href = "/", className }: { href?: "/" | null; classNa
   );
   if (href === null) return content;
   return (
-    <Link href={href} aria-label={`${BRAND.name} — לדף הבית`} className="rounded-md">
+    <Link href={href} aria-label={`${BRAND.name} - לדף הבית`} className="rounded-md">
       {content}
     </Link>
   );

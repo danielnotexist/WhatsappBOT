@@ -34,7 +34,7 @@ export function FinalCta() {
           דקה להרשמה, חיבור ל-Outlook או ל-Gmail, ו-{PRICING.trial} הודעות ראשונות בחינם.
         </p>
         <Cta href="/start" className="mt-10 max-sm:w-full sm:min-w-64">
-          בואו נתחיל — לוקח דקה
+          בואו נתחיל - לוקח דקה
         </Cta>
       </div>
     </section>

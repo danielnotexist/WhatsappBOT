@@ -15,6 +15,9 @@ import { GET as returnGet } from "./return/route";
 
 // route handlers mark themselves request-time with connection(), which needs a request scope outside Next
 vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
+// whether this browser is signed in: the result lands on /account (signed in) or on /pay/done (a link opened on the phone)
+const session = vi.hoisted(() => ({ signedIn: true }));
+vi.mock("@/lib/auth/current-user", async (orig) => ({ ...(await orig<typeof import("@/lib/auth/current-user")>()), hasSession: async () => session.signedIn }));
 
 const params = <T extends Record<string, string>>(p: T) => ({ params: Promise.resolve(p) }) as never;
 
@@ -23,6 +26,7 @@ describe("/pay/card/<token> (J2 card update) and /invoice/<token>", () => {
   let hyp: MockHypGateway;
   let wa: RecordingWaSender;
   beforeEach(() => {
+    session.signedIn = true;
     vi.stubEnv("DATA_MODE", "memory");
     vi.stubEnv("APP_URL", "https://app.example.co.il");
     vi.stubEnv("TOKEN_ENC_KEY", randomBytes(32).toString("base64"));
@@ -74,6 +78,9 @@ describe("/pay/card/<token> (J2 card update) and /invoice/<token>", () => {
   it("an invalid / expired card link never reaches HYP", async () => {
     const res = await cardGet(new Request("https://app.example.co.il/pay/card/x"), params({ token: "nope.nope" }));
     expect(new URL(res.headers.get("location")!).searchParams.get("error")).toContain("לא בתוקף");
+    session.signedIn = false; // the link opened on the phone: the fixed page, not the personal area
+    const phone = new URL((await cardGet(new Request("https://app.example.co.il/pay/card/x"), params({ token: "nope.nope" }))).headers.get("location")!);
+    expect(phone.pathname + phone.search).toBe("/pay/done?r=card_link");
     expect(hyp.calls).toHaveLength(0);
   });
 

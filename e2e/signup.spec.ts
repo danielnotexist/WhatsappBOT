@@ -38,6 +38,7 @@ test.describe("signup — the screen sequence of round plan §3", () => {
 
     // 2. email card (cream paper): the button wakes up only for a valid address; updates toggle is on by default
     await expect(page).toHaveURL(/\/start\/email$/);
+    await expect(page.getByRole("link", { name: "כבר יש לך חשבון? כניסה" })).toBeVisible();
     await expect(page.getByText("קודם כל")).toBeVisible();
     await expect(page.getByRole("switch", { name: "עדכונים וטיפים" })).toHaveAttribute("aria-checked", "true");
     await page.getByLabel("כתובת מייל").fill("not-an-email");
@@ -66,8 +67,10 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await expect(page.getByRole("alert").filter({ hasText: "הקוד לא נכון" })).toBeVisible();
     await enterCode(page, code); // auto-submits on the sixth digit
 
-    // 4. connect card (sage)
+    // 4. connect card (sage); signed in now, so the header offers the personal area instead of sign-in
     await expect(page).toHaveURL(/\/start\/connect$/);
+    await expect(page.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account");
+    await expect(page.getByText("כבר יש לך חשבון? כניסה")).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("תנו לעלזה את כוח-העל הראשון שלה");
     await expect(page.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" })).toBeVisible();
     await expect(page.getByRole("link", { name: "חיבור Gmail" })).toBeVisible();
@@ -217,9 +220,9 @@ test.describe("signup — the screen sequence of round plan §3", () => {
 
   test("legal drafts: /terms /privacy /accessibility are noindex with a draft banner", async ({ page }) => {
     for (const [path, title] of [
-      ["/terms", "תנאי שימוש — עלזה"],
-      ["/privacy", "מדיניות פרטיות — עלזה"],
-      ["/accessibility", "הצהרת נגישות — עלזה"],
+      ["/terms", "תנאי שימוש - עלזה"],
+      ["/privacy", "מדיניות פרטיות - עלזה"],
+      ["/accessibility", "הצהרת נגישות - עלזה"],
     ] as const) {
       await page.goto(path);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(title);

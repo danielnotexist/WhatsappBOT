@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ChatDemo } from "@/components/brand/chat-demo";
 import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
@@ -13,8 +13,10 @@ import { StyleAfterHydration } from "./mascot-deferred";
  * sentence runs the full width on one line and the phone rises beside the short second line (the name + "על זה.").
  * Server-rendered; the chat demo inside the phone is the one client island. The single entrance moment (the phone
  * rises, its screen turns on and lights the table) is CSS only and collapses under reduced motion.
+ * `signIn` replaces the "כניסה" button (app/page.tsx: a request-time hole that hides it for a signed-in visitor, who
+ * gets "לאזור האישי" in the header instead).
  */
-export function Hero() {
+export function Hero({ signIn = <SignInCta /> }: { signIn?: ReactNode }) {
   return (
     <section
       aria-labelledby="hero-title"
@@ -46,11 +48,9 @@ export function Hero() {
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Cta href="/start" className="max-sm:flex-1 sm:min-w-64">
-              בואו נתחיל — לוקח דקה
+              בואו נתחיל - לוקח דקה
             </Cta>
-            <Cta href="/login" tone="ghost" className="px-6">
-              כניסה
-            </Cta>
+            {signIn}
           </div>
           <p className="mt-5 text-[0.9375rem] text-cream-muted">
             {PRICING.trial} הודעות ראשונות בחינם, בלי כרטיס אשראי.
@@ -89,5 +89,14 @@ export function Hero() {
         </div>
       </div>
     </section>
+  );
+}
+
+/** The hero's secondary button for a visitor who is not signed in. */
+export function SignInCta() {
+  return (
+    <Cta href="/login" tone="ghost" className="px-6">
+      כניסה
+    </Cta>
   );
 }

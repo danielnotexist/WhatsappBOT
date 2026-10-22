@@ -136,7 +136,19 @@ for (const vp of VIEWPORTS) {
       // 3. pay (memory-mode mock) → an active basic plan; the cancel fold open
       const pay = (await page.getByRole("link", { name: "בחירת מסלול" }).getAttribute("href"))!;
       await page.goto(pay);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("בחירת מסלול");
+      await page.waitForTimeout(600);
+      await check(page, "pay", vp.width, problems, { dir: ACCOUNT_DIR, full: true });
       await payWithMock(page);
+      // the same link with the plan active: the card update face
+      await page.goto(pay);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("עדכון כרטיס");
+      await page.waitForTimeout(600);
+      await check(page, "pay-card", vp.width, problems, { dir: ACCOUNT_DIR, full: true });
+      await page.goto("/pay/done?r=paid");
+      await page.waitForTimeout(600);
+      await check(page, "pay-done", vp.width, problems, { dir: ACCOUNT_DIR, full: true });
+      await page.goto("/account");
       await page.locator("details").filter({ hasText: "ביטול המנוי" }).locator("summary").click();
       await page.waitForTimeout(600);
       await check(page, "paid", vp.width, problems, { dir: ACCOUNT_DIR, full: true });

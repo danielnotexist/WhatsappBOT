@@ -129,7 +129,7 @@ export async function GET(request: Request) {
     const refused = dropped && requested.includes(GOOGLE_SCOPES.gmailReadonly) ? gmailRead.reason : null;
     await db.addAudit({ user_id: user.id, action: "google.connect", target: email, result: missing.length ? `partial:${missing.join(" ")}` : refused ? `ok:gmail_read_refused:${refused}` : feature ? `ok:${feature}` : gmailReadDeclined ? "ok:gmail_read_declined" : "ok" });
     if (!user.name && claims.name) await db.updateUserProfile(user.id, { name: claims.name });
-    if (!refreshToken) console.warn(`[google:callback] no refresh token for connection ${connection.id} — the user will need to reconnect when the access token expires`);
+    if (!refreshToken) console.warn(`[google:callback] no refresh token for connection ${connection.id} - the user will need to reconnect when the access token expires`);
 
     await tell(gcopy["g.connect_done"](email, scopes, { gmailReadDeclined }));
     if (refused) await tell(refused === "cap_reached" ? gcopy["g.err.gmail_read_cap_reached"]() : gcopy["g.err.gmail_read_unavailable"]());
@@ -161,5 +161,5 @@ const refusedNotice = (reason: GmailReadKeep["reason"]) => (reason === "cap_reac
  * operator can reconcile the ledger with Google Auth Platform → Audience → OAuth user cap.
  */
 function uncounted(why: string, userId?: string): void {
-  console.warn(`[google:user-cap] consent returned but not recorded (${why})${userId ? ` user ${userId}` : ""} — Google may have counted this account; compare with the Console's OAuth user cap.`);
+  console.warn(`[google:user-cap] consent returned but not recorded (${why})${userId ? ` user ${userId}` : ""} - Google may have counted this account; compare with the Console's OAuth user cap.`);
 }

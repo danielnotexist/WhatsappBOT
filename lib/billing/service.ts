@@ -89,7 +89,7 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
     await ctx.db.addAudit({ user_id: user.id, action: "payment.return", target: params.Id ?? "", result: declined ? `declined:${params.CCode}` : "invalid_signature" });
     return declined
       ? { ok: false, reason: "declined", userId, message: "התשלום לא עבר. אפשר לנסות שוב, גם עם כרטיס אחר." }
-      : { ok: false, reason: "invalid_signature", userId, message: "אימות התשלום נכשל. אם חויבת — נבדוק ונחזור אלייך." };
+      : { ok: false, reason: "invalid_signature", userId, message: "אימות התשלום נכשל. אם חויבת - נבדוק ונחזור אלייך." };
   }
 
   const transId = params.Id ?? "";
@@ -130,7 +130,7 @@ async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQu
     console.error(`[billing] card update ${transId} of user ${user.id} returned CCode 0 — a real 1 ₪ charge, not a J2 check. Refund it in the HYP portal and enable J2 on the terminal (docs/hyp-setup.md §1, §8)`);
     await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: "charged_not_checked" });
     await deliver(ctx, user, { text: billCopy["bill.card_update_charged"]() });
-    return { ok: false, reason: "charged_not_checked", userId: user.id, message: "הכרטיס לא עודכן בגלל תקלה בהגדרות התשלום אצלנו. אם הופיע חיוב של 1 ₪ — הוא יבוטל.", mode: "card" };
+    return { ok: false, reason: "charged_not_checked", userId: user.id, message: "הכרטיס לא עודכן בגלל תקלה בהגדרות התשלום אצלנו. אם הופיע חיוב של 1 ₪ - הוא יבוטל.", mode: "card" };
   }
   if (!verified.ok || params.CCode !== "600") {
     await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: verified.ok ? `declined:${params.CCode}` : "invalid_signature" });
@@ -144,7 +144,7 @@ async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQu
     token = await ctx.hyp.getToken(transId, { allowFalse: true });
   } catch (e) {
     await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: `token_failed: ${(e as Error).message}` });
-    return { ok: false, reason: "token_failed", userId: user.id, message: "הכרטיס אומת אבל שמירתו נכשלה. הכרטיס הקודם נשאר — נטפל בזה.", mode: "card" };
+    return { ok: false, reason: "token_failed", userId: user.id, message: "הכרטיס אומת אבל שמירתו נכשלה. הכרטיס הקודם נשאר - נטפל בזה.", mode: "card" };
   }
   await saveCardToken(ctx.db, user.id, token.token, token.tokef);
   // a renewal that waited for a new card: automatic attempts resume (otherwise day 7 would pause without trying it)

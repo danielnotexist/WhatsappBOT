@@ -13,7 +13,7 @@ import { enterCode, newContext, submitEmail, uniqueEmail } from "./helpers";
  */
 const B = `http://localhost:${DEMO_PORT_B}`;
 const master = keyFromBase64(E2E_DEMO_KEY);
-const STRIP = "גרסת הדגמה — שום דבר לא נשלח באמת";
+const STRIP = "גרסת הדגמה - שום דבר לא נשלח באמת";
 
 /** DEMO_SCREENS_DIR=<dir> pnpm e2e:demo → screenshots of the demo-only UI for review (nothing written otherwise). */
 async function snap(page: Page, name: string) {

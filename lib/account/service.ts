@@ -66,7 +66,7 @@ export function planLabel(plan: string): string {
 
 export function statusLabel(status: string): string {
   return (
-    { trial: "ניסיון", active: "פעיל", past_due: "תשלום נכשל — ממתין", cancelled: "בוטל (פעיל עד סוף התקופה)" }[status] ??
+    { trial: "ניסיון", active: "פעיל", past_due: "תשלום נכשל - ממתין", cancelled: "בוטל (פעיל עד סוף התקופה)" }[status] ??
     status
   );
 }

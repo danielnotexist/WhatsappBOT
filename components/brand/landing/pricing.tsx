@@ -67,7 +67,7 @@ export function Pricing() {
             {PRICING.vatNote}
           </p>
           <Cta href="/start" className="flex-none max-sm:w-full">
-            בואו נתחיל — לוקח דקה
+            בואו נתחיל - לוקח דקה
           </Cta>
         </div>
       </div>

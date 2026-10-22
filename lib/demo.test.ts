@@ -90,7 +90,7 @@ describe("data layer and integrations in the demo", () => {
 describe("the demo's words", () => {
   it("has the strip, the code note and the robots rule", () => {
     expect(DEMO_OTP_CODE).toBe("123456");
-    expect(DEMO_COPY.strip).toBe("גרסת הדגמה — שום דבר לא נשלח באמת");
+    expect(DEMO_COPY.strip).toBe("גרסת הדגמה - שום דבר לא נשלח באמת");
     expect(DEMO_COPY.codeNote).toBe("בגרסת ההדגמה הקוד הוא 123456");
     expect(DEMO_COPY.robots).toBe("noindex, nofollow");
   });
