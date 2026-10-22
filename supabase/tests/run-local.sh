@@ -50,4 +50,39 @@ for t in "$SUPA"/tests/*.test.sql; do
   echo "$out" | grep -E "ALL CHECKS PASSED|FAILED" || true
 done
 
+# -----------------------------------------------------------------------------
+# Two sessions at once (the *.test.sql files run in one transaction and cannot show this): the user-row lock in
+# enforce_agent_rules and enforce_agent_daily_cap must make the second writer wait and then fail.
+#   session A: begin → insert → hold the transaction 2 s → commit
+#   session B: starts 0.7 s later → the same insert → must wait for A and raise
+# -----------------------------------------------------------------------------
+race() { # race <label> <setup-sql> <insert-sql> <expected-error> <count-sql> <expected-count>
+  local label="$1" setup="$2" insert="$3" expected="$4" count_sql="$5" want="$6" out_b count
+  run -d "$DB_NAME" -c "$setup"
+  "${PSQL_CMD[@]}" -X -q -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; $insert; select pg_sleep(2); commit;" >/dev/null &
+  local pid_a=$!
+  sleep 0.7
+  out_b="$("${PSQL_CMD[@]}" -X -q -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "$insert" 2>&1)" && { wait "$pid_a"; echo "✖ race: $label — the second insert succeeded"; exit 1; }
+  wait "$pid_a" || { echo "✖ race: $label — the first insert failed"; exit 1; }
+  echo "$out_b" | grep -q "$expected" || { echo "$out_b"; echo "✖ race: $label — expected $expected"; exit 1; }
+  count="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "$count_sql")"
+  [[ "$count" == "$want" ]] || { echo "✖ race: $label — expected $want rows, got $count"; exit 1; }
+  echo "ok - race: $label"
+}
+
+echo "▶ concurrency (two sessions)"
+race "two parallel custom agents for a basic user → one row, the other agent_limit_reached" \
+  "insert into public.users (id, email) values ('c1111111-1111-4111-8111-111111111111', 'race-basic@example.com');
+   insert into public.subscriptions (user_id, plan, status, next_charge_at) values ('c1111111-1111-4111-8111-111111111111', 'basic', 'active', now() + interval '20 days');" \
+  "insert into public.agents (user_id, name, role) values ('c1111111-1111-4111-8111-111111111111', 'מרוץ ' || substr(md5(random()::text), 1, 6), 'custom')" \
+  "agent_limit_reached" \
+  "select count(*) from public.agents where user_id = 'c1111111-1111-4111-8111-111111111111'" \
+  "1"
+race "two parallel drafts of a cap-1 agent → one row, the other agent_daily_cap_reached" \
+  "update public.agents set permissions = '{\"max_outbound_per_day\": 1}' where user_id = 'c1111111-1111-4111-8111-111111111111';" \
+  "insert into public.pending_actions (user_id, kind, agent_key, agent_name) select user_id, 'send_mail', 'custom:' || id::text, name from public.agents where user_id = 'c1111111-1111-4111-8111-111111111111'" \
+  "agent_daily_cap_reached" \
+  "select count(*) from public.pending_actions where user_id = 'c1111111-1111-4111-8111-111111111111'" \
+  "1"
+
 echo "SUPABASE LOCAL: ALL TESTS PASSED"

@@ -11,6 +11,10 @@
 --                                    override מובנה רק בפרו, user_id / role / template לא משתנים.
 --                                    רץ גם תחת service_role — המכסה נאכפת גם אם קוד השרת טועה.
 --   * ייחוס: pending_actions / audit_log += agent_key, agent_name; messages += agent_key.
+--   * messages.hidden_from_model   — הודעות ניהול הסוכנים בוואטסאפ (אשף יצירה/עריכה, פקודות) לא נכנסות להיסטוריה
+--                                    של המודל ולסיכום הזיכרון: ההנחיות של סוכן לא דולפות לעוזרת הראשית (I5).
+--   * enforce_agent_daily_cap()    — טריגר על pending_actions: תקרה יומית לסוכן (max_outbound_per_day), נועל את
+--                                    שורת המשתמש, כך ששתי הודעות במקביל לא עוברות את התקרה.
 --   * pending_action_kind += 'forward_mail' (העברת מייל, באישור בכפתור כמו כל פעולה יוצאת).
 --   * RLS: authenticated כבר לא כותב ל-agents (רק SELECT של שלו) — כתיבה רק מהשרת, אחרי הוולידציה של
 --     lib/agents/service.ts.
@@ -198,9 +202,77 @@ comment on column public.audit_log.agent_key        is 'הסוכן שפעל (מ�
 comment on column public.audit_log.agent_name       is 'תמונת מצב של שם הסוכן — שורדת מחיקת סוכן. אינו מידע אישי ולא מאונמם.';
 comment on column public.messages.agent_key         is 'איזה סוכן ענה (תצוגה, דיבאג, עלויות לפי סוכן). null = העוזרת הראשית.';
 
+-- הודעות ניהול הסוכנים (שלב 5b בצינור: אשף יצירה/עריכה, פקודות, תשובות דטרמיניסטיות על סוכנים) נשמרות כרגיל,
+-- אבל לא נשלחות למודל — לא בהיסטוריה של התור ולא בסיכום המתגלגל.
+alter table public.messages
+  add column if not exists hidden_from_model boolean not null default false;
+comment on column public.messages.hidden_from_model is
+  'true = הודעה של ניהול סוכנים בוואטסאפ (אשף יצירה/עריכה, פקודות כמו "סוכנים", תשובות בלי מודל). נשמרת בהיסטוריה, אבל לא נכנסת להקשר של המודל ולא לסיכום הזיכרון (docs/design/agents.md I5): הנחיות של סוכן לא מגיעות לעוזרת הראשית.';
+
 create index if not exists pending_actions_user_agent_created_idx
   on public.pending_actions (user_id, agent_key, created_at)
   where agent_key is not null;
+
+-- -----------------------------------------------------------------------------
+-- 4b. תקרה יומית לסוכן (max_outbound_per_day) — נאכפת גם כאן, אטומית
+--     השרת בודק לפני כל טיוטה (guardAgentAction) ויוצר טיוטות של תור אחד בזו אחר זו; הטריגר מכסה שתי הודעות
+--     שמעובדות במקביל: נועל את שורת המשתמש, סופר את הטיוטות של הסוכן מחצות לפי users.timezone (בלי
+--     cancelled / expired / failed) ודוחה כשהגיעו לתקרה. התקרה: permissions של שורת הסוכן (מותאם — לפי ה-id
+--     שב-agent_key; מובנה — שורת ה-override של התפקיד), ברירת מחדל 10.
+-- -----------------------------------------------------------------------------
+create or replace function public.enforce_agent_daily_cap()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_tz    text;
+  v_cap   integer;
+  v_since timestamptz;
+  v_used  integer;
+  v_ref   text := split_part(new.agent_key, ':', 2);
+begin
+  -- one draft per user at a time (the same lock as enforce_agent_rules; FK checks take KEY SHARE and are not blocked)
+  select u.timezone into v_tz from public.users u where u.id = new.user_id for no key update;
+  if not found then
+    raise exception 'agent_user_not_found' using errcode = '23503';
+  end if;
+
+  select (a.permissions ->> 'max_outbound_per_day')::integer into v_cap
+    from public.agents a
+   where a.user_id = new.user_id
+     and case when new.agent_key like 'custom:%' then a.role = 'custom' and a.id::text = v_ref
+              else a.role::text = v_ref end
+   limit 1;
+  v_cap := coalesce(v_cap, 10);
+
+  v_since := date_trunc('day', now() at time zone coalesce(nullif(v_tz, ''), 'Asia/Jerusalem')) at time zone coalesce(nullif(v_tz, ''), 'Asia/Jerusalem');
+  select count(*) into v_used
+    from public.pending_actions p
+   where p.user_id = new.user_id
+     and p.agent_key = new.agent_key
+     and p.created_at >= v_since
+     and p.status not in ('cancelled', 'expired', 'failed');
+  if v_used >= v_cap then
+    raise exception 'agent_daily_cap_reached'
+      using errcode = 'P0001', detail = format('cap=%s used=%s', v_cap, v_used);
+  end if;
+  return new;
+end;
+$$;
+comment on function public.enforce_agent_daily_cap() is
+  'BEFORE INSERT על pending_actions כש-agent_key לא null: תקרה יומית לסוכן (agents.permissions.max_outbound_per_day, ברירת מחדל 10) מחצות לפי users.timezone. נועל את שורת המשתמש — שתי הודעות במקביל לא עוברות שתיהן (agent_daily_cap_reached). מקביל ל-guardAgentAction ב-lib/agents/guard.ts.';
+
+drop trigger if exists pending_actions_agent_daily_cap on public.pending_actions;
+create trigger pending_actions_agent_daily_cap
+  before insert on public.pending_actions
+  for each row
+  when (new.agent_key is not null)
+  execute function public.enforce_agent_daily_cap();
+
+revoke execute on function public.enforce_agent_daily_cap() from public, anon, authenticated;
+grant  execute on function public.enforce_agent_daily_cap() to service_role;
 
 -- -----------------------------------------------------------------------------
 -- 5. RLS: הלקוח קורא את הסוכנים שלו, לא כותב (כתיבה ישירה הייתה עוקפת את הוולידציה של שכבת השירות)

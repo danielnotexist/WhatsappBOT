@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { agentRowViolation } from "@/lib/agents/constraints";
+import { DEFAULT_MAX_OUTBOUND, agentRowViolation } from "@/lib/agents/constraints";
 import { customAgentLimit, effectivePlan, type EffectivePlan } from "@/lib/billing/plans";
-import { AgentLimitError, AgentNameTakenError, AgentPlanError, AgentRuleError } from "./errors";
+import { localDateOf, zonedToUtc } from "@/lib/time/zoned";
+import { AgentDailyCapError, AgentLimitError, AgentNameTakenError, AgentPlanError, AgentRuleError } from "./errors";
 import type {
   AgentKey,
   AgentPatch,
@@ -282,14 +283,20 @@ export class MemoryDb implements Db {
       tokens_out: row.tokens_out ?? null,
       cost_usd: row.cost_usd ?? null,
       agent_key: row.agent_key ?? null,
+      hidden_from_model: row.hidden_from_model ?? false,
       created_at: iso(this.now()),
     };
     this.messages.push(full);
     return full;
   }
 
-  async recentMessages(userId: string, limit: number): Promise<MessageRow[]> {
-    return this.messages.filter((m) => m.user_id === userId).slice(-limit);
+  async recentMessages(userId: string, limit: number, opts: { forModel?: boolean } = {}): Promise<MessageRow[]> {
+    return this.messages.filter((m) => m.user_id === userId && !(opts.forModel && m.hidden_from_model)).slice(-limit);
+  }
+
+  async hideMessageFromModel(userId: string, id: string): Promise<void> {
+    const row = this.messages.find((m) => m.id === id && m.user_id === userId);
+    if (row) row.hidden_from_model = true;
   }
 
   async countMessagesSince(userId: string, since: Date): Promise<number> {
@@ -314,9 +321,22 @@ export class MemoryDb implements Db {
 
   async createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date, meta?: PendingActionMeta): Promise<PendingActionRow> {
     if (meta && !/^(builtin:(secretary|intern|bookkeeper)|custom:[0-9a-f-]{36})$/.test(meta.agentKey)) throw new Error("pending_actions_agent_key_format");
+    if (meta) this.enforceDailyCap(userId, meta.agentKey); // trigger enforce_agent_daily_cap (synchronous here, so atomic)
     const row: PendingActionRow = { id: randomUUID(), user_id: userId, kind, payload, status: "pending", expires_at: iso(expiresAt), approved_msg_id: null, executed_at: null, error: null, agent_key: meta?.agentKey ?? null, agent_name: meta?.agentName ?? null, created_at: iso(this.now()) };
     this.pendingActions.push(row);
     return row;
+  }
+
+  /** Mirrors public.enforce_agent_daily_cap(): the agent's max_outbound_per_day (default 10) since local midnight. */
+  private enforceDailyCap(userId: string, agentKey: AgentKey): void {
+    const [kind, ref] = agentKey.split(":") as [string, string];
+    const row = this.agents.find((a) => a.user_id === userId && (kind === "custom" ? a.role === "custom" && a.id === ref : a.role === ref));
+    const n = (row?.permissions as Record<string, unknown> | undefined)?.max_outbound_per_day;
+    const cap = typeof n === "number" && Number.isInteger(n) ? n : DEFAULT_MAX_OUTBOUND;
+    const tz = this.users.get(userId)?.timezone || "Asia/Jerusalem";
+    const since = zonedToUtc({ ...localDateOf(this.now(), tz), hour: 0, minute: 0 }, tz).getTime();
+    const used = this.pendingActions.filter((p) => p.user_id === userId && p.agent_key === agentKey && Date.parse(p.created_at) >= since && !["cancelled", "expired", "failed"].includes(p.status)).length;
+    if (used >= cap) throw new AgentDailyCapError(`cap=${cap}`);
   }
 
   async getPendingAction(id: string): Promise<PendingActionRow | null> {

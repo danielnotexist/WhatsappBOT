@@ -103,6 +103,25 @@ describe("agent service", () => {
     expect(db.audit.at(-1)).toMatchObject({ agent_key: key, agent_name: "לקוחות VIP", target: key });
   });
 
+  it("a locked agent (over the quota after a downgrade) cannot be switched on or off, but can still be edited or deleted", async () => {
+    const { db, user } = await setup("pro");
+    const keys: string[] = [];
+    for (const [i, name] of ["ראשון", "שני"].entries()) {
+      db.now = () => new Date(NOW.getTime() + i * 60_000);
+      const r = await createAgentFor(db, user.id, blank(name), opts);
+      if (!r.ok) throw new Error("setup");
+      keys.push(r.agent.key);
+    }
+    db.seedSubscription(user.id, "basic", "active");
+    const second = keys[1]!;
+    expect((await loadAgents(db, user.id, NOW)).agents.find((a) => a.key === second)).toMatchObject({ status: "locked" });
+    expect(await setAgentEnabledFor(db, user.id, second, false, opts)).toMatchObject({ ok: false, code: "locked" });
+    expect(await setAgentEnabledFor(db, user.id, second, true, opts)).toMatchObject({ ok: false, code: "locked" });
+    expect(db.agents.find((a) => `custom:${a.id}` === second)).toMatchObject({ enabled: true }); // not silently disabled
+    expect(await updateAgentFor(db, user.id, second, { instructions: "לסכם רק חשבוניות." }, opts)).toMatchObject({ ok: true, agent: { status: "locked" } });
+    expect(await deleteAgentFor(db, user.id, second, opts)).toMatchObject({ ok: true });
+  });
+
   it("built-ins: trial cannot customise, basic needs pro, pro gets an override row (narrowing only), no delete or rename", async () => {
     const trial = await setup("trial");
     expect(await updateAgentFor(trial.db, trial.user.id, "builtin:secretary", { instructions: "x" }, opts)).toMatchObject({ ok: false, code: "trial_builtin_edit" });

@@ -98,12 +98,16 @@ export async function enterCode(page: Page, code: string): Promise<void> {
 }
 
 /**
- * On /pay/<token>: choose the basic plan and let the memory-mode HYP stand-in approve it. The stand-in is same-origin,
- * so the server action's redirect is soft-navigated by the router and stops on /api/pay/mock; load it for real
- * (real HYP is another origin, so the browser navigates there normally). Ends on /account with the paid plan.
+ * On /pay/<token>: choose a plan (basic by default) and let the memory-mode HYP stand-in approve it. The stand-in is
+ * same-origin, so the server action's redirect is soft-navigated by the router and stops on /api/pay/mock; load it for
+ * real (real HYP is another origin, so the browser navigates there normally). Ends on /account with the paid plan.
  */
-export async function payWithMock(page: Page): Promise<void> {
-  await page.locator("form").filter({ hasText: "בסיסי" }).getByRole("button", { name: "לתשלום" }).click();
+export async function payWithMock(page: Page, plan: "basic" | "pro" = "basic"): Promise<void> {
+  await page
+    .locator("form")
+    .filter({ hasText: plan === "basic" ? "בסיסי —" : "פרו —" })
+    .getByRole("button", { name: "לתשלום" })
+    .click();
   await page.waitForURL(/\/api\/pay\/mock\?|\/account\?/);
   if (/\/api\/pay\/mock\?/.test(page.url())) await page.goto(page.url());
   await expect(page).toHaveURL(/\/account(\?|$)/);

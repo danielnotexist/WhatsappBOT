@@ -121,7 +121,7 @@ describe("resolveAgents", () => {
 });
 
 describe("validation", () => {
-  it("names: length, characters, reserved words (built-ins, aliases, product name) and uniqueness", () => {
+  it("names: length, characters, reserved words (built-ins, aliases, product name, reply words) and uniqueness", () => {
     const existing = [{ id: "x", name: "חשבוניות" }];
     expect(validateAgentName("  לקוחות   VIP  ", existing)).toEqual({ ok: true, name: "לקוחות VIP" });
     expect(validateAgentName("״רו״ח ברק״", existing)).toEqual({ ok: true, name: "רו״ח ברק" });
@@ -130,6 +130,9 @@ describe("validation", () => {
     expect(validateAgentName("@מזכירה", existing)).toEqual({ ok: false, reason: "chars" });
     expect(validateAgentName("סוכן <x>", existing)).toEqual({ ok: false, reason: "chars" });
     for (const reserved of ["מזכירה", "המתמחה", "הנהלת חשבונות", "מנהלת חשבונות", PRODUCT_NAME, "סוכנים", "סיום"]) expect(validateAgentName(reserved, existing), reserved).toEqual({ ok: false, reason: "reserved" });
+    // reply words: a name alone is a vocative, so an agent named "כן" would swallow every "כן"
+    for (const reply of ["כן", "לא", "תודה", "שלום", "בסדר", "אוקיי", "אישור", "שמירה", "OK", "Yes", "כניסה"]) expect(validateAgentName(reply, existing), reply).toEqual({ ok: false, reason: "reserved" });
+    expect(validateAgentName("סוכן ביטוח", existing)).toEqual({ ok: true, name: "סוכן ביטוח" }); // reachable by vocative (routing.test)
     expect(validateAgentName("חשבוניות", existing)).toEqual({ ok: false, reason: "taken" });
     expect(validateAgentName("חשבוניות", existing, "x")).toEqual({ ok: true, name: "חשבוניות" }); // renaming itself
     expect(sanitizeName("מְזַכִּירָה")).toBe("מזכירה"); // niqqud stripped → reserved

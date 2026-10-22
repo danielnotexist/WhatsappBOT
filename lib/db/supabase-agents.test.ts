@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
-import { AgentLimitError, AgentNameTakenError } from "./errors";
+import { AgentDailyCapError, AgentLimitError, AgentNameTakenError } from "./errors";
 import { SupabaseDb } from "./supabase";
 
 /** A recording stand-in for the supabase-js builder: every call is logged; the terminal returns `result`. */
@@ -48,6 +48,35 @@ describe("SupabaseDb — agents (0006)", () => {
       ["eq", "id", AID],
     ]);
     expect(s.calls.find((c) => c[0] === "update")).toEqual(["update", { enabled: false }]);
+  });
+
+  it("maps the daily cap trigger on pending_actions to AgentDailyCapError (with the cap); other errors stay generic", async () => {
+    const capped = stub({ data: null, error: { code: "P0001", message: "agent_daily_cap_reached", details: "cap=3 used=3" } });
+    const err = await capped.db.createPendingAction(UID, "send_mail", {}, new Date(), { agentKey: "builtin:bookkeeper", agentName: "מנהלת חשבונות" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AgentDailyCapError);
+    expect((err as AgentDailyCapError).cap).toBe(3);
+    const other = stub({ data: null, error: { code: "23514", message: "pending_actions_agent_key_format" } });
+    await expect(other.db.createPendingAction(UID, "send_mail", {}, new Date())).rejects.toThrow(/Supabase createPendingAction/);
+  });
+
+  it("reads the model's history without the agent-management turns, and hides a message by owner and id", async () => {
+    const all = stub({ data: [], error: null });
+    await all.db.recentMessages(UID, 50);
+    expect(all.calls.filter((c) => c[0] === "eq")).toEqual([["eq", "user_id", UID]]); // the 24-hour window sees every message
+    const forModel = stub({ data: [], error: null });
+    await forModel.db.recentMessages(UID, 10, { forModel: true });
+    expect(forModel.calls.filter((c) => c[0] === "eq")).toEqual([
+      ["eq", "user_id", UID],
+      ["eq", "hidden_from_model", false],
+    ]);
+    expect(forModel.calls.find((c) => c[0] === "select")?.[1]).toContain("hidden_from_model");
+    const hide = stub({ data: null, error: null });
+    await hide.db.hideMessageFromModel(UID, AID);
+    expect(hide.calls.filter((c) => c[0] !== "from")).toEqual([
+      ["update", { hidden_from_model: true }],
+      ["eq", "user_id", UID],
+      ["eq", "id", AID],
+    ]);
   });
 
   it("counts an agent's drafts since a time, without cancelled / expired / failed", async () => {

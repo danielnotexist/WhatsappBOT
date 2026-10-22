@@ -71,7 +71,7 @@ describe("agent copy", () => {
       }
     }
     const templateRows: ListRow[] = [...BUILTIN_ORDER.map((r) => ({ id: `ag:tpl:${r}`, title: BUILTIN_AGENTS[r].name, description: BUILTIN_AGENTS[r].summary })), agentLists.blankRow];
-    const lists: ListRow[][] = [templateRows, agentLists.editRows(KEY, false, true), agentLists.editRows("builtin:secretary", true, false), TOOL_BUNDLES.map((b) => ({ id: `ag:tb:${b.id}`, title: b.title }))];
+    const lists: ListRow[][] = [templateRows, agentLists.editRows(KEY, false, "disable"), agentLists.editRows("builtin:secretary", true, "enable"), TOOL_BUNDLES.map((b) => ({ id: `ag:tb:${b.id}`, title: b.title }))];
     for (const rows of lists) {
       expect(rows.length).toBeLessThanOrEqual(10);
       for (const r of rows) {
@@ -82,6 +82,6 @@ describe("agent copy", () => {
     }
     for (const t of [agentLists.templateButton, agentLists.toolsButton, agentLists.editButton]) expect(t.length).toBeLessThanOrEqual(20);
     for (const t of [agentLists.templateTitle, agentLists.toolsTitle, agentLists.editTitle]) expect(t.length).toBeLessThanOrEqual(24);
-    expect(agentLists.editRows("builtin:secretary", true, true).some((r) => r.id.startsWith("ag:ed:delete"))).toBe(false);
+    expect(agentLists.editRows("builtin:secretary", true, "disable").some((r) => r.id.startsWith("ag:ed:delete"))).toBe(false);
   });
 });

@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { createAgentFor, loadAgents } from "@/lib/agents/service";
+import { describe, expect, it, vi } from "vitest";
+import { createAgentFor, loadAgents, updateAgentFor } from "@/lib/agents/service";
 import { MemoryDb } from "@/lib/db/memory";
-import type { GraphClient } from "@/lib/ms/graph";
+import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
+import { GraphClient } from "@/lib/ms/graph";
 import { graphTools } from "@/lib/ms/tools";
 import { MockProvider } from "./mock";
 import { parseRouterVerdict, runAssistant } from "./orchestrator";
@@ -139,6 +140,88 @@ describe("runAssistant with agents", () => {
     // the main assistant has no such cap or list
     const ai6 = new MockProvider().enqueue({ text: '{"intent":"email","complexity":"tool","needs_tools":true,"reply":null}' }, draft("hacker@evil.example", "d6"), { text: "" });
     expect((await runAssistant({ db, ai: ai6, user, connections: [], text: "x", now: NOW })).pendingActions[0]).toMatchObject({ agent_key: null, agent_name: null });
+  });
+
+  it("an agent limited to a list: moving or cancelling a meeting is checked against the people already on it", async () => {
+    const { db, user } = await proUser();
+    const fixture = createGraphFixture();
+    const client = new GraphClient({ getAccessToken: async () => "tok", fetchImpl: fixture.fetchImpl });
+    const tools = graphTools({ graph: async () => client, timeZone: "Asia/Jerusalem" });
+    const move = (id: string, callId: string) => ({ id: callId, name: "update_event", input: { id, subject: "", date: "2026-10-22", start: "12:00", end: "13:00", location: "" } });
+    const cancel = (id: string, callId: string) => ({ id: callId, name: "delete_event", input: { id, subject: "x" } });
+    const outputs = (req: { messages: { role: string; results?: { output: unknown }[] }[] }) => req.messages.filter((m) => m.role === "tool").at(-1)!.results!.map((r) => r.output as { status?: string; error?: string });
+
+    const listed = await updateAgentFor(db, user.id, "builtin:secretary", { recipients: "barak@cpa-barak.co.il" }, { source: "account", now: NOW });
+    if (!listed.ok) throw new Error(listed.message);
+    const ai = new MockProvider().enqueue({ toolCalls: [move("AAMkAGe2", "u1"), cancel("AAMkAGe1", "c1"), cancel("AAMkNOPE", "c2")], stopReason: "tool_use" }, (req) => {
+      const [moved, cancelled, missing] = outputs(req);
+      expect(moved).toMatchObject({ status: "pending_approval" }); // the only attendee is on the list
+      expect(cancelled).toMatchObject({ status: "pending_approval" }); // nobody to notify
+      expect(missing!.error).toBeTruthy(); // the event cannot be read → no draft
+      return { text: "" };
+    });
+    const out = await runAssistant({ db, ai, user, connections: [], text: "x", tools, agent: listed.agent, now: NOW });
+    expect(out.pendingActions.map((p) => [p.kind, p.payload.current_attendees])).toEqual([
+      ["update_event", ["barak@cpa-barak.co.il"]],
+      ["delete_event", []],
+    ]);
+
+    const other = await updateAgentFor(db, user.id, "builtin:secretary", { recipients: "office@other.example" }, { source: "account", now: NOW });
+    if (!other.ok) throw new Error(other.message);
+    const ai2 = new MockProvider().enqueue({ toolCalls: [move("AAMkAGe2", "u2"), cancel("AAMkAGe2", "c3")], stopReason: "tool_use" }, (req) => {
+      for (const o of outputs(req)) expect(o.error).toContain("הנמען barak@cpa-barak.co.il לא ברשימה המותרת לסוכן ״מזכירה״");
+      return { text: "הפגישה כוללת משתתף שלא ברשימה." };
+    });
+    expect((await runAssistant({ db, ai: ai2, user, connections: [], text: "x", tools, agent: other.agent, now: NOW })).pendingActions).toEqual([]);
+
+    // the main assistant and an agent without a list do not look anything up
+    const reads = () => fixture.state.calls.filter((c) => c.method === "GET" && c.url.includes("/me/events/")).length;
+    const before = reads();
+    const ai3 = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' }, { toolCalls: [move("AAMkAGe2", "u3")], stopReason: "tool_use" }, { text: "" });
+    const main = await runAssistant({ db, ai: ai3, user, connections: [], text: "x", tools, now: NOW });
+    expect(main.pendingActions[0]!.payload).not.toHaveProperty("current_attendees");
+    expect(reads()).toBe(before);
+  });
+
+  it("parallel draft calls in one response cannot pass the daily cap: drafts are created one at a time", async () => {
+    const { db, user } = await proUser();
+    const created = await createAgentFor(db, user.id, { name: "חשבוניות", template: "bookkeeper", instructions: "", capabilities: ["mail.read", "mail.draft", "mail.forward"], recipients: "office@barak-cpa.example", maxOutboundPerDay: 2 }, { source: "account", now: NOW });
+    if (!created.ok) throw new Error(created.message);
+    const agent = created.agent;
+    const inserts = vi.spyOn(db, "createPendingAction");
+    const toolCalls = [1, 2, 3, 4].map((i) => ({ id: `p${i}`, name: "draft_email", input: { to_name: "", to_email: "office@barak-cpa.example", subject: `חשבונית ${i}`, body: "b" } }));
+    const ai = new MockProvider().enqueue({ toolCalls, stopReason: "tool_use" }, (req) => {
+      const r = req.messages.filter((m) => m.role === "tool").at(-1)!;
+      const results = r.role === "tool" ? r.results : [];
+      expect(results.filter((x) => !x.isError)).toHaveLength(2);
+      expect(results.filter((x) => x.isError).map((x) => (x.output as { error: string }).error)).toEqual([
+        "הסוכן ״חשבוניות״ הגיע לתקרה היומית (2 פעולות יוצאות). לא נוצרה טיוטה; התקרה מתאפסת בחצות.",
+        "הסוכן ״חשבוניות״ הגיע לתקרה היומית (2 פעולות יוצאות). לא נוצרה טיוטה; התקרה מתאפסת בחצות.",
+      ]);
+      return { text: "הכנתי שתיים; הגעתי לתקרה היומית." };
+    });
+    const out = await runAssistant({ db, ai, user, connections: [], text: "להעביר את כל החשבוניות לרו״ח", agent, now: NOW });
+    expect(out.pendingActions).toHaveLength(2);
+    expect(db.pendingActions.filter((p) => p.agent_key === agent.key)).toHaveLength(2);
+    expect(inserts).toHaveBeenCalledTimes(2); // the guard refused the other two before any insert
+  });
+
+  it("two turns at the same time cannot pass the daily cap either: the database refuses the late draft", async () => {
+    const { db, user } = await proUser();
+    const created = await createAgentFor(db, user.id, { name: "חשבוניות", template: null, instructions: "x", capabilities: ["mail.draft"], maxOutboundPerDay: 1 }, { source: "account", now: NOW });
+    if (!created.ok) throw new Error(created.message);
+    const agent = created.agent;
+    const errors: string[] = [];
+    const turn = (id: string) =>
+      new MockProvider().enqueue({ toolCalls: [{ id, name: "draft_email", input: { to_name: "", to_email: "a@b.co", subject: "s", body: "b" } }], stopReason: "tool_use" }, (req) => {
+        const r = req.messages.filter((m) => m.role === "tool").at(-1)!;
+        if (r.role === "tool" && r.results[0]!.isError) errors.push((r.results[0]!.output as { error: string }).error);
+        return { text: "" };
+      });
+    const [a, b] = await Promise.all([runAssistant({ db, ai: turn("t1"), user, connections: [], text: "x", agent, now: NOW }), runAssistant({ db, ai: turn("t2"), user, connections: [], text: "x", agent, now: NOW })]);
+    expect(a.pendingActions.length + b.pendingActions.length).toBe(1);
+    expect(db.pendingActions.filter((p) => p.agent_key === agent.key)).toHaveLength(1);
+    expect(errors).toEqual(["הסוכן ״חשבוניות״ הגיע לתקרה היומית (1 פעולות יוצאות). לא נוצרה טיוטה; התקרה מתאפסת בחצות."]);
   });
 
   it("the router may pick an offered agent (a1…aN); an invented id goes to the main assistant", async () => {

@@ -253,7 +253,7 @@ function LimitFields({ scope, recipients, maxOutbound }: { scope: string; recipi
         inputMode="email"
         autoComplete="off"
         placeholder="office@example.co.il"
-        hint="מיילים, העברות והזמנות לפגישות רק לכתובות האלה, עד 5, מופרדות בפסיק. ריק: בלי הגבלה, ועדיין הכול באישור."
+        hint="מיילים, העברות ופגישות עם משתתפים (הזמנה, הזזה או ביטול) רק לכתובות האלה, עד 5, מופרדות בפסיק. ריק: בלי הגבלה, ועדיין הכול באישור."
       />
       <TextField
         id={fieldId(scope, "max")}

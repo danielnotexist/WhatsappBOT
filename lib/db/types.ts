@@ -204,6 +204,8 @@ export interface MessageRow {
   cost_usd: number | null;
   /** which agent answered (migration 0006); null = the main assistant */
   agent_key: string | null;
+  /** agent management in WhatsApp (step 5b): stored, but never in the model's history or the rolling summary (0006, I5) */
+  hidden_from_model: boolean;
   created_at: string;
 }
 
@@ -220,6 +222,7 @@ export interface NewMessage {
   tokens_out?: number | null;
   cost_usd?: number | null;
   agent_key?: AgentKey | null;
+  hidden_from_model?: boolean;
 }
 
 export interface ConversationStateRow {
@@ -364,7 +367,10 @@ export interface Db {
   // messages
   /** Inserts; returns null when wa_message_id already exists (webhook redelivery). */
   insertMessage(row: NewMessage): Promise<MessageRow | null>;
-  recentMessages(userId: string, limit: number): Promise<MessageRow[]>;
+  /** The last `limit` messages, oldest first. `forModel`: without the agent-management turns (hidden_from_model). */
+  recentMessages(userId: string, limit: number, opts?: { forModel?: boolean }): Promise<MessageRow[]>;
+  /** Keeps a stored message out of the model's history and the summary (an inbound turn step 5b answered). */
+  hideMessageFromModel(userId: string, id: string): Promise<void>;
   countMessagesSince(userId: string, since: Date): Promise<number>;
   /** voice notes: stores the STT transcript on the inbound audio message */
   setMessageTranscript(id: string, transcript: string): Promise<void>;

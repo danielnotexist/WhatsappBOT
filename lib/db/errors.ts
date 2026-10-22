@@ -8,7 +8,8 @@ export type AgentRuleCode =
   | "agent_immutable_field"
   | "agent_name_taken"
   | "agent_override_exists"
-  | "agent_invalid";
+  | "agent_invalid"
+  | "agent_daily_cap_reached";
 
 export class AgentRuleError extends Error {
   constructor(
@@ -44,6 +45,21 @@ export class AgentNameTakenError extends AgentRuleError {
   }
 }
 
+/**
+ * SQL `agent_daily_cap_reached` (trigger enforce_agent_daily_cap on pending_actions): the agent already prepared its
+ * max_outbound_per_day drafts since local midnight — also when two messages or parallel tool calls race.
+ */
+export class AgentDailyCapError extends AgentRuleError {
+  /** the cap the database applied (from the error detail "cap=N"), when known */
+  readonly cap: number | null;
+  constructor(detail: string | null = null) {
+    super("agent_daily_cap_reached", detail);
+    this.name = "AgentDailyCapError";
+    const m = detail?.match(/cap=(\d+)/);
+    this.cap = m ? Number(m[1]) : null;
+  }
+}
+
 /** Maps a PostgREST / Postgres error on the agents table to the matching error, or null when it is something else. */
 export function agentErrorFromPostgres(error: { code?: string | null; message?: string | null; details?: string | null } | null): AgentRuleError | null {
   if (!error) return null;
@@ -51,6 +67,7 @@ export function agentErrorFromPostgres(error: { code?: string | null; message?: 
   const detail = error.details ?? null;
   if (message.includes("agent_limit_reached")) return new AgentLimitError(detail);
   if (message.includes("agent_builtin_requires_pro")) return new AgentPlanError(detail);
+  if (message.includes("agent_daily_cap_reached")) return new AgentDailyCapError(detail);
   if (message.includes("agent_immutable_field")) return new AgentRuleError("agent_immutable_field", detail);
   if (error.code === "23505") return message.includes("agents_user_builtin_role_unique") ? new AgentRuleError("agent_override_exists", detail) : new AgentNameTakenError(detail);
   if (error.code === "23514") return new AgentRuleError("agent_invalid", message);

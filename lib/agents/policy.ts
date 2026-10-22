@@ -81,9 +81,19 @@ export function asksToBypassApproval(text: string | null | undefined): boolean {
 
 // ---------------------------------------------------------------- names
 
-/** Names no custom agent may take: the built-ins and their aliases, the product name, and the command words. */
+/**
+ * Whole-message words a user types as a reply or a keyword. A name is addressed by itself as a vocative ("<name>"
+ * alone), so an agent named "כן" would swallow every "כן" — these can never be names.
+ */
+const REPLY_WORDS = [
+  "כן", "לא", "תודה", "תודה רבה", "שלום", "היי", "הי", "בסדר", "אוקיי", "אוקי", "טוב", "סבבה", "מעולה", "יופי", "נכון",
+  "אישור", "מאשר", "מאשרת", "שמירה", "שמור", "לשמור", "מתאים", "לשנות", "שינוי", "ריק", "אין", "בלי הגבלה", "ללא הגבלה", "בלי תוספות",
+  "עזרה", "כניסה", "ok", "okay", "yes", "no", "thanks", "hi", "hello", "help", "login",
+];
+
+/** Names no custom agent may take: the built-ins and their aliases, the product name, command words and reply words. */
 export function reservedNames(): string[] {
-  return [...BUILTIN_ORDER.flatMap((r) => [BUILTIN_AGENTS[r].name, ...BUILTIN_AGENTS[r].aliases]), PRODUCT_NAME, "סוכן", "סוכנים", "סיום", "ביטול"];
+  return [...BUILTIN_ORDER.flatMap((r) => [BUILTIN_AGENTS[r].name, ...BUILTIN_AGENTS[r].aliases]), PRODUCT_NAME, "סוכן", "סוכנים", "סיום", "ביטול", ...REPLY_WORDS];
 }
 
 /** NFC, no niqqud / invisible characters, curly quotes → straight, one space between words, trimmed. */

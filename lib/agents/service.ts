@@ -32,6 +32,7 @@ export type AgentFailCode =
   | "recipients_invalid"
   | "recipients_too_many"
   | "max_outbound_invalid"
+  | "locked"
   | "not_found"
   | "invalid";
 
@@ -58,6 +59,7 @@ export const AGENT_FAIL_MESSAGES: Record<AgentFailCode, string> = {
   recipients_invalid: "אחת הכתובות לא נראית תקינה.",
   recipients_too_many: `אפשר עד ${MAX_RECIPIENTS} כתובות.`,
   max_outbound_invalid: `מספר הפעולות היומי צריך להיות בין ${MAX_OUTBOUND_MIN} ל-${MAX_OUTBOUND_MAX}.`,
+  locked: "הסוכן נעול: הוא מעבר למכסת הסוכנים של המסלול הנוכחי. אפשר למחוק סוכן אחר כדי לפנות מקום, או לעבור לפרו.",
   not_found: "הסוכן לא נמצא.",
   invalid: "השמירה לא הצליחה. כדאי לבדוק את השדות ולנסות שוב.",
 };
@@ -197,6 +199,9 @@ export async function updateAgentFor(db: Db, userId: string, key: string, input:
   const current = state.agents.find((a) => a.key === key);
   if (!current) return fail("not_found");
 
+  // a locked agent (over the quota after a downgrade) has no on / off: its state is the plan's. Writing enabled=false
+  // here would leave it silently disabled after an upgrade or after another agent is deleted.
+  if (input.enabled !== undefined && current.status === "locked") return fail("locked");
   if (parsed.kind === "builtin") {
     if (state.plan === "trial") return fail("trial_builtin_edit");
     if (state.plan !== "pro") return fail("builtin_needs_pro");

@@ -270,6 +270,12 @@ export class GraphClient {
     return r.value.map((e) => this.mapEvent(e));
   }
 
+  async getEvent(id: string, timeZone = "Asia/Jerusalem"): Promise<GraphEvent> {
+    const q = new URLSearchParams({ $select: "id,subject,start,end,isAllDay,location,attendees,organizer,webLink,bodyPreview" });
+    const e = await this.request<RawEvent>("GET", `/me/events/${encodeURIComponent(id)}?${q}`, undefined, { Prefer: `outlook.timezone="${timeZone}"` });
+    return this.mapEvent(e);
+  }
+
   async createEvent(input: NewEvent): Promise<GraphEvent> {
     const e = await this.request<RawEvent>("POST", "/me/events", this.eventBody(input), { Prefer: `outlook.timezone="${input.timeZone}"` });
     return this.mapEvent(e);

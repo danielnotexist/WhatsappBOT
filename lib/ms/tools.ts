@@ -31,6 +31,10 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
     }
   };
 
+  /** Who a change or a cancellation of an event reaches (its attendees), for an agent limited to a list of addresses. */
+  const attendeesOf = async (id: string): Promise<string[] | { error: string }> =>
+    (await guard(async (g) => (await g.getEvent(id, deps.timeZone)).attendees.map((a) => a.address.trim().toLowerCase()).filter(Boolean))) as string[] | { error: string };
+
   return [
     {
       name: "search_emails",
@@ -109,7 +113,10 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
       readOnly: false,
       input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-list_events"), subject: str("כותרת חדשה או ריק"), date: str("תאריך חדש YYYY-MM-DD או ריק"), start: str("שעת התחלה חדשה HH:MM או ריק"), end: str("שעת סיום חדשה HH:MM או ריק"), location: str("מקום חדש או ריק") }, required: ["id", "subject", "date", "start", "end", "location"], additionalProperties: false },
       run: async (input, ctx) => {
-        const pending = await ctx.createPending("update_event", { id: String(input.id ?? ""), subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? "") });
+        const id = String(input.id ?? "");
+        const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
+        if (attendees && !Array.isArray(attendees)) return attendees;
+        const pending = await ctx.createPending("update_event", { id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
         return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
       },
     },
@@ -119,7 +126,10 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
       readOnly: false,
       input_schema: { type: "object", properties: { id: str("מזהה האירוע"), subject: str("כותרת האירוע (לתצוגה)") }, required: ["id", "subject"], additionalProperties: false },
       run: async (input, ctx) => {
-        const pending = await ctx.createPending("delete_event", { id: String(input.id ?? ""), subject: String(input.subject ?? "") });
+        const id = String(input.id ?? "");
+        const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
+        if (attendees && !Array.isArray(attendees)) return attendees;
+        const pending = await ctx.createPending("delete_event", { id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
         return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
       },
     },

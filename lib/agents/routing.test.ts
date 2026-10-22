@@ -30,6 +30,17 @@ describe("parseAgentAddress", () => {
     expect(parseAgentAddress("סוכנים", agents)).toBeNull();
   });
 
+  it("a name that starts with ״סוכן ״ is reachable by vocative too (voice notes), and by @ / סוכן:", () => {
+    const withPrefix = resolveAgents(U, [custom("סוכן ביטוח", "00000000-0000-4000-8000-000000000004"), custom("ביטוח", "00000000-0000-4000-8000-000000000005")], "pro");
+    expect(parseAgentAddress("סוכן ביטוח, מה חדש?", withPrefix)).toMatchObject({ kind: "agent", agent: { name: "סוכן ביטוח" }, rest: "מה חדש?", via: "vocative" });
+    expect(parseAgentAddress("סוכן ביטוח", withPrefix)).toMatchObject({ kind: "agent", agent: { name: "סוכן ביטוח" }, rest: "", via: "vocative" });
+    expect(parseAgentAddress("@סוכן ביטוח מה חדש", withPrefix)).toMatchObject({ agent: { name: "סוכן ביטוח" }, rest: "מה חדש", via: "mention" });
+    expect(parseAgentAddress("סוכן: סוכן ביטוח מה חדש", withPrefix)).toMatchObject({ agent: { name: "סוכן ביטוח" }, via: "command" });
+    expect(parseAgentAddress("סוכן: ביטוח מה חדש", withPrefix)).toMatchObject({ agent: { name: "ביטוח" }, via: "command" });
+    expect(parseAgentAddress("סוכן ביטוח התקשר אליי", withPrefix)).toMatchObject({ agent: { name: "ביטוח" }, via: "command" }); // the command form, as before
+    expect(parseAgentAddress("סוכן ביטוח, מה חדש?", agents)).toBeNull(); // without such an agent: ordinary text
+  });
+
   it("vocative (voice notes): name, … / name: … / the name alone", () => {
     expect(parseAgentAddress("מזכירה, מה יש לי מחר?", agents)).toMatchObject({ agent: { role: "secretary" }, rest: "מה יש לי מחר?", via: "vocative" });
     expect(parseAgentAddress("חשבוניות: מה פתוח", agents)).toMatchObject({ agent: { name: "חשבוניות" }, rest: "מה פתוח", via: "vocative" });
@@ -49,6 +60,12 @@ describe("parseAgentAddress", () => {
     expect(parseAgentAddress("תעבירי ל-@מזכירה את זה", agents)).toBeNull();
     expect(parseAgentAddress("מייל ל-dana@levi.co.il", agents)).toBeNull();
     expect(parseAgentAddress("@ 10 בבוקר", agents)).toBeNull();
+    // a word that cannot be a name is not an address either (an e-mail address, a handle with symbols)
+    expect(parseAgentAddress("@user@x.com מה זה?", agents)).toBeNull();
+    expect(parseAgentAddress("@dana_levi תעני לה", agents)).toBeNull();
+    expect(parseAgentAddress("@10 בבוקר יש פגישה", agents)).toBeNull(); // no letter: a time, not a name
+    expect(parseAgentAddress("סוכן: 2 מה חדש", agents)).toBeNull();
+    expect(parseAgentAddress("@Marketing תכתבי פוסט", agents)).toEqual({ kind: "unknown", name: "Marketing", rest: "תכתבי פוסט" });
   });
 
   it("back to the main assistant: @product, product name as vocative, סיום only while sticky", () => {

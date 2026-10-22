@@ -169,6 +169,51 @@ select pg_temp.expect_error('messages: malformed agent_key → check violation',
   $$insert into public.messages (user_id, direction, text, agent_key) values ('a2222222-2222-4222-8222-222222222222', 'out', 'x', 'custom:not-a-uuid')$$, '23514');
 insert into public.messages (user_id, direction, text, agent_key) values
   ('a2222222-2222-4222-8222-222222222222', 'out', '*מזכירה:* מחר פנוי.', 'builtin:secretary');
+select pg_temp.check('messages.hidden_from_model: false by default (an ordinary turn reaches the model)',
+  (select not hidden_from_model from public.messages where text = '*מזכירה:* מחר פנוי.'));
+insert into public.messages (user_id, direction, text, hidden_from_model) values
+  ('a2222222-2222-4222-8222-222222222222', 'out', '*סוכן חדש: לקוחות*', true);
+select pg_temp.check('messages.hidden_from_model: an agent-management turn is stored hidden',
+  (select hidden_from_model from public.messages where text = '*סוכן חדש: לקוחות*'));
+select pg_temp.expect_error('messages.hidden_from_model: not null',
+  $$insert into public.messages (user_id, direction, text, hidden_from_model) values ('a2222222-2222-4222-8222-222222222222', 'out', 'x', null)$$, '23502');
+
+-- ---------- daily cap (enforce_agent_daily_cap) ----------
+select pg_temp.check('enforce_agent_daily_cap: not executable by clients',
+  not has_function_privilege('authenticated', 'public.enforce_agent_daily_cap()', 'execute'));
+update public.agents set permissions = '{"max_outbound_per_day": 2}' where name = 'חשבוניות';
+insert into public.pending_actions (user_id, kind, payload, agent_key, agent_name) values
+  ('a2222222-2222-4222-8222-222222222222', 'send_mail', '{}',
+   'custom:' || (select id::text from public.agents where name = 'חשבוניות'), 'חשבוניות');
+select pg_temp.check('daily cap: two drafts of a cap-2 agent today',
+  (select count(*) from public.pending_actions where agent_name = 'חשבוניות') = 2);
+select pg_temp.expect_error('daily cap: the third draft of a cap-2 agent → agent_daily_cap_reached',
+  $$insert into public.pending_actions (user_id, kind, agent_key, agent_name)
+    select 'a2222222-2222-4222-8222-222222222222', 'send_mail', 'custom:' || id::text, name from public.agents where name = 'חשבוניות'$$,
+  'P0001', 'agent_daily_cap_reached');
+update public.pending_actions set status = 'cancelled'
+ where id = (select id from public.pending_actions where agent_name = 'חשבוניות' and kind = 'send_mail' limit 1);
+insert into public.pending_actions (user_id, kind, agent_key, agent_name)
+select 'a2222222-2222-4222-8222-222222222222', 'send_mail', 'custom:' || id::text, name from public.agents where name = 'חשבוניות';
+select pg_temp.check('daily cap: a cancelled draft does not count',
+  (select count(*) from public.pending_actions where agent_name = 'חשבוניות' and status <> 'cancelled') = 2);
+update public.pending_actions set created_at = now() - interval '2 days' where agent_name = 'חשבוניות';
+insert into public.pending_actions (user_id, kind, agent_key, agent_name)
+select 'a2222222-2222-4222-8222-222222222222', 'send_mail', 'custom:' || id::text, name from public.agents where name = 'חשבוניות';
+select pg_temp.check('daily cap: drafts from before local midnight do not count',
+  (select count(*) from public.pending_actions where agent_name = 'חשבוניות' and created_at >= now() - interval '1 hour') = 1);
+insert into public.pending_actions (user_id, kind)
+select 'a2222222-2222-4222-8222-222222222222', 'send_mail' from generate_series(1, 12);
+select pg_temp.check('daily cap: the main assistant (agent_key null) has no cap',
+  (select count(*) from public.pending_actions where user_id = 'a2222222-2222-4222-8222-222222222222' and agent_key is null) = 12);
+select pg_temp.expect_error('daily cap: a built-in without a cap gets the default 10 (11 in one statement → refused)',
+  $$insert into public.pending_actions (user_id, kind, agent_key, agent_name)
+    select 'a3333333-3333-4333-8333-333333333333', 'create_event', 'builtin:secretary', 'מזכירה' from generate_series(1, 11)$$,
+  'P0001', 'agent_daily_cap_reached');
+insert into public.pending_actions (user_id, kind, agent_key, agent_name)
+select 'a3333333-3333-4333-8333-333333333333', 'create_event', 'builtin:secretary', 'מזכירה' from generate_series(1, 10);
+select pg_temp.check('daily cap: ten drafts of the built-in fit the default cap',
+  (select count(*) from public.pending_actions where agent_key = 'builtin:secretary') = 10);
 insert into public.audit_log (user_id, action, target, result, agent_key, agent_name, pending_action_id)
 select 'a2222222-2222-4222-8222-222222222222', 'forward_mail.execute', p.id::text, 'ok', p.agent_key, p.agent_name, p.id
   from public.pending_actions p where p.kind = 'forward_mail';

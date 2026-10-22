@@ -1,7 +1,7 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { requireEnv } from "@/lib/env";
-import { agentErrorFromPostgres } from "./errors";
+import { AgentDailyCapError, agentErrorFromPostgres } from "./errors";
 import type {
   AgentKey,
   AgentPatch,
@@ -55,7 +55,7 @@ export class SupabaseDb implements Db {
   private static USER_COLS =
     "id,email,name,business_name,business_type,timezone,morning_time,locale,profile,created_at,deleted_at";
   private static PA_COLS = "id,user_id,kind,payload,status,expires_at,approved_msg_id,executed_at,error,agent_key,agent_name,created_at";
-  private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,agent_key,created_at";
+  private static MSG_COLS = "id,user_id,wa_message_id,direction,type,text,media_url,transcript,model_used,tokens_in,tokens_out,cost_usd,agent_key,hidden_from_model,created_at";
   private static AGENT_COLS = "id,user_id,name,role,template,instructions,tools,permissions,enabled,created_at,updated_at";
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,expires_at,created_at,revoked_at";
@@ -187,15 +187,17 @@ export class SupabaseDb implements Db {
     return data as unknown as MessageRow;
   }
 
-  async recentMessages(userId: string, limit: number): Promise<MessageRow[]> {
-    const { data, error } = await this.client
-      .from("messages")
-      .select(SupabaseDb.MSG_COLS)
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
+  async recentMessages(userId: string, limit: number, opts: { forModel?: boolean } = {}): Promise<MessageRow[]> {
+    let q = this.client.from("messages").select(SupabaseDb.MSG_COLS).eq("user_id", userId);
+    if (opts.forModel) q = q.eq("hidden_from_model", false);
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
     if (error) this.fail("recentMessages", error);
     return ((data as unknown as MessageRow[]) ?? []).reverse();
+  }
+
+  async hideMessageFromModel(userId: string, id: string): Promise<void> {
+    const { error } = await this.client.from("messages").update({ hidden_from_model: true }).eq("user_id", userId).eq("id", id);
+    if (error) this.fail("hideMessageFromModel", error);
   }
 
   async countMessagesSince(userId: string, since: Date): Promise<number> {
@@ -235,7 +237,11 @@ export class SupabaseDb implements Db {
       .insert({ user_id: userId, kind, payload, expires_at: expiresAt.toISOString(), ...(meta ? { agent_key: meta.agentKey, agent_name: meta.agentName } : {}) })
       .select(SupabaseDb.PA_COLS)
       .single();
-    if (error) this.fail("createPendingAction", error);
+    if (error) {
+      // the daily cap trigger (enforce_agent_daily_cap) → a typed error; anything else stays generic
+      if (error.message?.includes("agent_daily_cap_reached")) throw new AgentDailyCapError(error.details ?? null);
+      this.fail("createPendingAction", error);
+    }
     return data as unknown as PendingActionRow;
   }
 

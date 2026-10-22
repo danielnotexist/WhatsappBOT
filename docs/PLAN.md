@@ -87,9 +87,9 @@ link_tokens       id, user_id, token (unique), expires_at, used_at
 wa_identities     id, user_id, phone_e164 (unique), wa_name, linked_at, status
 connections       id, user_id, provider (microsoft|google), account_email, tenant_id, scopes[], enc_access, enc_refresh, expires_at, status, consent_type (user|admin), created_at, revoked_at
 graph_subscriptions id, connection_id, subscription_id, resource, expires_at, client_state
-messages          id, user_id, wa_message_id (unique), direction (in|out), type (text|audio|image|doc|button|template), text, media_url, transcript, model_used, tokens_in, tokens_out, cost_usd, agent_key, created_at
+messages          id, user_id, wa_message_id (unique), direction (in|out), type (text|audio|image|doc|button|template), text, media_url, transcript, model_used, tokens_in, tokens_out, cost_usd, agent_key, hidden_from_model (ניהול סוכנים — לא נשלח למודל), created_at
 conversation_state user_id (pk), summary, last_summarized_msg_id, facts jsonb, updated_at
-pending_actions   id, user_id, kind (send_mail|create_event|update_event|delete_event|share_file|forward_mail), payload jsonb, status (pending|approved|edited|cancelled|executed|expired), expires_at, approved_msg_id, executed_at, agent_key, agent_name
+pending_actions   id, user_id, kind (send_mail|create_event|update_event|delete_event|share_file|forward_mail), payload jsonb, status (pending|approved|edited|cancelled|executed|expired), expires_at, approved_msg_id, executed_at, agent_key, agent_name (תקרה יומית לסוכן — טריגר enforce_agent_daily_cap)
 jobs              id, user_id, kind (morning_summary|reminder|renew_subscription|charge|retry), run_at, payload jsonb, status, attempts, last_error
 reminders         id, user_id, text, due_at, job_id, status
 usage             user_id, period_start, counted_messages, free_remaining, plan_limit, updated_at

@@ -169,12 +169,13 @@ export const agentLists = {
   editButton: "בחירה",
   editTitle: "עריכה",
   blankRow: { id: "ag:tpl:blank", title: "סוכן ריק", description: "מתחילים מאפס: שם, הנחיות ויכולות" } satisfies ListRow,
-  editRows: (key: string, builtin: boolean, enabled: boolean): ListRow[] =>
+  /** `toggle`: which switch to offer — none for a locked agent (over the quota; only an upgrade or a deletion frees it). */
+  editRows: (key: string, builtin: boolean, toggle: "enable" | "disable" | null): ListRow[] =>
     [
       { id: `ag:ed:instructions:${key}`, title: builtin ? "הנחיות נוספות" : "שינוי הנחיות", description: builtin ? "מה להוסיף להנחיות של הסוכן" : "מה הסוכן עושה ואיך" },
       { id: `ag:ed:tools:${key}`, title: "שינוי יכולות", description: builtin ? "צמצום מתוך היכולות של הסוכן" : "מייל, יומן, קבצים, תזכורות" },
       { id: `ag:ed:recipients:${key}`, title: "נמענים מותרים", description: "לאילו כתובות מותר להכין מיילים והעברות" },
-      { id: `ag:ed:toggle:${key}`, title: enabled ? "השבתה" : "הפעלה", description: enabled ? "הסוכן לא יענה עד שיופעל שוב" : "הסוכן יחזור לענות" },
+      ...(toggle ? [{ id: `ag:ed:toggle:${key}`, title: toggle === "disable" ? "השבתה" : "הפעלה", description: toggle === "disable" ? "הסוכן לא יענה עד שיופעל שוב" : "הסוכן יחזור לענות" }] : []),
       ...(builtin ? [] : [{ id: `ag:ed:delete:${key}`, title: "מחיקה", description: "מחיקת הסוכן וההנחיות שלו" }]),
     ] satisfies ListRow[],
 };

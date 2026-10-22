@@ -148,6 +148,7 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
         state.events = state.events.filter((x) => x.id !== id);
         return new Response(null, { status: 202 });
       }
+      if (method === "GET") return json(e);
       if (method === "PATCH") {
         Object.assign(e, { ...(body.subject !== undefined ? { subject: body.subject } : {}), ...(body.start ? { start: body.start } : {}), ...(body.end ? { end: body.end } : {}), ...(body.location ? { location: body.location } : {}) });
         return json(e);

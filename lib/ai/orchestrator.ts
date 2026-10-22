@@ -1,7 +1,8 @@
 import { toolsForAgent } from "@/lib/agents/capabilities";
-import { guardAgentAction } from "@/lib/agents/guard";
-import type { ResolvedAgent } from "@/lib/agents/policy";
+import { dailyCapMessage, guardAgentAction } from "@/lib/agents/guard";
+import { maxOutboundPerDay, type ResolvedAgent } from "@/lib/agents/policy";
 import { agentChoices, buildAgentSection, buildRouterAgentBlock } from "@/lib/agents/prompt";
+import { AgentDailyCapError } from "@/lib/db/errors";
 import type { AgentKey, ConnectionRow, Db, PendingActionRow, UserRow } from "@/lib/db/types";
 import { loadMemory } from "./memory";
 import { ROUTER_INSTRUCTIONS, buildSystemPrompt } from "./system-prompt";
@@ -131,20 +132,36 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
   const byName = new Map(tools.map((t) => [t.name, t]));
   const pendingActions: PendingActionRow[] = [];
   const turnAgent = agent;
+  // The tool calls of one model response run in parallel (Promise.all below), but drafts are created one at a time:
+  // the guard counts the agent's drafts and the insert lands before the next draft is checked, so parallel calls
+  // cannot all pass the daily cap. Messages processed at the same time are covered by the database trigger.
+  let lane: Promise<unknown> = Promise.resolve();
+  const oneAtATime = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = lane.then(fn);
+    lane = run.catch(() => undefined);
+    return run;
+  };
   const toolCtx: ToolContext = {
     db: input.db,
     userId: input.user.id,
     now,
-    async createPending(kind, payload) {
-      if (turnAgent) {
-        const refused = await guardAgentAction(input.db, input.user.id, turnAgent, kind, payload, now, input.user.timezone);
-        if (refused) throw new Error(refused);
-      }
-      const meta = turnAgent ? { agentKey: turnAgent.key, agentName: turnAgent.name } : undefined;
-      const row = await input.db.createPendingAction(input.user.id, kind, payload, new Date(now.getTime() + PENDING_TTL_MS), meta);
-      pendingActions.push(row);
-      return row;
-    },
+    checksRecipients: Boolean(turnAgent?.permissions.recipients?.length),
+    createPending: (kind, payload) =>
+      oneAtATime(async () => {
+        if (turnAgent) {
+          const refused = await guardAgentAction(input.db, input.user.id, turnAgent, kind, payload, now, input.user.timezone);
+          if (refused) throw new Error(refused);
+        }
+        const meta = turnAgent ? { agentKey: turnAgent.key, agentName: turnAgent.name } : undefined;
+        try {
+          const row = await input.db.createPendingAction(input.user.id, kind, payload, new Date(now.getTime() + PENDING_TTL_MS), meta);
+          pendingActions.push(row);
+          return row;
+        } catch (e) {
+          if (turnAgent && e instanceof AgentDailyCapError) throw new Error(dailyCapMessage(turnAgent.name, e.cap ?? maxOutboundPerDay(turnAgent.permissions)));
+          throw e;
+        }
+      }),
   };
   const messages: ChatMessage[] = [...history];
   const maxRounds = input.maxRounds ?? 4;

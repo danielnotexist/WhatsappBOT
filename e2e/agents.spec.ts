@@ -82,6 +82,51 @@ test.describe("personal area — agents", () => {
     await ctx.close();
   });
 
+  test("pro: the built-ins can be tuned and disabled, up to three agents of your own", async ({ browser }) => {
+    test.setTimeout(180_000);
+    const ctx = await newContext(browser);
+    await signup(ctx);
+    const page = await ctx.newPage();
+    await page.goto("/account");
+    await page.goto((await page.getByRole("link", { name: "בחירת מסלול" }).getAttribute("href"))!);
+    await payWithMock(page, "pro");
+
+    const agents = page.getByRole("region", { name: "הסוכנים שלי" });
+    await expect(agents.getByText("סוכנים משלך: 0 מתוך 3, בנוסף לשלושת הסוכנים המובנים.")).toBeVisible();
+    await expect(agents.getByRole("link", { name: "לשדרוג לפרו" })).toHaveCount(0);
+    await expect(agents.getByText("מובנה", { exact: true })).toHaveCount(3);
+    await expect(agents.getByText("כלול במסלול פרו")).toHaveCount(0);
+    const row = (name: string) => agents.locator("li").filter({ has: page.locator("summary") }).filter({ hasText: name });
+
+    // the secretary: additional instructions and a recipient list; no rename, no delete
+    await row("מזכירה").getByText("עריכה", { exact: true }).click();
+    await expect(row("מזכירה").getByLabel("שם", { exact: true })).toHaveCount(0);
+    await expect(row("מזכירה").getByText("מחיקת הסוכן", { exact: true })).toHaveCount(0);
+    await row("מזכירה").getByLabel("הנחיות נוספות").fill("פגישות רק אחרי 10:00.");
+    await row("מזכירה").getByLabel("כתובות מותרות").fill("barak@cpa-barak.example");
+    await shot(page, "account-agents-pro-builtin");
+    await row("מזכירה").getByRole("button", { name: "שמירה" }).click();
+    await expect(agents.getByRole("status")).toContainText("השינויים בסוכן ״מזכירה״ נשמרו.");
+
+    // the intern: disabled
+    await row("מתמחה").getByText("עריכה", { exact: true }).click();
+    await row("מתמחה").getByRole("button", { name: "השבתת הסוכן" }).click();
+    await expect(agents.getByRole("status")).toContainText("הסוכן ״מתמחה״ הושבת.");
+    await expect(row("מתמחה").getByText("מושבת", { exact: true })).toBeVisible();
+
+    // an agent of your own, from scratch: the quota line counts it and there is room for more
+    await agents.getByRole("link", { name: /^סוכן ריק/ }).click();
+    await expect(page).toHaveURL(/\/account\?new=blank#agents$/);
+    await agents.getByLabel("שם", { exact: true }).fill("לקוחות");
+    await agents.getByLabel("מה הסוכן עושה ואיך").fill("לסכם מיילים מלקוחות, בקצרה.");
+    await agents.getByRole("button", { name: "יצירת הסוכן" }).click();
+    await expect(agents.getByRole("status").filter({ hasText: "הסוכן ״לקוחות״ נשמר." })).toBeVisible();
+    await expect(agents.getByText("סוכנים משלך: 1 מתוך 3, בנוסף לשלושת הסוכנים המובנים.")).toBeVisible();
+    await expect(agents.getByRole("link", { name: /^סוכן ריק/ })).toBeVisible(); // room for two more
+    await shot(page, "account-agents-pro");
+    await ctx.close();
+  });
+
   test("a phone-width page has no horizontal scroll with the form open", async ({ browser }) => {
     const ctx = await newContext(browser, { width: 375, height: 812 });
     await signup(ctx);

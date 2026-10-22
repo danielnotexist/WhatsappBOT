@@ -112,7 +112,7 @@ export async function handleAgentMessage(ctx: BotContext, user: UserRow, msg: In
 
   // 4. who the message is addressed to
   const sticky = t.sticky();
-  const address = parseAgentAddress(text, state.agents, { sticky: Boolean(sticky) });
+  let address = parseAgentAddress(text, state.agents, { sticky: Boolean(sticky) });
   const choices = activeAgents(state.agents);
   if (address?.kind === "unknown") {
     await t.say(acopy["agent.not_found"](address.name, state.agents.filter((a) => a.status !== "not_in_plan").map((a) => a.name)));
@@ -124,7 +124,13 @@ export async function handleAgentMessage(ctx: BotContext, user: UserRow, msg: In
       await t.say(acopy["agent.back_to_main"]());
       return { handled: true, note: "agent back to main" };
     }
-    return { handled: false, text: address.rest, agent: null, choices, activeKey: null, clearSticky: true };
+    // an explicit "@עלזה <request>": the main assistant answers — no agent choices for the router, stickiness cleared
+    return { handled: false, text: address.rest, agent: null, choices: [], activeKey: null, clearSticky: true };
+  }
+  if (address?.kind === "agent" && address.agent.status !== "active" && address.via === "vocative") {
+    // "המזכירה, דנה ביקשה…" from a basic user, or a disabled / locked agent's name used as an ordinary word: not an
+    // explicit address — the whole message goes on as it is
+    address = null;
   }
   if (address?.kind === "agent") {
     const a = address.agent;
@@ -151,6 +157,10 @@ export async function updateStickyAfterTurn(ctx: BotContext, user: UserRow, answ
 
 // ---------------------------------------------------------------- one turn
 
+/**
+ * One 5b turn. Everything it sends is stored with `hidden_from_model` (and the pipeline hides the inbound message it
+ * answered): agent management — a dictated instruction above all — never reaches the model's history or the summary.
+ */
 class Turn {
   private readonly payLink: string;
 
@@ -165,17 +175,17 @@ class Turn {
 
   async say(text: string): Promise<void> {
     await this.ctx.wa.sendText(this.to, text);
-    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "text", text });
+    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "text", text, hidden_from_model: true });
   }
 
   private async buttons(text: string, buttons: Parameters<BotContext["wa"]["sendButtons"]>[2]): Promise<void> {
     await this.ctx.wa.sendButtons(this.to, text, buttons);
-    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "button", text });
+    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "button", text, hidden_from_model: true });
   }
 
   private async list(text: string, button: string, title: string, rows: ListRow[]): Promise<void> {
     await this.ctx.wa.sendList(this.to, text, button, [{ title, rows }]);
-    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "button", text });
+    await this.ctx.db.insertMessage({ user_id: this.user.id, direction: "out", type: "button", text, hidden_from_model: true });
   }
 
   // ---- profile state ----
@@ -221,6 +231,8 @@ class Turn {
         return acopy["agent.trial_builtin_edit"](this.payLink);
       case "builtin_no_delete":
         return acopy["agent.delete.builtin"](name);
+      case "locked":
+        return acopy["agent.locked"](name, this.payLink);
       case "recipients_invalid":
         return acopy["agent.error"](r.detail ? `הכתובת ״${r.detail}״ לא נראית תקינה.` : r.message);
       default:
@@ -282,7 +294,9 @@ class Turn {
 
   private async editMenu(agent: ResolvedAgent): Promise<void> {
     await this.saveDraft(null);
-    await this.list(acopy["agent.edit.menu"](agent.name), agentLists.editButton, agentLists.editTitle, agentLists.editRows(agent.key, agent.kind === "builtin", agent.status !== "disabled"));
+    // a locked agent (over the quota after a downgrade) has no enable / disable: its state is the plan's, not a switch
+    const toggle = agent.status === "locked" ? null : agent.status === "disabled" ? "enable" : "disable";
+    await this.list(acopy["agent.edit.menu"](agent.name), agentLists.editButton, agentLists.editTitle, agentLists.editRows(agent.key, agent.kind === "builtin", toggle));
   }
 
   private async confirmDelete(agent: ResolvedAgent): Promise<void> {

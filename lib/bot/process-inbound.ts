@@ -96,8 +96,13 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
 
   // 5b. agents (docs/design/agents.md §5.1) — deterministic, no model, not counted: `ag:` buttons, the create / edit
   //     flows, management commands, and addresses that cannot reach the model. A message to an available agent goes on.
+  //     What 5b answers is agent management (a dictated instruction, a name, a choice): kept in the history, but
+  //     never in the model's context or the summary (I5) — its replies are stored hidden, and so is this message.
   const routing = await handleAgentMessage(ctx, user, msg, text, sub);
-  if (routing.handled) return { handled: true, note: routing.note };
+  if (routing.handled) {
+    await ctx.db.hideMessageFromModel(user.id, stored.id);
+    return { handled: true, note: routing.note };
+  }
   const ask = routing.text;
 
   // 5c. trial / monthly quota

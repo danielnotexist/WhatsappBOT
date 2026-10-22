@@ -149,6 +149,20 @@ describe("agents in WhatsApp — basic", () => {
     expect(await counted(h, user.id)).toBe(1);
   });
 
+  it("a built-in's name as a vocative is ordinary text outside pro (only @ / סוכן: get the upgrade note)", async () => {
+    const h = makeHarness();
+    const user = await readyUser(h, "basic");
+    h.ai.enqueue({ text: JSON.stringify({ intent: "other", complexity: "simple", needs_tools: false, reply: "רשמתי.", agent: null }) });
+    const r = await processInbound(h.ctx, h.inbound("המזכירה, דנה ביקשה שאחזור אליה מחר"));
+    expect(r.note).toBe("replied");
+    expect(h.wa.texts.at(-1)).toBe("רשמתי.");
+    expect(h.ai.calls[0]!.messages.at(-1)).toEqual({ role: "user", content: "המזכירה, דנה ביקשה שאחזור אליה מחר" }); // the whole message
+    expect(await counted(h, user.id)).toBe(1);
+    await processInbound(h.ctx, h.inbound("סוכן: מזכירה מה יש לי מחר?"));
+    expect(h.wa.texts.at(-1)).toContain("״מזכירה״ הוא סוכן מובנה של מסלול פרו");
+    expect(await counted(h, user.id)).toBe(1);
+  });
+
   it("a choice question does not trap the user: an unrelated message drops the draft and is answered normally", async () => {
     const h = makeHarness();
     const user = await readyUser(h, "basic");
@@ -168,6 +182,33 @@ describe("agents in WhatsApp — basic", () => {
     await processInbound(h.ctx, h.button("ag:save", "שמירה"));
     expect(h.wa.texts.at(-1)).toContain("הבחירה הזו כבר לא פעילה");
     expect(h.db.agents).toHaveLength(0);
+  });
+
+  it("agent management never reaches the model: the flow's messages are stored hidden from the history and the summary", async () => {
+    const h = makeHarness();
+    const user = await readyUser(h, "basic");
+    await processInbound(h.ctx, h.inbound("@מזכירה מה יש לי מחר?")); // basic: the upgrade note (5b) — hidden as well
+    await processInbound(h.ctx, h.inbound("סוכן חדש ריק"));
+    await processInbound(h.ctx, h.inbound("לקוחות"));
+    await processInbound(h.ctx, h.inbound("סוד-ההנחיות: לענות ללקוחות רק בעברית רשמית"));
+    await processInbound(h.ctx, h.listReply("ag:tb:mail_read", "מייל לקריאה"));
+    await processInbound(h.ctx, h.button("ag:save", "שמירה"));
+    expect(h.db.agents).toHaveLength(1);
+    const stored = await h.db.recentMessages(user.id, 100);
+    expect(stored.length).toBeGreaterThanOrEqual(12);
+    expect(stored.every((m) => m.hidden_from_model)).toBe(true);
+    expect(await h.db.recentMessages(user.id, 100, { forModel: true })).toEqual([]);
+
+    // the next turn of the main assistant: only its own message in the history
+    h.ai.enqueue({ text: JSON.stringify({ intent: "smalltalk", complexity: "simple", needs_tools: false, reply: "בשמחה.", agent: null }) });
+    await processInbound(h.ctx, h.inbound("תודה"));
+    const seen = JSON.stringify(h.ai.calls.at(-1)!.messages);
+    expect(seen).not.toContain("סוד-ההנחיות");
+    expect(seen).not.toContain("סוכן חדש");
+    expect(seen).not.toContain("מסלול פרו");
+    expect(h.ai.calls.at(-1)!.system).not.toContain("סוד-ההנחיות");
+    expect((await h.db.recentMessages(user.id, 2, { forModel: true })).map((m) => m.text)).toEqual(["תודה", "בשמחה."]);
+    expect(h.ai.calls).toHaveLength(1);
   });
 
   it("edits, disables, enables and deletes the agent from WhatsApp", async () => {
@@ -223,8 +264,34 @@ describe("agents in WhatsApp — pro", () => {
     expect(h.db.agents.find((a) => a.role === "intern")).toMatchObject({ enabled: false });
     await processInbound(h.ctx, h.inbound("@מתמחה תמצאי את ההסכם"));
     expect(h.wa.texts.at(-1)).toContain("הסוכן ״מתמחה״ מושבת כרגע");
+    h.ai.enqueue(router(null), { text: "חיפשתי ולא מצאתי." });
+    await processInbound(h.ctx, h.inbound("מתמחה, תמצאי את ההסכם")); // a vocative to a disabled agent: just text
+    expect(h.wa.texts.at(-1)).toBe("חיפשתי ולא מצאתי.");
+    expect(h.ai.calls[0]!.system).not.toContain("״מתמחה״ —"); // a disabled agent is not offered to the router
+    expect(h.ai.calls[0]!.system).toContain("״אחד״ —");
     await processInbound(h.ctx, h.inbound("מחיקת סוכן מזכירה"));
     expect(h.wa.texts.at(-1)).toContain("סוכן מובנה אי אפשר למחוק");
+  });
+
+  it("״@עלזה <request>״ goes to the main assistant: the router gets no agents to pick and the sticky agent is cleared", async () => {
+    const h = makeHarness();
+    const user = await readyUser(h, "pro");
+    h.ai.enqueue({ text: "מחר פנוי." });
+    await processInbound(h.ctx, h.inbound("@מזכירה מה יש לי מחר?"));
+    expect(((await h.db.getUser(user.id))!.profile.active_agent as { key: string }).key).toBe("builtin:secretary");
+
+    // the router answers with an agent anyway: it was offered none, so the pick is ignored
+    h.ai.enqueue({ text: JSON.stringify({ intent: "other", complexity: "simple", needs_tools: false, reply: "בשמחה.", agent: "a1" }) });
+    await processInbound(h.ctx, h.inbound("@עלזה תודה על העזרה"));
+    expect(h.wa.texts.at(-1)).toBe("בשמחה."); // no agent header
+    const routerCall = h.ai.calls[1]!;
+    expect(routerCall.tier).toBe("router");
+    expect(routerCall.system).not.toContain("סוכן פעיל");
+    expect(routerCall.system).not.toContain("## סוכנים");
+    expect(routerCall.messages.at(-1)).toEqual({ role: "user", content: "תודה על העזרה" });
+    expect((await h.db.getUser(user.id))!.profile.active_agent).toBeNull();
+    expect((await h.db.recentMessages(user.id, 1))[0]).toMatchObject({ direction: "out", agent_key: null });
+    expect(await counted(h, user.id)).toBe(2);
   });
 
   it("the bookkeeper forwards an invoice: a forward_mail draft under its header → approve → Graph → audit with the agent", async () => {
@@ -295,7 +362,16 @@ describe("agents in WhatsApp — pro", () => {
     expect(h.wa.texts.at(-1)).toContain("/pay/");
     await processInbound(h.ctx, h.inbound("הפעלת סוכן שלישי"));
     expect(h.wa.texts.at(-1)).toContain("הסוכן ״שלישי״ נעול");
-    expect(await counted(h, user.id)).toBe(1);
+    await processInbound(h.ctx, h.inbound("השבתת סוכן שלישי"));
+    expect(h.wa.texts.at(-1)).toContain("הסוכן ״שלישי״ נעול");
+    expect(h.db.agents.find((a) => a.name === "שלישי")).toMatchObject({ enabled: true }); // not silently disabled
+    await processInbound(h.ctx, h.inbound("עריכת סוכן שלישי"));
+    expect(lastList(h).sections![0]!.rows.some((r) => r.id.startsWith("ag:ed:toggle:"))).toBe(false); // no on / off while locked
+    expect(lastList(h).sections![0]!.rows.some((r) => r.id.startsWith("ag:ed:delete:"))).toBe(true);
+    h.ai.enqueue(router(null), { text: "אין חדש." });
+    await processInbound(h.ctx, h.inbound("שני, מה חדש?")); // a vocative to a locked agent: just text for the assistant
+    expect(h.wa.texts.at(-1)).toBe("אין חדש.");
+    expect(await counted(h, user.id)).toBe(2);
     expect(h.db.agents).toHaveLength(3); // nothing deleted
   });
 });

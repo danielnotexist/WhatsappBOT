@@ -10,6 +10,11 @@ export interface ToolContext {
   now: Date;
   /** records a pending action and returns it; the pipeline renders it with approval buttons */
   createPending(kind: PendingActionRow["kind"], payload: Record<string, unknown>): Promise<PendingActionRow>;
+  /**
+   * The turn's agent may only reach a list of addresses (docs/design/agents.md §7.2): a tool that changes or cancels
+   * an existing event first looks up who that reaches (`current_attendees` in the payload) so the guard can check it.
+   */
+  checksRecipients?: boolean;
 }
 
 export interface Tool extends ToolDefinition {
