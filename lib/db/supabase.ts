@@ -435,6 +435,40 @@ export class SupabaseDb implements Db {
     if (error) this.fail("setConnectionStatus", error);
   }
 
+  // ---- google_scope_grants / ops_flags (migration 0008) ----
+
+  async recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean> {
+    const { error } = await this.client.from("google_scope_grants").insert(row);
+    if (error?.code === "23505") return false; // already recorded (primary key account_hash + scope)
+    if (error) this.fail("recordGoogleScopeGrant", error);
+    return true;
+  }
+
+  async countGoogleScopeAccounts(scopes: string[]): Promise<number> {
+    const { data, error } = await this.client.rpc("google_scope_account_count", { p_scopes: scopes });
+    if (error) this.fail("countGoogleScopeAccounts", error);
+    return Number(data ?? 0);
+  }
+
+  async hasGoogleScopeGrant(accountHash: string, scopes: string[]): Promise<boolean> {
+    const { data, error } = await this.client.from("google_scope_grants").select("scope").eq("account_hash", accountHash).in("scope", scopes).limit(1);
+    if (error) this.fail("hasGoogleScopeGrant", error);
+    return (data ?? []).length > 0;
+  }
+
+  async setOpsFlagOnce(key: string, value: Record<string, unknown>): Promise<boolean> {
+    const { error } = await this.client.from("ops_flags").insert({ key, value });
+    if (error?.code === "23505") return false;
+    if (error) this.fail("setOpsFlagOnce", error);
+    return true;
+  }
+
+  async getOpsFlag(key: string): Promise<import("./types").OpsFlagRow | null> {
+    const { data, error } = await this.client.from("ops_flags").select("key,value,created_at").eq("key", key).maybeSingle();
+    if (error) this.fail("getOpsFlag", error);
+    return (data as unknown as import("./types").OpsFlagRow | null) ?? null;
+  }
+
   async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {
     const { data, error } = await this.client.from("graph_subscriptions").upsert(row, { onConflict: "subscription_id" }).select(SupabaseDb.GSUB_COLS).single();
     if (error) this.fail("upsertGraphSubscription", error);

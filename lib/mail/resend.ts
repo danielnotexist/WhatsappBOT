@@ -1,5 +1,5 @@
 import { requireEnv } from "@/lib/env";
-import type { Mailer, OtpMail } from "./types";
+import type { Mailer, OperatorAlertMail, OtpMail } from "./types";
 
 export const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -49,10 +49,19 @@ export class ResendMailer implements Mailer {
 
   async sendOtp(mail: OtpMail): Promise<{ id: string | null }> {
     const content = otpEmailContent(mail, this.opts.productName);
+    return this.post({ from: this.opts.from, to: [mail.to], subject: content.subject, text: content.text, html: content.html });
+  }
+
+  /** Plain text only — an internal alert to the operator, not a customer email. */
+  async sendOperatorAlert(mail: OperatorAlertMail): Promise<{ id: string | null }> {
+    return this.post({ from: this.opts.from, to: [mail.to], subject: mail.subject, text: mail.text });
+  }
+
+  private async post(payload: Record<string, unknown>): Promise<{ id: string | null }> {
     const res = await this.fetchImpl(RESEND_ENDPOINT, {
       method: "POST",
       headers: { Authorization: `Bearer ${this.opts.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: this.opts.from, to: [mail.to], subject: content.subject, text: content.text, html: content.html }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

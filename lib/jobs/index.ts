@@ -1,6 +1,8 @@
 import "server-only";
 import { getDb } from "@/lib/db";
 import { googleForUser } from "@/lib/google";
+import { GmailReader } from "@/lib/google/gmail";
+import { GOOGLE_SCOPES, gmailReadActive, hasScope } from "@/lib/google/oauth";
 import { graphForUser } from "@/lib/ms";
 import { getWaSender } from "@/lib/wa";
 import type { JobDeps } from "./run";
@@ -18,7 +20,11 @@ export function getJobDeps(): JobDeps {
     },
     async googleFor(user) {
       const g = await googleForUser(db, user);
-      return g ? { google: g.google } : null;
+      if (!g) return null;
+      // Gmail section only when this connection granted gmail.readonly (lib/google/user-cap.ts) and the feature is on
+      // (GOOGLE_GMAIL_READ_ENABLED=false is a kill switch for every connection)
+      const gmail = gmailReadActive() && hasScope(g.connection.scopes, GOOGLE_SCOPES.gmailReadonly) ? new GmailReader(g.google) : null;
+      return { google: g.google, gmail, accountEmail: g.connection.account_email };
     },
   };
 }

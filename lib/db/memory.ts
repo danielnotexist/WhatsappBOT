@@ -145,6 +145,8 @@ export class MemoryDb implements Db {
     this.pendingActions = this.pendingActions.filter((p) => p.user_id !== id);
     this.reminders = this.reminders.filter((r) => r.user_id !== id);
     this.jobs = this.jobs.filter((j) => j.user_id !== id);
+    // the Google user-cap ledger stays (Google still counts the account) without the link — SQL: on delete set null
+    for (const g of this.googleScopeGrants) if (g.user_id === id) g.user_id = null;
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -388,6 +390,34 @@ export class MemoryDb implements Db {
   async setConnectionStatus(id: string, status: ConnectionStatus): Promise<void> {
     const row = this.connections.find((c) => c.id === id);
     if (row) row.status = status;
+  }
+
+  // ---- google_scope_grants / ops_flags (migration 0008): survive revoke and user deletion (deleteUser sets user_id null), like the SQL table ----
+  googleScopeGrants: import("./types").GoogleScopeGrantRow[] = [];
+  opsFlags = new Map<string, import("./types").OpsFlagRow>();
+
+  async recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean> {
+    if (this.googleScopeGrants.some((g) => g.account_hash === row.account_hash && g.scope === row.scope)) return false;
+    this.googleScopeGrants.push({ ...row, first_granted_at: iso(this.now()) });
+    return true;
+  }
+
+  async countGoogleScopeAccounts(scopes: string[]): Promise<number> {
+    return new Set(this.googleScopeGrants.filter((g) => scopes.includes(g.scope)).map((g) => g.account_hash)).size;
+  }
+
+  async hasGoogleScopeGrant(accountHash: string, scopes: string[]): Promise<boolean> {
+    return this.googleScopeGrants.some((g) => g.account_hash === accountHash && scopes.includes(g.scope));
+  }
+
+  async setOpsFlagOnce(key: string, value: Record<string, unknown>): Promise<boolean> {
+    if (this.opsFlags.has(key)) return false;
+    this.opsFlags.set(key, { key, value, created_at: iso(this.now()) });
+    return true;
+  }
+
+  async getOpsFlag(key: string): Promise<import("./types").OpsFlagRow | null> {
+    return this.opsFlags.get(key) ?? null;
   }
 
   async upsertGraphSubscription(row: Omit<GraphSubscriptionRow, "id">): Promise<GraphSubscriptionRow> {

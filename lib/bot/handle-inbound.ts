@@ -9,6 +9,7 @@ import { graphExecutors, graphTools } from "@/lib/ms/tools";
 import { activeGoogleConnection, googleForConnection, googleForUser } from "@/lib/google";
 import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispatch";
 import { googleExecutors, googleTools } from "@/lib/google/tools";
+import { gmailReadConsentLink } from "@/lib/google/gmail-tools";
 import type { BotContext } from "./context";
 import { registerExecutor } from "./pending";
 import { processInbound } from "./process-inbound";
@@ -45,7 +46,7 @@ export async function handleInbound(message: InboundMessage): Promise<{ handled:
       const g = activeGoogleConnection(connections);
       return [
         ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone }) : []),
-        ...(g ? googleTools({ google: async () => googleForConnection(db, g), timeZone: user.timezone, scopes: g.scopes, accountEmail: g.account_email }) : []),
+        ...(g ? googleTools({ google: async () => googleForConnection(db, g), timeZone: user.timezone, scopes: g.scopes, accountEmail: g.account_email, gmailConsentLink: () => gmailReadConsentLink(ctx, user.id) }) : []),
       ];
     },
   };

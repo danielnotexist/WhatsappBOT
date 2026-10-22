@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { getBillingContext } from "@/lib/billing";
 import { runChargeJob } from "@/lib/billing/service";
 import { getDb } from "@/lib/db";
+import { maybeCheckGoogleUserCapAlerts } from "@/lib/google/user-cap";
 import { getJobDeps } from "@/lib/jobs";
 import { runScheduledJob } from "@/lib/jobs/run";
 import { renewExpiringSubscriptions } from "@/lib/ms/renewal";
@@ -70,6 +71,8 @@ export async function POST(request: Request) {
         result = { skipped: `kind ${job.kind} not handled yet` };
     }
     await db.finishJob(job.job_id, null);
+    // operator alerts for Google's unverified-app user cap also when the count moved without a connect (backfill)
+    await maybeCheckGoogleUserCapAlerts(db);
     return Response.json({ ok: true, result }, { status: 200 });
   } catch (e) {
     const message = (e as Error).message;

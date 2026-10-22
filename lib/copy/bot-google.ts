@@ -20,20 +20,28 @@ export const GOOGLE_CAPABILITY_SCOPES = Object.keys(GOOGLE_CAPABILITY);
 
 const joinHe = (items: string[]) => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ו${items.at(-1)}`);
 
+/** The one-line heads-up before Google's "unverified app" screen (owner's wording, 21.10.2026). */
+const UNVERIFIED_HEADS_UP = "גוגל תציג מסך 'אפליקציה לא מאומתת' — זה צפוי בשלב הזה, אפשר ללחוץ 'מתקדם' ואז 'המשך'.";
+
 export const gcopy = {
   // ---- WhatsApp ----
-  "g.connect_done": (accountEmail: string, granted: string[]) => {
+  "g.connect_done": (accountEmail: string, granted: string[], opts: { gmailReadDeclined?: boolean } = {}) => {
     const can = granted.map((s) => GOOGLE_CAPABILITY[s]?.can).filter(Boolean) as string[];
     const readsInbox = granted.includes(GOOGLE_SCOPES.gmailReadonly);
-    return `החיבור ל-Google הושלם (${accountEmail}).${can.length ? `\nמעכשיו אפשר לבקש ממני:\n${can.map((c) => `• ${c}`).join("\n")}` : ""}${readsInbox ? "" : "\nאת תיבת ה-Gmail עצמה אני לא קוראת בשלב זה."}`;
+    const inboxNote = readsInbox ? "" : opts.gmailReadDeclined ? "\nאת תיבת ה-Gmail אני לא קוראת, כי ההרשאה לכך לא סומנה. אפשר לבקש ממני בהמשך לקרוא מיילים, ואשלח קישור לאישור." : "\nאת תיבת ה-Gmail עצמה אני לא קוראת בשלב זה.";
+    return `החיבור ל-Google הושלם (${accountEmail}).${can.length ? `\nמעכשיו אפשר לבקש ממני:\n${can.map((c) => `• ${c}`).join("\n")}` : ""}${inboxNote}`;
   },
+  "g.unverified_heads_up": () => UNVERIFIED_HEADS_UP,
+  "g.gmail_read.consent": (link: string, headsUp: boolean) => `כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף אחד מ-Google:\n${link}\n${headsUp ? `${UNVERIFIED_HEADS_UP}\n` : ""}הקישור עובד ל-30 הדקות הקרובות.`,
+  "g.gmail_read.consent_no_link": () => 'כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף מ-Google. אפשר לכתוב "לחבר את גוגל" ואשלח קישור.',
+  "g.err.gmail_read_cap_reached": () => "קריאת מיילים ב-Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
   "g.connect_partial": (missing: string[], link: string) => {
     const cannot = missing.map((s) => GOOGLE_CAPABILITY[s]?.cannot).filter(Boolean) as string[];
     return `חלק מההרשאות לא סומנו במסך של Google, ולכן לא אוכל ${joinHe(cannot)}.\nאם זה היה בטעות — אפשר לאשר שוב כאן:\n${link}\nהקישור עובד ל-30 הדקות הקרובות.`;
   },
   "g.mail.sent": (toName: string, accountEmail: string) => `נשלח אל ${toName} מתיבת ה-Gmail (${accountEmail}).`,
   "g.err.missing_scope": (scope: string, link: string) => `אין לי הרשאה ${GOOGLE_CAPABILITY[scope]?.cannot ?? "לפעולה הזו"} בחשבון Google — כנראה שהאפשרות לא סומנה במסך האישור. אפשר להוסיף אותה כאן:\n${link}\nהקישור עובד ל-30 הדקות הקרובות.`,
-  "g.err.gmail_read_unavailable": () => "קריאה וסיכום של מיילים ב-Gmail עדיין לא זמינים — היכולת תתווסף אחרי בדיקת האבטחה של Google. שליחת מיילים מ-Gmail, היומן וקבצי Drive כבר עובדים.",
+  "g.err.gmail_read_unavailable": () => "קריאה וסיכום של מיילים ב-Gmail אינם זמינים כרגע. שליחת מיילים מ-Gmail, היומן וקבצי Drive עובדים.",
   "g.err.attachment_too_large": () => "הקובץ גדול מדי לצירוף למייל (עד 18MB). אפשר לשלוח במקום קישור לקובץ ב-Drive.",
   "g.cal.moved_all_day": (title: string, newDate: string) => `הוזז. ${title} עכשיו ב-${newDate} (כל היום).`,
   "g.err.event_gone": () => "הפגישה הזו כבר לא נמצאת ביומן — ייתכן שנמחקה או הוזזה. אפשר לבקש ממני להציג את היומן מחדש.",
@@ -47,7 +55,8 @@ export const gcopy = {
   "g.web.failed": (code: string) => `החיבור ל-Google לא הושלם (${code}). אפשר לנסות שוב.`,
   "g.web.no_email": () => "החיבור ל-Google לא הושלם: Google לא החזירה כתובת מייל לחשבון. אפשר לנסות שוב ולאשר את שיתוף כתובת המייל.",
   "g.web.link_expired": () => "הקישור לא בתוקף (הוא עובד 30 דקות). אפשר לבקש קישור חדש בשיחה.",
-  "g.web.feature_disabled": () => "קריאת Gmail עדיין לא זמינה: היא דורשת בדיקת אבטחה של Google (CASA) שטרם הושלמה.",
+  "g.web.feature_disabled": () => "קריאת Gmail אינה זמינה כרגע. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
+  "g.web.gmail_read_cap_reached": () => "קריאת Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
 } as const;
 
 export type GoogleCopyId = keyof typeof gcopy;

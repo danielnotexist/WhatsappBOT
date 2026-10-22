@@ -2,17 +2,21 @@
  * Morning summary (PLAN §11 milestone 5, bot-copy.md §4.5): at the user's `morning_time`, Sunday–Thursday,
  * today's meetings + emails awaiting a reply + today's reminders — free text inside the 24-hour window,
  * the `morning_summary` template outside it. Meetings come from Microsoft 365 and/or Google Calendar (merged);
- * emails only from Microsoft 365 (Gmail reading needs CASA — Milestone 6 phase 1 sends only).
+ * emails awaiting a reply from Microsoft 365 and/or Gmail — Gmail only for connections that granted gmail.readonly
+ * (the first users of the unverified app, lib/google/user-cap.ts); merged newest first.
  *
  * Scheduling: one `morning_summary` job per user per local day, dedupe key
  * `morning_summary:<user>:<YYYY-MM-DD>:<HHMM>` — created by SQL `schedule_morning_summaries()` (pg_cron,
  * migration 0005) and by `scheduleMorningSummary()` here (after each run, and when the time changes).
  * The job re-checks everything at run time, so stale jobs (time changed, turned off) are harmless.
  */
+import { oneLineUntrusted } from "@/lib/ai/untrusted";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
 import type { GoogleClient, GoogleEvent } from "@/lib/google/client";
-import type { GraphClient, GraphEvent, GraphMessage } from "@/lib/ms/graph";
+import type { GmailReader } from "@/lib/google/gmail";
+import type { GraphClient, GraphEvent } from "@/lib/ms/graph";
+import { emailsAwaitingReply, type MailLike, type SentRef } from "./awaiting-reply";
 import { DEFAULT_TZ, addDays, clockHe, dateKey, dayLabelHe, localDateOf, parseClock, parseDateKey, weekdayOf, zonedParts, zonedToUtc, type LocalDate } from "@/lib/time/zoned";
 import { morningSummaryTemplate } from "@/lib/wa/templates";
 import { sendProactive, type ProactiveDeps } from "./proactive";
@@ -25,8 +29,12 @@ const MAX_EMAILS = 5;
 export interface MorningDeps extends ProactiveDeps {
   /** Graph for the user's active Microsoft connection (null when not connected) */
   graphFor(user: UserRow): Promise<{ graph: GraphClient; accountEmail: string | null } | null>;
-  /** Google Calendar for the user's active Google connection (null / absent when not connected) */
-  googleFor?(user: UserRow): Promise<{ google: Pick<GoogleClient, "listEvents"> } | null>;
+  /**
+   * Google for the user's active Google connection (null / absent when not connected): the calendar always;
+   * `gmail` only when the connection granted gmail.readonly (users past the unverified-app cap have none, so their
+   * summary has no "emails awaiting a reply" from Gmail).
+   */
+  googleFor?(user: UserRow): Promise<{ google: Pick<GoogleClient, "listEvents">; gmail?: Pick<GmailReader, "awaitingReplyInputs"> | null; accountEmail?: string | null } | null>;
 }
 
 const tzOf = (user: UserRow) => user.timezone || DEFAULT_TZ;
@@ -89,45 +97,9 @@ export async function rescheduleMorningSummary(db: Db, userId: string, now: Date
 // content
 // ---------------------------------------------------------------------------------------------
 
-const AUTOMATED_SENDER = /(^|[._+-])(no-?reply|do-?not-?reply|donotreply|notifications?|notify|alerts?|mailer-daemon|postmaster|newsletters?|news|marketing|bounces?|billing|invoices?|receipts?|updates?|automated)([._+-]|@)/i;
-const BULK_SUBJECT = /newsletter|ניוזלטר|unsubscribe|הסרה מרשימת|webinar|וובינר|מבצע|הנחה של|sale\b/i;
-const ASKS = /\?|נשמח|אשמח|אפשר |תוכל|תוכלי|תוכלו|מתי|האם |בבקשה|נא ל|מחכה|ממתין|ממתינה|ממתינים|דחוף|לתשובתך|לתשובתכם|לאשר|אישורך|אישורכם|please|could you|can you|let me know|waiting for/i;
-
-export interface SentRef {
-  conversationId: string | null;
-  sentDateTime: string;
-}
-
-/**
- * "Emails awaiting a reply" heuristic: inbox messages from the last `maxAgeDays` days, from a person
- * (not the user, not no-reply/newsletters), in a conversation the user has not answered since, and either
- * unread or asking something ("?", "נשמח", "מתי", "please"…). Newest first, one per conversation.
- */
-export function emailsAwaitingReply(inbox: GraphMessage[], sent: SentRef[], opts: { selfAddress: string | null; now: Date; maxAgeDays?: number; limit?: number }): GraphMessage[] {
-  const self = opts.selfAddress?.toLowerCase() ?? null;
-  const oldest = opts.now.getTime() - (opts.maxAgeDays ?? 7) * 86_400_000;
-  const lastSent = new Map<string, number>();
-  for (const s of sent) {
-    if (!s.conversationId) continue;
-    lastSent.set(s.conversationId, Math.max(lastSent.get(s.conversationId) ?? 0, Date.parse(s.sentDateTime) || 0));
-  }
-  const seen = new Set<string>();
-  return [...inbox]
-    .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
-    .filter((m) => {
-      const received = Date.parse(m.receivedDateTime);
-      if (!Number.isFinite(received) || received < oldest || received > opts.now.getTime()) return false;
-      const from = m.from?.address.toLowerCase() ?? "";
-      if (!from || from === self || AUTOMATED_SENDER.test(from) || BULK_SUBJECT.test(m.subject)) return false;
-      if (m.conversationId && (lastSent.get(m.conversationId) ?? 0) > received) return false;
-      if (m.conversationId) {
-        if (seen.has(m.conversationId)) return false;
-        seen.add(m.conversationId);
-      }
-      return !m.isRead || ASKS.test(`${m.subject} ${m.bodyPreview}`);
-    })
-    .slice(0, opts.limit ?? MAX_EMAILS);
-}
+// "Emails awaiting a reply" — one heuristic for Microsoft 365 and Gmail (lib/jobs/awaiting-reply.ts)
+export { emailsAwaitingReply };
+export type { SentRef };
 
 async function sentSince(graph: GraphClient, since: Date): Promise<SentRef[]> {
   const q = new URLSearchParams({ $top: "50", $select: "conversationId,sentDateTime", $filter: `sentDateTime ge ${since.toISOString()}`, $orderby: "sentDateTime desc" });
@@ -148,7 +120,15 @@ const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.atten
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
 const byStart = (a: DayEvent, b: DayEvent) => (a.allDay === b.allDay ? (a.allDay ? 0 : a.start.slice(11, 16).localeCompare(b.start.slice(11, 16))) : a.allDay ? -1 : 1);
 const meetingLine = (e: DayEvent) => (e.allDay ? `• כל היום — ${e.title || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.title || "(ללא כותרת)"}`);
-const emailLine = (m: GraphMessage) => `• ${m.from?.name || m.from?.address || "?"} — ${m.subject || "(ללא נושא)"}`;
+/**
+ * Sender and subject come from outside (any sender, RFC 2047 can encode newlines) and land in the assistant's own
+ * message: one sanitized line each, capped — never extra lines that look like a section of the summary.
+ */
+const emailLine = (m: Pick<MailLike, "from" | "subject">) => {
+  const who = oneLineUntrusted(m.from?.name || m.from?.address || "", 60) || "?";
+  const subject = oneLineUntrusted(m.subject || "", 120) || "(ללא נושא)";
+  return `• ${who} — ${subject}`;
+};
 const capped = (lines: string[], max: number) => (lines.length > max ? [...lines.slice(0, max), `• ועוד ${lines.length - max}`] : lines);
 
 export interface MorningSummary {
@@ -176,7 +156,7 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   const dayEnd = zonedToUtc({ ...addDays(day, 1), hour: 0, minute: 0 }, tz);
 
   const dayEvents: DayEvent[] = [];
-  let emails: string[] = [];
+  const awaiting: MailLike[] = [];
   let connected = false;
   const g = await deps.graphFor(user).catch(() => null);
   if (g) {
@@ -190,7 +170,7 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       const since = new Date(now.getTime() - 7 * 86_400_000);
       const inbox = await g.graph.listInbox({ top: 30, since });
       const sent = await sentSince(g.graph, since).catch(() => [] as SentRef[]);
-      emails = emailsAwaitingReply(inbox, sent, { selfAddress: g.accountEmail, now }).map(emailLine);
+      awaiting.push(...emailsAwaitingReply(inbox, sent, { selfAddress: g.accountEmail, now }));
       connected = true;
     } catch (e) {
       console.warn(`[morning] mail failed for ${user.id}:`, (e as Error).message);
@@ -205,8 +185,23 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       // invalid_grant already marked the connection expired (lib/google/token-store.ts); reconnect is prompted in chat
       console.warn(`[morning] google calendar failed for ${user.id}:`, (e as Error).message);
     }
+    // Gmail only with gmail.readonly — past the unverified-app user cap there is no `gmail`, so no Gmail section
+    if (google.gmail) {
+      try {
+        const { inbox, sent } = await google.gmail.awaitingReplyInputs({ newerThanDays: 7, maxThreads: 15 });
+        awaiting.push(...emailsAwaitingReply(inbox, sent, { selfAddress: google.accountEmail ?? null, now }));
+        connected = true;
+      } catch (e) {
+        console.warn(`[morning] gmail failed for ${user.id}:`, (e as Error).message);
+      }
+    }
   }
   const meetings = capped([...dayEvents].sort(byStart).map(meetingLine), MAX_MEETINGS);
+  // both mailboxes, newest first
+  const emails = awaiting
+    .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
+    .slice(0, MAX_EMAILS)
+    .map(emailLine);
 
   const due = await deps.db.listReminders(user.id, { statuses: ["scheduled"], dueFrom: dayStart, dueBefore: dayEnd, limit: 20 });
   const reminders = due.map((r) => {
