@@ -609,3 +609,19 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - כתובות החזרה אומתו מול שני הספקים (`https://alze.vercel.app/api/auth/microsoft/callback`, `.../google/callback`). ה-webhook של Graph (`/api/graph/notify`) פתוח אחרי המעבר ל-Standard Protection.
 - חיבורי ההדגמה הישנים (fixture) נמחקו מ-Supabase, כדי שהחיבור האמיתי יחליף אותם.
 - בדיקות: `lib/demo-factories.test.ts` - כל דגל פותח רק את הספק שלו, והסוד של הספק השני עדיין נדחה.
+
+## פגישות Teams ו-Google Meet ביומן
+> משימה: כשעלזה קובעת או מעדכנת פגישה, אפשר לצרף פגישה מקוונת: Teams ב-Microsoft 365, Google Meet ב-Google. בלי הרשאות חדשות.
+
+- **כלים:** שדה `online_meeting` (בוליאני) ב-`create_event`, `gcal_create_event`, `update_event` ו-`gcal_update_event`. המודל מסמן אותו כשמבקשים Teams, Meet, זום, וידאו או "אונליין", או כשהמשתתפים לא נפגשים פיזית (`lib/ai/system-prompt.ts`, סעיף "פגישות מקוונות"). Zoom לא נוצר: בבקשה לזום נוצרת Teams או Meet לפי היומן, והטיוטה מראה את זה לפני האישור.
+- **Microsoft 365:** ביצירה ובעדכון `isOnlineMeeting: true` + `onlineMeetingProvider: "teamsForBusiness"` (ההרשאה הקיימת Calendars.ReadWrite). לפני כן בדיקה של `allowedOnlineMeetingProviders` ב-`GET /me/calendar`. הקישור מ-`onlineMeeting.joinUrl`, ואם לא חזר מיד - קריאה נוספת אחת של האירוע.
+- **Google:** `conferenceData.createRequest` (requestId חדש בכל בקשה, `hangoutsMeet`) עם `conferenceDataVersion=1` (ההרשאה הקיימת calendar.events). הקישור מ-`hangoutLink` או מנקודת הכניסה מסוג `video`. Meet נוצר ברקע: בקשה במצב `pending` נקראת פעם נוספת. עדכון של פגישה שכבר יש לה Meet לא שולח בקשה חדשה (היא הייתה מחליפה את הקישור שכבר אצל המוזמנים).
+- **הטיוטה:** שורה "פגישת Teams" או "פגישת Google Meet", לפי היומן שהפגישה תיקבע בו (גם ב-`create_event` הכללי, לפי `providerForAction`). בשינוי: "הוספת פגישת Teams"; כשזה השינוי היחיד - "לעדכן?" עם [עדכן].
+- **אחרי האישור:** "קישור לפגישה: ..." בשורה מתחת ל"נקבע" (או "נוסף קישור Teams לפגישה ..." כשרק הקישור נוסף).
+- **חשבון Microsoft אישי (בלי Teams), או ש-Google דחתה את ה-Meet:** שום דבר לא נוצר. נשלחת טיוטה חדשה של אותה פגישה בלי קישור, עם ההסבר בראשה ו-[קבע בלי קישור], כך שהפגישה נקבעת בלי קישור רק אם מאשרים את הטיוטה הזו. מימוש: `ActionResult.offer` ו-`onlineMeetingUnavailable()` ב-`lib/bot/pending.ts`; הטיוטה החדשה שומרת את הסוכן שהכין את המקורית ומקבלת 10 דקות משלה. כשאי אפשר ליצור אותה (סוכן בתקרה היומית) נשלח `act.cal.online_not_done` בלבד.
+- **קישורים קיימים:** `join_url` בתוצאות `list_events` ו-`gcal_list_events`, והמודל מוסיף "קישור לפגישה: ..." מתחת לפגישה. בסיכום הבוקר שורת קישור מתחת לפגישה מקוונת, רק בהודעה החופשית (בתבנית `morning_summary` אין מקום: 300 תווים לסעיף).
+- **אבטחה:** `lib/online-meeting.ts` (`safeJoinUrl`): רק קישור https לשירות פגישות מוכר (Teams, Meet, Zoom, Webex), בלי רווחים או תווים נסתרים, עד 1,024 תווים. כל קישור אחר (למשל מארגן חיצוני ששם קישור משלו ב-entry point) לא מגיע למודל ולא להודעה של עלזה.
+- **טקסטים:** `act.cal.online_label`, `act.cal.join_link`, `act.cal.join_link_later`, `act.cal.online_missing`, `act.cal.online_added`, `act.cal.online_unavailable`, `act.cal.online_not_done` (`lib/copy/bot.ts`, מתועדים ב-`docs/copy/bot-copy.md`).
+- **fixtures:** Graph - `GET /me/calendar` לפי `onlineMeetingProviders` (חשבון אישי: `["skypeForConsumer"]`, ואז 400 על בקשת Teams), וקישור Teams לפגישה עם רו״ח ברק. Google - `conferenceMode` (success / pending / refuse), ו-Meet לשיחה עם משפחת אברהם.
+- **בדיקות:** `lib/online-meeting.test.ts`, `lib/ms/online-meeting.test.ts`, `lib/google/online-meeting.test.ts` (גוף הבקשה, הקישור בתשובה, הטיוטה, מסלול החשבון האישי, דחייה של Graph ושל Google, Meet ב-pending, רשימת אירועים, עדכון), ועדכון `lib/jobs/morning-summary.test.ts`.
+- **לבדוק מול הספקים האמיתיים:** הנוסח המדויק של שגיאת Graph לחשבון אישי לא מתועד, ולכן המסלול העיקרי הוא הבדיקה המוקדמת של `allowedOnlineMeetingProviders`. כדאי לנסות עם `LIVE_MS=1` בחשבון עבודה ובחשבון outlook.com, ועם `LIVE_GOOGLE=1`.

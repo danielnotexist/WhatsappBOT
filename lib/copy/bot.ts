@@ -6,6 +6,11 @@
 import { PRODUCT_NAME as P } from "@/lib/brand";
 import type { ListRow, ReplyButton } from "@/lib/wa/types";
 
+/** The online meeting service of each calendar: Teams on Microsoft 365, Google Meet on Google. */
+export const onlineService = (provider: string) => (provider === "google" ? "Google Meet" : "Teams");
+const onlineUnavailable = (provider: string) =>
+  provider === "google" ? "לא הצלחתי ליצור פגישת Google Meet בחשבון הזה." : "בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams (היא זמינה רק בחשבון עבודה או בית ספר).";
+
 export const copy = {
   // ---- 1. account linking ----
   "link.success": () => "החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.",
@@ -58,9 +63,16 @@ export const copy = {
   "act.mail.sent": (toName: string) => `נשלח ל${toName}. אעדכן כשתגיע תשובה.`,
   "act.mail.edit_prompt": () => "מה לשנות?",
   "act.mail.cancelled": () => "בוטל. הטיוטה נמחקה ולא נשלחה.",
-  "act.cal.create_confirm": (e: { title: string; date: string; start: string; end: string; location?: string; attendees?: string }) =>
-    `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}\nלקבוע?`,
+  "act.cal.create_confirm": (e: { title: string; date: string; start: string; end: string; location?: string; attendees?: string; online?: string; withoutLink?: boolean }) =>
+    `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.online ? `${e.online}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}\n${e.withoutLink ? "לקבוע בלי קישור?" : "לקבוע?"}`,
   "act.cal.created": (title: string, date: string, start: string) => `נקבע: ${title}, ${date} ב-${start}.`,
+  "act.cal.online_label": (provider: string) => `פגישת ${onlineService(provider)}`,
+  "act.cal.join_link": (url: string) => `קישור לפגישה: ${url}`,
+  "act.cal.join_link_later": () => "הקישור לפגישה עוד בהכנה ויופיע באירוע ביומן.",
+  "act.cal.online_missing": (provider: string) => `קישור ${onlineService(provider)} לא נוצר לפגישה הזו.`,
+  "act.cal.online_added": (title: string, provider: string) => `נוסף קישור ${onlineService(provider)} לפגישה "${title}".`,
+  "act.cal.online_unavailable": (provider: string) => onlineUnavailable(provider),
+  "act.cal.online_not_done": (provider: string, isUpdate: boolean) => `${onlineUnavailable(provider)}\n${isUpdate ? "הפגישה לא עודכנה." : "הפגישה לא נקבעה. אפשר לבקש לקבוע אותה בלי קישור."}`,
   "act.cal.move_confirm": (e: { title: string; oldDate: string; oldStart: string; newDate: string; newStart: string; newEnd: string }) => `*הזזת פגישה*\n${e.title}\nמ: ${e.oldDate}, ${e.oldStart}\nאל: ${e.newDate}, ${e.newStart}–${e.newEnd}\nלהזיז?`,
   "act.cal.moved": (title: string, newDate: string, newStart: string) => `הוזז. ${title} עכשיו ב-${newDate}, ${newStart}.`,
   "act.cal.cancel_confirm": (title: string, date: string, start: string) => `*ביטול פגישה*\n${title}\n${date}, ${start}\nלבטל? המשתתפים יקבלו הודעת ביטול.`,

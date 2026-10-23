@@ -11,6 +11,7 @@
  * The job re-checks everything at run time, so stale jobs (time changed, turned off) are harmless.
  */
 import { oneLineUntrusted } from "@/lib/ai/untrusted";
+import { copy } from "@/lib/copy/bot";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
 import type { GoogleClient, GoogleEvent } from "@/lib/google/client";
@@ -112,14 +113,18 @@ interface DayEvent {
   allDay: boolean;
   start: string;
   title: string;
+  /** Teams / Meet join link, already checked by safeJoinUrl (lib/online-meeting.ts) */
+  joinUrl: string | null;
 }
-const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject });
-const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary });
+const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject, joinUrl: e.joinUrl });
+const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary, joinUrl: e.joinUrl });
 /** Google: drop cancelled occurrences and invitations the user declined. */
 const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.attendees.some((a) => a.self && a.response === "declined");
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
 const byStart = (a: DayEvent, b: DayEvent) => (a.allDay === b.allDay ? (a.allDay ? 0 : a.start.slice(11, 16).localeCompare(b.start.slice(11, 16))) : a.allDay ? -1 : 1);
 const meetingLine = (e: DayEvent) => (e.allDay ? `• כל היום — ${e.title || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.title || "(ללא כותרת)"}`);
+/** The free-text summary adds the join link under an online meeting (the template's 300 characters cannot hold links). */
+const meetingWithLink = (e: DayEvent) => (e.joinUrl ? `${meetingLine(e)}\n${copy["act.cal.join_link"](e.joinUrl)}` : meetingLine(e));
 /**
  * Sender and subject come from outside (any sender, RFC 2047 can encode newlines) and land in the assistant's own
  * message: one sanitized line each, capped — never extra lines that look like a section of the summary.
@@ -133,7 +138,10 @@ const capped = (lines: string[], max: number) => (lines.length > max ? [...lines
 
 export interface MorningSummary {
   dayLabel: string;
+  /** one line per meeting (the template) */
   meetings: string[];
+  /** the same meetings with the join link of an online meeting under it (the free-text message) */
+  meetingsWithLinks?: string[];
   emails: string[];
   reminders: string[];
   closer: string;
@@ -196,7 +204,9 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       }
     }
   }
-  const meetings = capped([...dayEvents].sort(byStart).map(meetingLine), MAX_MEETINGS);
+  const sorted = [...dayEvents].sort(byStart);
+  const meetings = capped(sorted.map(meetingLine), MAX_MEETINGS);
+  const meetingsWithLinks = capped(sorted.map(meetingWithLink), MAX_MEETINGS);
   // both mailboxes, newest first
   const emails = awaiting
     .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
@@ -210,11 +220,11 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   });
 
   const base = { meetings, emails, reminders, connected };
-  return { dayLabel: dayLabelHe(day), ...base, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
+  return { dayLabel: dayLabelHe(day), ...base, meetingsWithLinks, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
 }
 
 export function renderMorningText(s: MorningSummary): string {
-  return s.empty ? copyM5["act.morning.empty"](s.dayLabel) : copyM5["act.morning.summary"](s);
+  return s.empty ? copyM5["act.morning.empty"](s.dayLabel) : copyM5["act.morning.summary"]({ ...s, meetings: s.meetingsWithLinks ?? s.meetings });
 }
 
 // ---------------------------------------------------------------------------------------------

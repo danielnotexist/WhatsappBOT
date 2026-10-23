@@ -25,6 +25,15 @@ export interface Tool extends ToolDefinition {
 
 const str = (description: string) => ({ type: "string", description });
 
+/**
+ * `online_meeting` on the tools that create a meeting: the provider adds the join link (Teams on Microsoft 365,
+ * Google Meet on Google) and sends it with the invitation. Shared with gcal_create_event (lib/google/tools.ts).
+ */
+export const onlineMeetingField = (service: string) => ({
+  type: "boolean",
+  description: `true כשמבקשים פגישה מקוונת (Teams, Meet, זום, וידאו, "אונליין", "בזום"), או כשהמשתתפים לא נפגשים פיזית (שיחה מרחוק, לקוח בעיר אחרת או בחו״ל). הקישור (${service}) נוצר אוטומטית ונשלח בהזמנה. false לפגישה פרונטלית או כשלא ברור.`,
+});
+
 export const draftEmailTool: Tool = {
   name: "draft_email",
   description: "מנסח טיוטת מייל חדשה ומעביר אותה לאישור המשתמש בכפתורים. לא שולח. להשתמש כשמבקשים לכתוב/לנסח/לשלוח מייל.",
@@ -53,7 +62,7 @@ export const draftEmailTool: Tool = {
 
 export const createEventTool: Tool = {
   name: "create_event",
-  description: "מכין פגישה חדשה ביומן ומעביר לאישור המשתמש. לא יוצר בפועל. להשתמש כשמבקשים לקבוע פגישה.",
+  description: "מכין פגישה חדשה ביומן ומעביר לאישור המשתמש. לא יוצר בפועל. להשתמש כשמבקשים לקבוע פגישה, גם פגישה מקוונת (online_meeting).",
   readOnly: false,
   input_schema: {
     type: "object",
@@ -64,8 +73,9 @@ export const createEventTool: Tool = {
       end: str("שעת סיום HH:MM"),
       location: str("מקום, או ריק"),
       attendees: { type: "array", items: { type: "string" }, description: "כתובות מייל של משתתפים (ריק אם אין)" },
+      online_meeting: onlineMeetingField("Teams ב-Microsoft 365, Google Meet ב-Google"),
     },
-    required: ["title", "date", "start", "end", "location", "attendees"],
+    required: ["title", "date", "start", "end", "location", "attendees", "online_meeting"],
     additionalProperties: false,
   },
   async run(input, ctx) {
@@ -76,6 +86,7 @@ export const createEventTool: Tool = {
       end: String(input.end ?? ""),
       location: String(input.location ?? ""),
       attendees: Array.isArray(input.attendees) ? input.attendees.map(String) : [],
+      ...(input.online_meeting === true ? { online_meeting: true } : {}),
     });
     return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. ענה במשפט קצר בלבד." };
   },

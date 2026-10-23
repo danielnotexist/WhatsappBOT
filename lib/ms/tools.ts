@@ -1,7 +1,8 @@
 import type { Tool, ToolContext } from "@/lib/ai/tools";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
-import type { ActionExecutor } from "@/lib/bot/pending";
+import { onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
+import { TEAMS_PROVIDER } from "@/lib/online-meeting";
 import { driveItemText } from "./files-text";
 import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from "./graph";
 
@@ -15,7 +16,13 @@ const str = (description: string) => ({ type: "string", description });
 const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
 const compactMessage = (m: GraphMessage) => ({ id: m.id, subject: m.subject, from: m.from ? `${m.from.name} <${m.from.address}>` : "", received: m.receivedDateTime, unread: !m.isRead, attachments: m.hasAttachments, preview: m.bodyPreview.slice(0, 200) });
-const compactEvent = (e: GraphEvent) => ({ id: e.id, subject: e.subject, start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: e.location, attendees: e.attendees.map((a) => a.address) });
+const compactEvent = (e: GraphEvent) => ({ id: e.id, subject: e.subject, start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: e.location, attendees: e.attendees.map((a) => a.address), ...(e.joinUrl ? { join_url: e.joinUrl } : {}) });
+
+/** update_event's `online_meeting`: add a Teams link to an existing event (Graph cannot remove one later). */
+const ONLINE_MEETING_UPDATE_FIELD = {
+  type: "boolean",
+  description: "true כדי להוסיף לפגישה קישור Teams (כשמבקשים להפוך אותה לפגישה מקוונת או לשלוח קישור למשתתפים). false = בלי שינוי בקישור.",
+} as const;
 
 function graphErrorOutput(e: unknown) {
   if (e instanceof GraphError) return { error: e.unauthorized ? "connection_expired" : e.retryable ? "provider_down" : e.message };
@@ -109,14 +116,19 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
     },
     {
       name: "update_event",
-      description: "מכין שינוי לאירוע קיים (הזזה, שינוי כותרת/מקום) ומעביר לאישור המשתמש. לא משנה בפועל.",
+      description: "מכין שינוי לאירוע קיים (הזזה, שינוי כותרת/מקום, הוספת קישור Teams) ומעביר לאישור המשתמש. לא משנה בפועל.",
       readOnly: false,
-      input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-list_events"), subject: str("כותרת חדשה או ריק"), date: str("תאריך חדש YYYY-MM-DD או ריק"), start: str("שעת התחלה חדשה HH:MM או ריק"), end: str("שעת סיום חדשה HH:MM או ריק"), location: str("מקום חדש או ריק") }, required: ["id", "subject", "date", "start", "end", "location"], additionalProperties: false },
+      input_schema: {
+        type: "object",
+        properties: { id: str("מזהה האירוע מ-list_events"), subject: str("כותרת חדשה או ריק"), date: str("תאריך חדש YYYY-MM-DD או ריק"), start: str("שעת התחלה חדשה HH:MM או ריק"), end: str("שעת סיום חדשה HH:MM או ריק"), location: str("מקום חדש או ריק"), online_meeting: ONLINE_MEETING_UPDATE_FIELD },
+        required: ["id", "subject", "date", "start", "end", "location", "online_meeting"],
+        additionalProperties: false,
+      },
       run: async (input, ctx) => {
         const id = String(input.id ?? "");
         const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
         if (attendees && !Array.isArray(attendees)) return attendees;
-        const pending = await ctx.createPending("update_event", { id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
+        const pending = await ctx.createPending("update_event", { id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(input.online_meeting === true ? { online_meeting: true } : {}), ...(attendees ? { current_attendees: attendees } : {}) });
         return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
       },
     },
@@ -170,7 +182,7 @@ const dateHe = (isoDate: string) => {
   return `יום ${DAYS[d.getUTCDay()]} ${Number(m[3])}.${Number(m[2])}`;
 };
 
-function failure(e: unknown): { ok: false; message: string; retryable?: boolean } {
+function failure(e: unknown): ActionResult {
   if (e instanceof GraphError && e.unauthorized) return { ok: false, message: copy["err.connection_expired"]("Microsoft 365", "") };
   if (e instanceof GraphError && e.retryable) return { ok: false, message: copy["err.provider_down"]("Microsoft 365"), retryable: true };
   return { ok: false, message: copy["err.generic"]() };
@@ -183,11 +195,12 @@ export function graphExecutors(graphFor: (userId: string) => Promise<{ graph: Gr
     if (!g) throw new NoConnection();
     return g;
   };
-  const wrap = (fn: (g: { graph: GraphClient; timeZone: string }, p: Record<string, unknown>) => Promise<string>): ActionExecutor => {
+  const wrap = (fn: (g: { graph: GraphClient; timeZone: string }, p: Record<string, unknown>, action: Parameters<ActionExecutor>[0]) => Promise<string | ActionResult>): ActionExecutor => {
     return async (action) => {
       try {
         const g = await needGraph(action.user_id);
-        return { ok: true, message: await fn(g, action.payload) };
+        const out = await fn(g, action.payload, action);
+        return typeof out === "string" ? { ok: true, message: out } : out;
       } catch (e) {
         if (e instanceof NoConnection) return { ok: false, message: copy["err.not_connected"]() };
         return failure(e);
@@ -201,20 +214,43 @@ export function graphExecutors(graphFor: (userId: string) => Promise<{ graph: Gr
       await graph.sendMail({ to: [to], subject: String(p.subject ?? ""), body: String(p.body ?? ""), replyToMessageId: typeof p.reply_to === "string" ? p.reply_to : undefined });
       return copy["act.mail.sent"](String(p.to_name || to));
     }),
-    create_event: wrap(async ({ graph, timeZone }, p) => {
+    create_event: wrap(async ({ graph, timeZone }, p, action) => {
       const attendees = Array.isArray(p.attendees) ? (p.attendees as string[]).filter(Boolean) : [];
-      await graph.createEvent({ subject: String(p.title ?? ""), start: `${p.date}T${p.start}:00`, end: `${p.date}T${p.end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees });
-      return `${copy["act.cal.created"](String(p.title ?? ""), dateHe(String(p.date ?? "")), String(p.start ?? ""))}${attendees.length ? "\nההזמנות יצאו למשתתפים." : ""}`;
+      const online = p.online_meeting === true;
+      if (online && !(await teamsAllowed(graph))) return onlineMeetingUnavailable(action, "microsoft");
+      let e: GraphEvent;
+      try {
+        e = await graph.createEvent({ subject: String(p.title ?? ""), start: `${p.date}T${p.start}:00`, end: `${p.date}T${p.end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online });
+      } catch (err) {
+        if (online && isTeamsError(err)) return onlineMeetingUnavailable(action, "microsoft");
+        throw err;
+      }
+      const link = online ? await teamsLinkLine(graph, e, timeZone) : "";
+      return `${copy["act.cal.created"](String(p.title ?? ""), dateHe(String(p.date ?? "")), String(p.start ?? ""))}${link}${attendees.length ? "\nההזמנות יצאו למשתתפים." : ""}`;
     }),
-    update_event: wrap(async ({ graph, timeZone }, p) => {
+    update_event: wrap(async ({ graph, timeZone }, p, action) => {
+      const online = p.online_meeting === true;
       const patch: Parameters<GraphClient["updateEvent"]>[1] = { timeZone };
       if (p.subject) patch.subject = String(p.subject);
       if (p.date && p.start) patch.start = `${p.date}T${p.start}:00`;
       if (p.date && p.end) patch.end = `${p.date}T${p.end}:00`;
       if (p.location) patch.location = String(p.location);
-      const e = await graph.updateEvent(String(p.id ?? ""), patch);
+      if (online) {
+        if (!(await teamsAllowed(graph))) return onlineMeetingUnavailable(action, "microsoft");
+        patch.onlineMeeting = true;
+      }
+      let e: GraphEvent;
+      try {
+        e = await graph.updateEvent(String(p.id ?? ""), patch);
+      } catch (err) {
+        if (online && isTeamsError(err)) return onlineMeetingUnavailable(action, "microsoft");
+        throw err;
+      }
       const start = e.start.slice(11, 16);
-      return `${copy["act.cal.moved"](e.subject, dateHe(e.start), start)}${e.attendees.length ? `\nעדכון נשלח ל-${e.attendees.length} משתתפים.` : ""}`;
+      const moved = Boolean(patch.start || patch.end || patch.subject || patch.location);
+      const line = moved || !online ? copy["act.cal.moved"](e.subject, dateHe(e.start), start) : copy["act.cal.online_added"](e.subject, "microsoft");
+      const link = online ? await teamsLinkLine(graph, e, timeZone) : "";
+      return `${line}${link}${e.attendees.length ? `\nעדכון נשלח ל-${e.attendees.length} משתתפים.` : ""}`;
     }),
     delete_event: wrap(async ({ graph }, p) => {
       await graph.deleteEvent(String(p.id ?? ""));
@@ -230,5 +266,27 @@ export function graphExecutors(graphFor: (userId: string) => Promise<{ graph: Gr
 }
 
 class NoConnection extends Error {}
+
+/**
+ * Teams needs a work or school account: the calendar lists "teamsForBusiness" in allowedOnlineMeetingProviders.
+ * Unknown (the check itself failed) → try, and let the create / update error decide.
+ */
+async function teamsAllowed(graph: GraphClient): Promise<boolean> {
+  const providers = await graph.onlineMeetingProviders();
+  return providers === null || providers.includes(TEAMS_PROVIDER);
+}
+
+/** A client error from Graph about the online meeting itself (not auth, throttling, outage or a vanished event). */
+function isTeamsError(e: unknown): boolean {
+  return e instanceof GraphError && e.status >= 400 && e.status < 500 && !e.unauthorized && !e.retryable && e.status !== 404 && /online\s*meeting|teams/i.test(`${e.code ?? ""} ${e.message}`);
+}
+
+/** "\nקישור לפגישה: …" after the confirmation; Graph usually returns the join link at once, else one more read. */
+async function teamsLinkLine(graph: GraphClient, e: GraphEvent, timeZone: string): Promise<string> {
+  let ev = e;
+  if (!ev.joinUrl) ev = await graph.getEvent(e.id, timeZone).catch(() => e);
+  if (ev.joinUrl) return `\n${copy["act.cal.join_link"](ev.joinUrl)}`;
+  return `\n${ev.isOnlineMeeting ? copy["act.cal.join_link_later"]() : copy["act.cal.online_missing"]("microsoft")}`;
+}
 
 export type { ToolContext };

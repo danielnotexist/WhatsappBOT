@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
 import type { UserRow } from "@/lib/db/types";
-import { createGoogleFixture, fixtureMail } from "@/lib/google/__fixtures__/google-fixtures";
+import { FIXTURE_MEET_URL, createGoogleFixture, fixtureMail } from "@/lib/google/__fixtures__/google-fixtures";
 import { GoogleClient } from "@/lib/google/client";
 import { GmailReader } from "@/lib/google/gmail";
-import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
+import { FIXTURE_TEAMS_JOIN_URL, createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
 import { zonedToUtc } from "@/lib/time/zoned";
@@ -36,7 +36,10 @@ async function setup(opts: { at?: Date; connected?: boolean; sent?: { conversati
   return { h, user, deps, job, graphState: g.state };
 }
 
+// the template keeps one line per meeting: join links do not fit its 300 characters
 const MEETINGS = "• 09:00 דיון בבית משפט השלום ת״א  • 12:00 פגישה עם רו״ח ברק";
+const TEAMS_LINE = `קישור לפגישה: ${FIXTURE_TEAMS_JOIN_URL}`;
+const MEET_LINE = `קישור לפגישה: ${FIXTURE_MEET_URL}`;
 
 describe("morning summary — the job", () => {
   it("outside the window sends the morning_summary template from Graph (meetings, emails awaiting reply) + today's reminders", async () => {
@@ -60,7 +63,7 @@ describe("morning summary — the job", () => {
     await processInbound(h.ctx, h.inbound("תודה"));
     expect(await runMorningSummaryJob(deps, job)).toMatchObject({ status: "sent", mode: "text" });
     expect(h.wa.texts.at(-1)).toBe(
-      "*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• 09:00 דיון בבית משפט השלום ת״א\n• 12:00 פגישה עם רו״ח ברק\n\n*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n\nרוצה שאנסח תשובה למישהו מהם?",
+      `*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• 09:00 דיון בבית משפט השלום ת״א\n• 12:00 פגישה עם רו״ח ברק\n${TEAMS_LINE}\n\n*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n\nרוצה שאנסח תשובה למישהו מהם?`,
     );
   });
 
@@ -127,7 +130,7 @@ describe("morning summary — the job", () => {
     const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: createGoogleFixture().fetchImpl });
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google }) }, job);
-    expect(h.wa.texts.at(-1)).toContain("*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n• 13:00 שיחה עם משפחת אברהם\n\n*מיילים שמחכים לתשובה*");
+    expect(h.wa.texts.at(-1)).toContain(`*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n${TEAMS_LINE}\n• 13:00 שיחה עם משפחת אברהם\n${MEET_LINE}\n\n*מיילים שמחכים לתשובה*`);
   });
 
   it("Gmail with gmail.readonly: emails awaiting a reply from Gmail (threads.list + threads.get, own replies respected)", async () => {
@@ -154,7 +157,7 @@ describe("morning summary — the job", () => {
     const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: null, accountEmail: "dana.levi@gmail.com" }) }, job);
-    expect(h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 פגישת צוות שבועית\n• 13:00 שיחה עם משפחת אברהם\n\nשיהיה יום טוב.");
+    expect(h.wa.texts.at(-1)).toBe(`*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 פגישת צוות שבועית\n• 13:00 שיחה עם משפחת אברהם\n${MEET_LINE}\n\nשיהיה יום טוב.`);
     expect(fx.state.calls.some((c) => c.url.includes("gmail.googleapis.com"))).toBe(false);
   });
 

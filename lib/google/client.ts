@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { safeJoinUrl } from "@/lib/online-meeting";
 import { buildMimeMessage, toGmailRaw, type MimeMessageInput } from "./mime";
 
 /**
@@ -59,6 +60,10 @@ export interface GoogleEvent {
   status: string;
   /** "transparent" = shows as free */
   transparency: "opaque" | "transparent";
+  /** Meet (`hangoutLink`) or the conference's video entry point, when it is a safe meeting link (lib/online-meeting.ts) */
+  joinUrl: string | null;
+  /** status of a conference create request: "pending" right after the request, then "success" or "failure" */
+  conferenceStatus: "pending" | "success" | "failure" | null;
 }
 
 export interface NewGoogleEvent {
@@ -71,6 +76,8 @@ export interface NewGoogleEvent {
   description?: string;
   attendees?: string[];
   isAllDay?: boolean;
+  /** true → a Google Meet (conferenceData.createRequest, sent with conferenceDataVersion=1) */
+  onlineMeeting?: boolean;
 }
 
 export type SendUpdates = "all" | "externalOnly" | "none";
@@ -171,14 +178,17 @@ export class GoogleClient {
     return mapEvent(await this.json<RawEvent>("GET", this.eventsUrl(`/${encodeURIComponent(id)}`, { timeZone })), null);
   }
 
-  /** Invitations go out to attendees (`sendUpdates=all`) — the user already approved this exact event. */
+  /**
+   * Invitations go out to attendees (`sendUpdates=all`) — the user already approved this exact event. A Meet is
+   * created asynchronously: the response may carry `conferenceStatus: "pending"` and no link yet (read it again).
+   */
   async createEvent(input: NewGoogleEvent, sendUpdates: SendUpdates = input.attendees?.length ? "all" : "none"): Promise<GoogleEvent> {
-    return mapEvent(await this.json<RawEvent>("POST", this.eventsUrl("", { sendUpdates }), eventBody(input)), null);
+    return mapEvent(await this.json<RawEvent>("POST", this.eventsUrl("", { sendUpdates, ...conferenceParam(input) }), eventBody(input)), null);
   }
 
   /** PATCH semantics: only given fields change (an `attendees` array replaces the whole list). */
   async patchEvent(id: string, patch: Partial<NewGoogleEvent> & { timeZone: string }, sendUpdates: SendUpdates = "all"): Promise<GoogleEvent> {
-    return mapEvent(await this.json<RawEvent>("PATCH", this.eventsUrl(`/${encodeURIComponent(id)}`, { sendUpdates }), eventBody(patch)), null);
+    return mapEvent(await this.json<RawEvent>("PATCH", this.eventsUrl(`/${encodeURIComponent(id)}`, { sendUpdates, ...conferenceParam(patch) }), eventBody(patch)), null);
   }
 
   /** Deletes (organizer: guests get a cancellation). Already deleted (410 Gone) counts as done. */
@@ -317,8 +327,15 @@ function mapEvent(e: RawEvent, calendarTz: string | null): GoogleEvent {
     htmlLink: e.htmlLink ?? null,
     status: e.status ?? "confirmed",
     transparency: e.transparency === "transparent" ? "transparent" : "opaque",
+    joinUrl: safeJoinUrl(e.hangoutLink) ?? safeJoinUrl(e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri),
+    conferenceStatus: conferenceStatusOf(e.conferenceData?.createRequest?.status?.statusCode),
   };
 }
+
+const conferenceStatusOf = (code: unknown): GoogleEvent["conferenceStatus"] => (code === "pending" || code === "success" || code === "failure" ? code : null);
+
+/** Without conferenceDataVersion=1 Google ignores conferenceData in the body, so it goes with every Meet request. */
+const conferenceParam = (e: Partial<NewGoogleEvent>): Record<string, string> => (e.onlineMeeting ? { conferenceDataVersion: "1" } : {});
 
 function eventBody(e: Partial<NewGoogleEvent> & { timeZone: string }): Record<string, unknown> {
   const body: Record<string, unknown> = {};
@@ -329,6 +346,8 @@ function eventBody(e: Partial<NewGoogleEvent> & { timeZone: string }): Record<st
   if (e.location !== undefined) body.location = e.location;
   if (e.description !== undefined) body.description = e.description;
   if (e.attendees !== undefined) body.attendees = e.attendees.map((email) => ({ email }));
+  // a fresh requestId per request: Google deduplicates create requests by it
+  if (e.onlineMeeting) body.conferenceData = { createRequest: { requestId: randomUUID(), conferenceSolutionKey: { type: "hangoutsMeet" } } };
   return body;
 }
 
@@ -357,6 +376,8 @@ interface RawEvent {
   transparency?: string;
   attendees?: { email?: string; displayName?: string; responseStatus?: string; self?: boolean; resource?: boolean }[];
   organizer?: { email?: string; displayName?: string; self?: boolean };
+  hangoutLink?: string;
+  conferenceData?: { createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] };
 }
 interface RawDriveFile {
   id: string;

@@ -1,8 +1,8 @@
-import type { Tool } from "@/lib/ai/tools";
+import { onlineMeetingField, type Tool } from "@/lib/ai/tools";
 import { copy } from "@/lib/copy/bot";
 import { GOOGLE_LABEL, gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionRow, PendingActionRow } from "@/lib/db/types";
-import type { ActionExecutor } from "@/lib/bot/pending";
+import { onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
 import { connectLinkFor, type BotContext } from "@/lib/bot/context";
 import { GoogleApiError, GOOGLE_DOC_MIME, GOOGLE_SHEET_MIME, GOOGLE_SLIDES_MIME, type GoogleClient, type GoogleEvent } from "./client";
 import { driveFileText } from "./drive-text";
@@ -41,6 +41,7 @@ const compactEvent = (e: GoogleEvent) => ({
   location: e.location,
   attendees: e.attendees.filter((a) => !a.self).map((a) => a.email),
   organizer_is_me: e.organizer?.self ?? true,
+  ...(e.joinUrl ? { join_url: e.joinUrl } : {}),
 });
 
 export { googleErrorOutput };
@@ -101,22 +102,40 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         name: "gcal_create_event",
         description: "מכין פגישה חדשה ביומן Google ומעביר לאישור המשתמש. לא יוצר בפועל. להשתמש כשהמשתמש מבקש יומן Google במפורש או כשזה החשבון היחיד שמחובר.",
         readOnly: false,
-        input_schema: { type: "object", properties: { title: str("כותרת הפגישה"), date: str("YYYY-MM-DD"), start: str("HH:MM"), end: str("HH:MM"), location: str("מקום או ריק"), attendees: { type: "array", items: { type: "string" }, description: "כתובות מייל של משתתפים (ריק אם אין)" } }, required: ["title", "date", "start", "end", "location", "attendees"], additionalProperties: false },
+        input_schema: {
+          type: "object",
+          properties: { title: str("כותרת הפגישה"), date: str("YYYY-MM-DD"), start: str("HH:MM"), end: str("HH:MM"), location: str("מקום או ריק"), attendees: { type: "array", items: { type: "string" }, description: "כתובות מייל של משתתפים (ריק אם אין)" }, online_meeting: onlineMeetingField("Google Meet") },
+          required: ["title", "date", "start", "end", "location", "attendees", "online_meeting"],
+          additionalProperties: false,
+        },
         run: async (input, ctx) => {
-          const pending = await ctx.createPending("create_event", { provider: "google", title: String(input.title ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), attendees: Array.isArray(input.attendees) ? input.attendees.map(String).filter(Boolean) : [] });
+          const pending = await ctx.createPending("create_event", { provider: "google", title: String(input.title ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), attendees: Array.isArray(input.attendees) ? input.attendees.map(String).filter(Boolean) : [], ...(input.online_meeting === true ? { online_meeting: true } : {}) });
           return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי אישור. ענה במשפט קצר בלבד." };
         },
       },
       {
         name: "gcal_update_event",
-        description: "מכין שינוי לאירוע קיים ביומן Google (הזזה, כותרת, מקום) ומעביר לאישור המשתמש. לא משנה בפועל. שדה שלא משתנה — ריק.",
+        description: "מכין שינוי לאירוע קיים ביומן Google (הזזה, כותרת, מקום, הוספת קישור Google Meet) ומעביר לאישור המשתמש. לא משנה בפועל. שדה שלא משתנה — ריק.",
         readOnly: false,
-        input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-gcal_list_events"), subject: str("כותרת חדשה או ריק"), date: str("תאריך חדש YYYY-MM-DD או ריק"), start: str("שעת התחלה חדשה HH:MM או ריק"), end: str("שעת סיום חדשה HH:MM או ריק"), location: str("מקום חדש או ריק") }, required: ["id", "subject", "date", "start", "end", "location"], additionalProperties: false },
+        input_schema: {
+          type: "object",
+          properties: {
+            id: str("מזהה האירוע מ-gcal_list_events"),
+            subject: str("כותרת חדשה או ריק"),
+            date: str("תאריך חדש YYYY-MM-DD או ריק"),
+            start: str("שעת התחלה חדשה HH:MM או ריק"),
+            end: str("שעת סיום חדשה HH:MM או ריק"),
+            location: str("מקום חדש או ריק"),
+            online_meeting: { type: "boolean", description: "true כדי להוסיף לפגישה קישור Google Meet (כשמבקשים להפוך אותה לפגישה מקוונת או לשלוח קישור למשתתפים). false = בלי שינוי בקישור." },
+          },
+          required: ["id", "subject", "date", "start", "end", "location", "online_meeting"],
+          additionalProperties: false,
+        },
         run: async (input, ctx) => {
           const id = String(input.id ?? "");
           const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
           if (attendees && !Array.isArray(attendees)) return attendees;
-          const pending = await ctx.createPending("update_event", { provider: "google", id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
+          const pending = await ctx.createPending("update_event", { provider: "google", id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(input.online_meeting === true ? { online_meeting: true } : {}), ...(attendees ? { current_attendees: attendees } : {}) });
           return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
         },
       },
@@ -251,7 +270,7 @@ export interface GoogleForUser {
 class NoConnection extends Error {}
 class TooLarge extends Error {}
 
-async function failure(e: unknown, kind: ExecKind, action: PendingActionRow, ctx: BotContext): Promise<{ ok: false; message: string; retryable?: boolean }> {
+async function failure(e: unknown, kind: ExecKind, action: PendingActionRow, ctx: BotContext): Promise<ActionResult> {
   const link = () => connectLinkFor(ctx, action.user_id, "google");
   // a Google connect link in chat carries the one-line "unverified app" heads-up, like every other one
   const headsUp = async () => connectHeadsUpSuffix(ctx.db, await ctx.db.listConnections(action.user_id).catch(() => []), "google");
@@ -276,6 +295,22 @@ async function driveAttachment(g: GoogleClient, fileId: string): Promise<MimeAtt
   return { filename: file.name, contentType: contentType?.split(";")[0] ?? file.mimeType, bytes };
 }
 
+/** Google refused the conference itself (e.g. "Invalid conference type value"), not auth, quota or a vanished event. */
+function isMeetError(e: unknown): boolean {
+  return e instanceof GoogleApiError && e.status === 400 && /conference|hangout|meet/i.test(e.message);
+}
+
+/**
+ * "\nקישור לפגישה: …" after the confirmation. Google creates the Meet asynchronously: a pending request is read once
+ * more; still pending → the link will show in the event; failed → said plainly (the event itself was created).
+ */
+async function meetLinkLine(google: GoogleClient, e: GoogleEvent, timeZone: string): Promise<string> {
+  let ev = e;
+  if (!ev.joinUrl && ev.conferenceStatus === "pending") ev = await google.getEvent(e.id, timeZone).catch(() => e);
+  if (ev.joinUrl) return `\n${copy["act.cal.join_link"](ev.joinUrl)}`;
+  return `\n${ev.conferenceStatus === "pending" ? copy["act.cal.join_link_later"]() : copy["act.cal.online_missing"]("google")}`;
+}
+
 const splitEmails = (s: unknown) =>
   String(s ?? "")
     .split(/[,;\s]+/)
@@ -284,12 +319,13 @@ const splitEmails = (s: unknown) =>
 
 /** Executors for approved Google actions (PLAN §2.3: only after the owner's button press, within 10 minutes). */
 export function googleExecutors(googleFor: (userId: string) => Promise<GoogleForUser | null>): Record<ExecKind, ActionExecutor> {
-  const wrap = (kind: ExecKind, fn: (g: GoogleForUser, p: Record<string, unknown>) => Promise<string>): ActionExecutor => {
+  const wrap = (kind: ExecKind, fn: (g: GoogleForUser, p: Record<string, unknown>, action: PendingActionRow) => Promise<string | ActionResult>): ActionExecutor => {
     return async (action, ctx) => {
       try {
         const g = await googleFor(action.user_id);
         if (!g) throw new NoConnection();
-        return { ok: true, message: await fn(g, action.payload) };
+        const out = await fn(g, action.payload, action);
+        return typeof out === "string" ? { ok: true, message: out } : out;
       } catch (e) {
         if (e instanceof NoConnection) return { ok: false, message: copy["err.not_connected"]() };
         return failure(e, kind, action, ctx);
@@ -304,19 +340,29 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
       await google.sendMail({ to: [{ email: to, name: String(p.to_name ?? "") || null }], cc: splitEmails(p.cc).map((email) => ({ email })), subject: String(p.subject ?? ""), body: String(p.body ?? ""), attachments });
       return gcopy["g.mail.sent"](String(p.to_name || to), connection.account_email ?? "");
     }),
-    create_event: wrap("create_event", async ({ google, timeZone }, p) => {
+    create_event: wrap("create_event", async ({ google, timeZone }, p, action) => {
       const date = String(p.date ?? "");
       const start = String(p.start ?? "");
       if (!DATE_RE.test(date) || !TIME_RE.test(start)) return copy["err.generic"]();
       const end = TIME_RE.test(String(p.end ?? "")) && String(p.end) > start ? String(p.end) : addMinutesLocal(date, start, 60).time;
       const attendees = Array.isArray(p.attendees) ? (p.attendees as unknown[]).map(String).filter(isValidEmail) : [];
-      await google.createEvent({ summary: String(p.title ?? ""), start: `${date}T${start}:00`, end: `${date}T${end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees });
-      return `${copy["act.cal.created"](String(p.title ?? ""), dateHe(date), start)}${attendees.length ? "\nההזמנות יצאו למשתתפים." : ""}`;
+      const online = p.online_meeting === true;
+      let created: GoogleEvent;
+      try {
+        created = await google.createEvent({ summary: String(p.title ?? ""), start: `${date}T${start}:00`, end: `${date}T${end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online });
+      } catch (e) {
+        if (online && isMeetError(e)) return onlineMeetingUnavailable(action, "google");
+        throw e;
+      }
+      const link = online ? await meetLinkLine(google, created, timeZone) : "";
+      return `${copy["act.cal.created"](String(p.title ?? ""), dateHe(date), start)}${link}${attendees.length ? "\nההזמנות יצאו למשתתפים." : ""}`;
     }),
-    update_event: wrap("update_event", async ({ google, timeZone }, p) => {
+    update_event: wrap("update_event", async ({ google, timeZone }, p, action) => {
       const id = String(p.id ?? "");
       const current = await google.getEvent(id, timeZone);
-      const patch: Parameters<GoogleClient["patchEvent"]>[1] = { timeZone };
+      // a second create request would replace the Meet the attendees already have
+      const online = p.online_meeting === true;
+      const patch: Parameters<GoogleClient["patchEvent"]>[1] = { timeZone, ...(online && !current.joinUrl ? { onlineMeeting: true } : {}) };
       if (p.subject) patch.summary = String(p.subject);
       if (p.location) patch.location = String(p.location);
       const newDate = DATE_RE.test(String(p.date ?? "")) ? String(p.date) : "";
@@ -334,11 +380,26 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
         patch.start = `${startPair.date}T${startPair.time}:00`;
         patch.end = `${endPair.date}T${endPair.time}:00`;
       }
-      const updated = await google.patchEvent(id, patch);
+      const changed = Boolean(patch.summary || patch.location || patch.start || patch.end);
+      // only the link was asked for and the meeting already has one: nothing to change (and no update e-mail to guests)
+      if (online && current.joinUrl && !changed) return copy["act.cal.join_link"](current.joinUrl);
+      let updated: GoogleEvent;
+      try {
+        updated = await google.patchEvent(id, patch);
+      } catch (e) {
+        if (patch.onlineMeeting && isMeetError(e)) return onlineMeetingUnavailable(action, "google");
+        throw e;
+      }
       const others = updated.attendees.filter((a) => !a.self).length;
       const when = wallClock(patch.start ?? current.start);
-      const line = updated.isAllDay ? gcopy["g.cal.moved_all_day"](updated.summary, dateHe(updated.start)) : copy["act.cal.moved"](updated.summary, dateHe(when.date), when.time);
-      return `${line}${others ? `\nעדכון נשלח ל-${others} משתתפים.` : ""}`;
+      const line =
+        online && !changed
+          ? copy["act.cal.online_added"](updated.summary, "google")
+          : updated.isAllDay
+            ? gcopy["g.cal.moved_all_day"](updated.summary, dateHe(updated.start))
+            : copy["act.cal.moved"](updated.summary, dateHe(when.date), when.time);
+      const link = online ? (current.joinUrl ? `\n${copy["act.cal.join_link"](current.joinUrl)}` : await meetLinkLine(google, updated, timeZone)) : "";
+      return `${line}${link}${others ? `\nעדכון נשלח ל-${others} משתתפים.` : ""}`;
     }),
     delete_event: wrap("delete_event", async ({ google }, p) => {
       await google.deleteEvent(String(p.id ?? ""));
