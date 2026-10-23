@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SERVICE_TILE, serviceTileSrc } from "@/lib/connections/service-tiles";
+import { SERVICE_ICON_STYLE, SERVICE_MARK, SERVICE_TILE, serviceTileSrc } from "@/lib/connections/service-tiles";
 import { INTEGRATIONS } from "./catalogue";
 import { INTEGRATION_MARK_STYLE, INTEGRATION_TILE, MORE_TILE, integrationTileSrc, tileSrc, type TileSet } from "./tiles";
 
@@ -9,11 +9,24 @@ const PUBLIC = join(__dirname, "..", "..", "public");
 const SETS: TileSet[] = ["night", "paper"];
 const onDisk = (src: string) => existsSync(join(PUBLIC, src));
 
-describe("the icon tiles (public/brand/integrations/<set>/*.webp)", () => {
-  it("are the switched-on style; the SVG marks stay behind the one switch", () => {
-    expect(["tiles", "svg"]).toContain(INTEGRATION_MARK_STYLE);
-    expect(INTEGRATION_MARK_STYLE).toBe("tiles");
+describe("the switch (Daniel, round 3: the official marks, straight on the surface)", () => {
+  it("draws the owners' marks everywhere; the illustrated tiles and the white chips stay one constant away", () => {
+    expect(["marks", "tiles", "svg"]).toContain(INTEGRATION_MARK_STYLE);
+    expect(INTEGRATION_MARK_STYLE).toBe("marks");
+    expect(["marks", "tiles", "glyphs"]).toContain(SERVICE_ICON_STYLE);
+    expect(SERVICE_ICON_STYLE).toBe("marks");
   });
+
+  it("gives every service of the /account row the mark of a catalogue system", () => {
+    const ids = new Set(INTEGRATIONS.map((i) => i.id));
+    expect(Object.keys(SERVICE_MARK).sort()).toEqual(Object.keys(SERVICE_TILE).sort());
+    for (const [service, id] of Object.entries(SERVICE_MARK)) expect(ids.has(id), `${service} → ${id}`).toBe(true);
+    expect(SERVICE_MARK.outlook_calendar).toBe("outlook");
+    expect(SERVICE_MARK.office_files).toBe("word");
+  });
+});
+
+describe("the icon tiles (public/brand/integrations/<set>/*.webp), kept behind the switch", () => {
 
   it("map every catalogue system to a tile that exists in both sets, and nothing else", () => {
     expect(Object.keys(INTEGRATION_TILE).sort()).toEqual(INTEGRATIONS.map((i) => i.id).sort());

@@ -105,7 +105,13 @@ describe("ServiceRow", () => {
     expect(screen.queryByRole("link")).toBeNull();
     expect(container.querySelectorAll("[data-status=connected]").length).toBe(4);
     expect(container.querySelector("[data-status=unavailable]")!.className).toContain("border-dashed");
-    expect(screen.queryByText(/מחכים לאישור נוסף|מחכה לאישור נוסף/)).toBeNull();
+    // the products' official marks in colour, straight on the surface: no picture, no white chip, no sage tile
+    for (const icon of container.querySelectorAll<HTMLElement>("[data-status]")) {
+      expect(icon.querySelector("[data-glyph] svg")).not.toBeNull();
+      expect(icon.querySelector("img")).toBeNull();
+      expect(icon.className).not.toMatch(/\bbg-white\b|\bbg-sage\b/);
+    }
+    expect(container.querySelector("[data-status=connected]")!.className).not.toMatch(/opacity-\d/);    expect(screen.queryByText(/מחכים לאישור נוסף|מחכה לאישור נוסף/)).toBeNull();
   });
 
   it("Microsoft: an older connection asks for To Do and SharePoint through the normal connect (one line about the admin)", () => {
@@ -147,7 +153,7 @@ describe("ServiceRow", () => {
     const list = screen.getByRole("list", { name: "שירותים שיתחברו עם Google" });
     const gmail = within(list).getByRole("button", { name: "Gmail - יתחבר עם Google" });
     expect(gmail).toHaveAttribute("data-status", "preview");
-    expect(gmail.className).toContain("[&_img]:opacity-45");
+    expect(gmail.className).toContain("[&_[data-glyph]]:opacity-45");
     expect(gmail).toHaveAccessibleDescription("קריאה, חיפוש וסיכום של מיילים, ושליחה אחרי אישור");
     expect(within(list).getByRole("button", { name: "Google Tasks - יתחבר עם Google" })).toHaveAccessibleDescription("הצגה והוספה של משימות. במסלול פרו");
     expect(within(list).queryAllByRole("link")).toHaveLength(0);

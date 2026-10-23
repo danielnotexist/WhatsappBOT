@@ -1,15 +1,20 @@
 /**
  * How the systems she works with are drawn (lib/integrations/catalogue.ts) - the one switch and the one map.
  *
- * "tiles" (Daniel, 23.10.2026, after the preview): our own illustrated icon tiles (Nano Banana), in two sets that carry
- * their own rounded square - `night` for the dark stage (the "עובדת עם" strip, the full list, /pricing) and `paper` for
- * the cream price sheet. "svg": the owners' product marks drawn in code on a white chip
- * (components/brand/integrations/icons.tsx), kept so one change here switches every place back.
- * The names, tooltips and accessible labels are the same in both.
+ * "marks" (Daniel, 23.10.2026, round 3): the owners' official product marks in their own colours, drawn in code
+ * (components/brand/integrations/icons.tsx) straight on the surface - no chip, no tile behind them - on the night stage
+ * and on the cream price sheet alike. A system without a clean mark (Priority, מורנינג, iCount) gets a monogram plate in
+ * its brand colour, drawn at the same size and weight.
+ * "tiles": our own illustrated icon tiles (Nano Banana), in two sets that carry their own rounded square - `night` for
+ * the dark stage and `paper` for the cream price sheet (public/brand/integrations/<set>/). Kept, with the map below, so
+ * one change here switches every place back.
+ * "svg": the same product marks on a white chip (the earlier trial).
+ * The names, tooltips and accessible labels are the same in all three.
  *
- * The services row in /account (lib/connections/service-tiles.ts) draws from the same files through `tileSrc`.
+ * The services row in /account has its own switch over the same marks and files (lib/connections/service-tiles.ts).
  */
-export const INTEGRATION_MARK_STYLE: "tiles" | "svg" = "tiles";
+export type MarkStyle = "marks" | "tiles" | "svg";
+export const INTEGRATION_MARK_STYLE: MarkStyle = "marks";
 
 /** the surface a tile stands on: the night stage or the paper price sheet (public/brand/integrations/<set>/) */
 export type TileSet = "night" | "paper";

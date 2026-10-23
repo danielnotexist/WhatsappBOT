@@ -145,8 +145,10 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
       const names = integrationsForPlan(plan).flatMap((g) => g.items.map((i) => (i.status === "soon" ? `${i.name}, בקרוב` : i.name)));
       const shown = () => within(row).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
       expect(shown()).toEqual(names.slice(0, 8));
-      // the paper set on the cream sheet
-      expect(row.querySelector("img")?.getAttribute("src")).toMatch(/brand%2Fintegrations%2Fpaper%2F|brand\/integrations\/paper\//);
+      // the official marks straight on the cream sheet: no picture tiles, no white chips
+      expect(row.querySelector("img")).toBeNull();
+      expect(row.querySelector(".bg-white")).toBeNull();
+      expect(row.querySelectorAll("[data-mark='bare'] svg")).toHaveLength(8);
       fireEvent.click(within(card).getByRole("button", { name: `עוד ${names.length - 8} חיבורים` }));
       expect(shown()).toEqual(names);
     }
@@ -179,14 +181,19 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     expect(basic).toHaveTextContent("סוכן אחד משלך");
   });
 
-  it("the full list: three groups, every system with its benefit, 'בקרוב' where it is not connected yet, and more to come", () => {
+  it("the full list: three groups with their counts, a card per system with its benefit, 'בקרוב' where it is not connected yet, and more to come", () => {
     render(<Connectors />);
     const section = screen.getByRole("region", { name: "מתחברת לכלים שכבר יש לכם." });
     expect(section).toHaveAttribute("id", "connectors");
-    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Google", "Microsoft 365", "מערכות העסקבקרוב"]);
+    const headings = screen.getAllByRole("heading", { level: 3 });
+    expect(headings.map((h) => h.textContent)).toEqual(["Google", "Microsoft 365", "מערכות העסק"]);
+    // the count beside each heading
+    expect(headings.map((h) => h.nextElementSibling?.textContent)).toEqual(["8 חיבורים", "8 חיבורים", "4 בקרוב"]);
     for (const i of INTEGRATIONS) {
       const item = screen.getByText(i.name).closest("li")!;
       expect(item, i.id).toHaveTextContent(i.benefit);
+      // the card: the mark, centred above the name
+      expect(item.querySelector(`[data-integration-tile='${i.id}'] svg`), i.id).not.toBeNull();
       if (i.status === "soon") expect(item, i.id).toHaveTextContent("בקרוב");
       else expect(item, i.id).not.toHaveTextContent("בקרוב");
     }
@@ -210,12 +217,13 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     expect(screen.getByRole("link", { name: "מחירים" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("the full list: our night tiles (no white chips), and 'ועוד בהמשך' is a button that opens 'בקשת מערכת'", async () => {
+  it("the full list: the official marks straight on the cards (no white chips, no picture tiles), and 'ועוד בהמשך' is a card that opens 'בקשת מערכת'", async () => {
     const { container } = render(<Connectors />);
     expect(container.querySelector(".bg-white")).toBeNull();
-    const srcs = [...container.querySelectorAll("img")].map((i) => decodeURIComponent(i.getAttribute("src") ?? ""));
-    expect(srcs.length).toBe(INTEGRATIONS.length + 1);
-    for (const s of srcs) expect(s).toContain("/brand/integrations/night/");
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelectorAll("[data-mark='bare']")).toHaveLength(INTEGRATIONS.length);
+    // a responsive grid: 2 columns on a phone, up to 8 (one row per account) on a desktop
+    for (const list of screen.getAllByRole("list")) expect(list.className).toMatch(/grid-cols-2\b[\s\S]*xl:grid-cols-8/);
     const ask = screen.getByRole("button", { name: "בקשת מערכת" });
     expect(ask).toHaveAccessibleDescription("חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה כאן.");
     expect(ask.closest("li")).toHaveTextContent("ועוד בהמשך");

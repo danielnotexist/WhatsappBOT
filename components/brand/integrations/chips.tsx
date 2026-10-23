@@ -188,7 +188,12 @@ export function IntegrationChips({
                       o?.id === item.id && o.via === "tap" ? null : { id: item.id, via: "tap" },
                     );
                   }}
-                  className="block rounded-[0.6875rem] focus-visible:outline-offset-2"
+                  // the marks stand bare: a faint wash under the one pointed at or open
+                  className={cn(
+                    "block rounded-[0.6875rem] transition-colors duration-150 focus-visible:outline-offset-2 motion-reduce:transition-none",
+                    isNight ? "hover:bg-cream/[0.07]" : "hover:bg-ink/[0.06]",
+                    shown && (isNight ? "bg-cream/[0.07]" : "bg-ink/[0.06]"),
+                  )}
                 >
                   {g.marks[i]}
                 </button>

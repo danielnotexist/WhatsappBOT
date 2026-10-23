@@ -65,8 +65,8 @@ export const INTEGRATIONS: readonly Integration[] = [
 
   // business systems (docs/research/connectors-israel.md)
   { id: "monday", name: "monday.com", vendor: "business", status: "soon", plan: "pro", benefit: "מה הסטטוס של לקוח או פרויקט בבורד" },
-  { id: "priority", name: "Priority", vendor: "business", status: "soon", plan: "pro", benefit: "הזמנות, לקוחות ומלאי מתוך ה-ERP", monogram: { text: "P", color: "#13241C" } },
-  { id: "morning", name: "מורנינג (חשבונית ירוקה)", vendor: "business", status: "soon", plan: "pro", benefit: "מי עוד לא שילם, וקבלה חדשה באישור", monogram: { text: "מ", color: "#0CAB80" } },
+  { id: "priority", name: "Priority", vendor: "business", status: "soon", plan: "pro", benefit: "הזמנות, לקוחות ומלאי מתוך ה-ERP", monogram: { text: "P", color: "#3B37E6" } },
+  { id: "morning", name: "מורנינג (חשבונית ירוקה)", vendor: "business", status: "soon", plan: "pro", benefit: "מי עוד לא שילם, וקבלה חדשה באישור", monogram: { text: "מ", color: "#0DAC81" } },
   { id: "icount", name: "iCount", vendor: "business", status: "soon", plan: "pro", benefit: "חשבוניות פתוחות ותזכורות תשלום ללקוחות", monogram: { text: "iC", color: "#7133D9" } },
 ];
 

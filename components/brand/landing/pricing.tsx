@@ -15,7 +15,7 @@ const TILES_SHOWN = 8;
  * night stage, two columns split by a rule. Each plan: its name and allowance beside the price, then the feature lines
  * of lib/billing/plans.ts (planFeatures, generated from the entitlements) as tight ruled rows - pro opens with
  * "כל מה שבבסיסי, ובנוסף:", "בקרוב" on what is coming - and at its foot one compact row of the systems it connects
- * to (lib/integrations/catalogue.ts integrationsForPlan, our paper icon set): the first few tiles and "+K" for the rest.
+ * to (lib/integrations/catalogue.ts integrationsForPlan, the official marks straight on the paper): the first few tiles and "+K" for the rest.
  * The full comparison lives on /pricing ("להשוואה המלאה"). One call to action: the plan is chosen in WhatsApp after
  * the free messages, not here.
  */

@@ -1,21 +1,21 @@
-import type { ReactNode } from "react";
 import { IntegrationTile, MoreTile } from "@/components/brand/integrations/tile";
 import { SoonTag } from "@/components/brand/integrations/soon-tag";
 import { ProviderLogo } from "@/components/brand/provider-logo";
 import { SystemRequest } from "@/components/brand/system-request";
-import { integrationGroups, type IntegrationGroup } from "@/lib/integrations/catalogue";
+import { integrationGroups, type Integration, type IntegrationGroup } from "@/lib/integrations/catalogue";
 import { INTEGRATION_MARK_STYLE } from "@/lib/integrations/tiles";
 import { SYSTEM_REQUEST_COPY } from "@/lib/support/types";
 import { cn } from "@/lib/utils";
 import { CONTAINER, H2, LEDE } from "./ui";
 
 /**
- * "החיבורים": everything she works with, as a ruled directory in the page's own idiom (the hairline lists of
- * "לפי מקצוע", the trust facts and the FAQ) - one column per account (Google, Microsoft 365) and one for the
- * business systems on the way. Each row: the product's tile (our night icon set, lib/integrations/tiles.ts), its name
- * and one line of what she does with it; what is not connected yet carries "בקרוב". The business column ends with
- * "ועוד בהמשך" - a button that opens "בקשת מערכת" (components/brand/system-request.tsx). Data:
- * lib/integrations/catalogue.ts.
+ * "החיבורים": everything she works with, as a directory of cards (Daniel, 23.10.2026, round 3) - one group per account
+ * (Google, Microsoft 365) and one for the business systems on the way, each under its heading with a count. A card: the
+ * product's official mark in its own colours, straight on the card (lib/integrations/tiles.ts "marks"), its name, and
+ * one quiet line of what she does with it; what is not connected yet carries "בקרוב" in its corner. The cards are a
+ * step lighter than the stage, with a hairline edge, so the darker marks (Microsoft's navy, Excel's green) still read -
+ * no glow. The business group ends with "ועוד בהמשך" - a card that opens "בקשת מערכת"
+ * (components/brand/system-request.tsx). Data: lib/integrations/catalogue.ts.
  */
 export function Connectors() {
   const groups = integrationGroups();
@@ -32,7 +32,7 @@ export function Connectors() {
           </p>
         </div>
 
-        <div className="mt-16 grid gap-x-12 gap-y-16 sm:mt-20 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-16 space-y-14 sm:mt-20 sm:space-y-16">
           {groups.map((g) => (
             <Group key={g.vendor} group={g} />
           ))}
@@ -42,92 +42,87 @@ export function Connectors() {
   );
 }
 
+/**
+ * 2 columns on a phone, 3 on a large phone or a small tablet, 4 on a tablet and a laptop (each account in two full
+ * rows), 8 on a desktop (each account in one row - 6 left a 2-card orphan row under each account)
+ */
+const GRID = "grid grid-cols-2 gap-2.5 min-[34rem]:grid-cols-3 sm:gap-3 md:grid-cols-4 xl:grid-cols-8";
+
 function Group({ group }: { group: IntegrationGroup }) {
-  const allSoon = group.items.every((i) => i.status === "soon");
+  const soon = group.items.filter((i) => i.status === "soon").length;
+  const live = group.items.length - soon;
   const titleId = `connectors-${group.vendor}`;
-  // the owners' logos ask for a white chip; with our own tiles the heading is the name alone
+  // the owners' account logos ask for a white chip: only with the white-chip marks
   const logo = INTEGRATION_MARK_STYLE === "svg" && group.vendor !== "business";
   return (
     <div>
-      <h3 id={titleId} className="flex items-center gap-3 pb-5 font-heading text-[1.375rem] leading-tight">
-        {logo ? (
-          <span aria-hidden="true" className="grid size-8 flex-none place-items-center rounded-[0.5625rem] bg-white">
-            <ProviderLogo provider={group.vendor as "google" | "microsoft"} className="size-4" />
-          </span>
-        ) : null}
-        <bdi>{group.title}</bdi>
-        {allSoon ? <SoonTag /> : null}
-      </h3>
-      <ul aria-labelledby={titleId} className="border-t border-line">
+      <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1 pb-5">
+        <h3 id={titleId} className="flex items-center gap-3 font-heading text-[1.375rem] leading-tight">
+          {logo ? (
+            <span aria-hidden="true" className="grid size-8 flex-none place-items-center self-center rounded-[0.5625rem] bg-white">
+              <ProviderLogo provider={group.vendor as "google" | "microsoft"} className="size-4" />
+            </span>
+          ) : null}
+          <bdi>{group.title}</bdi>
+        </h3>
+        <p className="tabular text-[0.9375rem] text-cream-muted">
+          {live ? `${live} חיבורים` : null}
+          {live && soon ? ", " : null}
+          {soon ? `${soon} בקרוב` : null}
+        </p>
+      </div>
+      <ul aria-labelledby={titleId} className={GRID}>
         {group.items.map((i) => (
-          <Row
-            key={i.id}
-            tile={<IntegrationTile integration={i} size="lg" />}
-            name={i.name}
-            benefit={i.benefit}
-            soon={i.status === "soon" && !allSoon}
-            status={i.status === "soon" ? "בקרוב" : null}
-          />
+          <Card key={i.id} integration={i} />
         ))}
-        {group.vendor === "business" ? <RequestRow /> : null}
+        {group.vendor === "business" ? <RequestCard /> : null}
       </ul>
     </div>
   );
 }
 
-function Row({
-  tile,
-  name,
-  benefit,
-  soon = false,
-  status = null,
-}: {
-  tile: ReactNode;
-  name: string;
-  benefit: string;
-  /** show the "בקרוב" tag on the row (the business column says it once, in its heading) */
-  soon?: boolean;
-  /** read to screen readers when the tag is not shown */
-  status?: string | null;
-}) {
+/** the card's frame: a step above the stage, a hairline edge, the page's card corner scaled down */
+const CARD = "relative flex h-full flex-col items-center rounded-[1.25rem] px-3 pt-7 pb-5 text-center sm:px-4 sm:pt-8 sm:pb-6 xl:px-2";
+
+function Card({ integration: i }: { integration: Integration }) {
+  const soon = i.status === "soon";
   return (
-    <li className="flex items-start gap-4 border-b border-line py-3.5 sm:py-4">
-      {tile}
-      <div className="min-w-0 pt-px">
-        <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[1.0625rem] leading-snug text-cream">
-          <bdi>{name}</bdi>
-          {soon ? <SoonTag /> : status ? <span className="sr-only">({status})</span> : null}
-        </p>
-        <p className="mt-1 text-[0.9375rem] leading-snug text-cream-muted">{benefit}</p>
-      </div>
+    <li className={cn(CARD, "border border-cream/[0.085] bg-cream/[0.045]")}>
+      {soon ? <SoonTag className="absolute end-2.5 top-2.5 px-1.5 text-[0.6875rem] sm:end-3 sm:top-3" /> : null}
+      <IntegrationTile integration={i} size="xl" />
+      <p className="mt-4 text-[1rem] leading-snug font-semibold text-cream xl:text-[0.9375rem]">
+        <bdi>{i.name}</bdi>
+      </p>
+      <p className="mt-1.5 max-w-[15rem] text-[0.8125rem] leading-[1.45] text-cream-muted">{i.benefit}</p>
     </li>
   );
 }
 
 /**
- * "ועוד בהמשך": the last row is the way to ask for a missing system. The whole row is the button (a big target on a
+ * "ועוד בהמשך": the last card is the way to ask for a missing system. The whole card is the button (a big target on a
  * phone); its name is the honey "בקשת מערכת", the line under the title describes it.
  */
-function RequestRow() {
+function RequestCard() {
   const C = SYSTEM_REQUEST_COPY;
   return (
-    <li className="border-b border-line">
+    <li>
       <SystemRequest
         labelledBy="connectors-request-name"
         describedBy="connectors-request-lead"
-        className="group -mx-3 flex w-[calc(100%+1.5rem)] items-start gap-4 rounded-2xl px-3 py-3.5 text-start transition-colors hover:bg-cream/[0.04] focus-visible:outline-offset-0 sm:py-4"
+        className={cn(
+          CARD,
+          "group w-full border border-dashed border-cream-muted/30 transition-colors duration-150 hover:border-cream-muted/60 hover:bg-cream/[0.03] focus-visible:outline-offset-2 motion-reduce:transition-none",
+        )}
       >
-        <MoreTile size="lg" />
-        <span className="min-w-0 flex-1 pt-px">
-          <span aria-hidden="true" className="block text-[1.0625rem] leading-snug text-cream">
-            {C.rowTitle}
-          </span>
-          <span id="connectors-request-lead" className="mt-1 block text-[0.9375rem] leading-snug text-cream-muted">
-            {C.rowLead}
-          </span>
-          <span id="connectors-request-name" className="mt-2.5 inline-flex items-center gap-1.5 text-[0.9375rem] font-semibold text-honey underline decoration-honey/40 underline-offset-4 group-hover:decoration-honey">
-            {C.trigger}
-          </span>
+        <MoreTile size="xl" />
+        <span aria-hidden="true" className="mt-4 block text-[1rem] leading-snug font-semibold text-cream xl:text-[0.9375rem]">
+          {C.rowTitle}
+        </span>
+        <span id="connectors-request-lead" className="mt-1.5 block max-w-[15rem] text-[0.8125rem] leading-[1.45] text-cream-muted">
+          {C.rowLead}
+        </span>
+        <span id="connectors-request-name" className="mt-3 block text-[0.875rem] font-semibold text-honey underline decoration-honey/40 underline-offset-4 group-hover:decoration-honey">
+          {C.trigger}
         </span>
       </SystemRequest>
     </li>

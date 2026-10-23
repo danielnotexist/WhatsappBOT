@@ -68,8 +68,8 @@ describe("tiles", () => {
     }
   });
 
-  it("with the switch on 'tiles' (the default): our own icon tile from the surface's set, decorative, no white chip", () => {
-    expect(INTEGRATION_MARK_STYLE).toBe("tiles");
+  it("with the switch on 'marks' (the default): the owner's mark in colour straight on the surface - no chip, no picture; a brand-colour monogram plate where there is no clean mark", () => {
+    expect(INTEGRATION_MARK_STYLE).toBe("marks");
     for (const tone of ["night", "paper"] as const) {
       const { container, unmount } = render(
         <>
@@ -77,6 +77,46 @@ describe("tiles", () => {
             <IntegrationTile key={i.id} integration={i} size="lg" tone={tone} />
           ))}
           <MoreTile tone={tone} />
+        </>,
+      );
+      const tiles = container.querySelectorAll("[data-integration-tile]");
+      expect(tiles).toHaveLength(INTEGRATIONS.length);
+      tiles.forEach((t) => {
+        const id = t.getAttribute("data-integration-tile")!;
+        expect(t).toHaveAttribute("aria-hidden", "true");
+        expect(t).toHaveAttribute("data-mark", "bare");
+        // nothing behind the mark: no background, no shadow, no rounded chip
+        expect(t.className, id).not.toMatch(/\bbg-|shadow-|rounded/);
+        expect(t.querySelector("img"), id).toBeNull();
+        expect(t.querySelector("svg"), id).not.toBeNull();
+      });
+      // Priority, מורנינג and iCount: their letters on a plate of their brand colour
+      for (const i of INTEGRATIONS.filter((x) => !INTEGRATION_ICONS[x.id])) {
+        const t = container.querySelector(`[data-integration-tile='${i.id}']`)!;
+        // drawn by a pseudo-element, never page text (a fragment like "iC" inside a button named "iCount" fails axe)
+        expect(t.querySelector("[data-letters]"), i.id).toHaveAttribute("data-letters", i.monogram!.text);
+        expect(t, i.id).toHaveTextContent(/^$/);
+        expect(t.querySelector(`rect[fill='${i.monogram!.color}']`), i.id).not.toBeNull();
+      }
+      expect(container.querySelector("img")).toBeNull();
+      // the "ועוד בהמשך" tile: an open dashed square with a plus
+      expect(container.querySelector("[data-mark='more']")!.className).toContain("border-dashed");
+      unmount();
+    }
+  });
+
+  it("every monogram colour reads on the night stage (not the stage's own dark ink)", () => {
+    for (const i of INTEGRATIONS.filter((x) => x.monogram)) expect(i.monogram!.color.toLowerCase(), i.id).not.toBe("#13241c");
+  });
+
+  it("with mark='tiles' (the switch back): our own icon tile from the surface's set, decorative, no white chip", () => {
+    for (const tone of ["night", "paper"] as const) {
+      const { container, unmount } = render(
+        <>
+          {INTEGRATIONS.map((i) => (
+            <IntegrationTile key={i.id} integration={i} size="lg" tone={tone} mark="tiles" />
+          ))}
+          <MoreTile tone={tone} mark="tiles" />
         </>,
       );
       const tiles = container.querySelectorAll("[data-integration-tile]");
@@ -126,9 +166,12 @@ describe("tiles", () => {
         {INTEGRATIONS.map((i) => (
           <IntegrationTile key={i.id} integration={i} mark="svg" />
         ))}
+        {INTEGRATIONS.map((i) => (
+          <IntegrationTile key={`bare-${i.id}`} integration={i} mark="marks" />
+        ))}
       </>,
     );
-    const ids = [...container.querySelectorAll("[id]")].map((e) => e.id);
+    const ids =[...container.querySelectorAll("[id]")].map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
     const refs = [...container.querySelectorAll("[fill^='url('], [clip-path^='url(']")].map((e) =>
       [e.getAttribute("fill"), e.getAttribute("clip-path")]

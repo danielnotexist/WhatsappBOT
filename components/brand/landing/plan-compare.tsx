@@ -98,7 +98,7 @@ function Cell({ cell }: { cell: CompareCell }) {
 }
 
 /**
- * /pricing: every system each plan connects to, by account, on the night icon set - with their tooltips - and the way
+ * /pricing: every system each plan connects to, by account, as the official marks on the night stage - with their tooltips - and the way
  * to ask for a missing one ("בקשת מערכת").
  */
 export function PlanConnections() {

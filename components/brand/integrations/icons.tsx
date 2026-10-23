@@ -6,8 +6,8 @@ import { cn } from "@/lib/utils";
  *
  * Third-party trademarks: each mark belongs to its owner (Google LLC, Microsoft Corporation, monday.com Ltd.) and is
  * shown only to say that she works with the product ("works with" - nominative use), at its own proportions and
- * colours, on a white tile like the provider logos in components/brand/provider-logo.tsx. Never recolour, crop or
- * combine them with our own marks. Before production: legal check against Google's and Microsoft's brand guidelines
+ * colours, straight on our night and paper surfaces (lib/integrations/tiles.ts "marks"; "svg" puts them on a white
+ * chip). Never recolour, crop or combine them with our own marks. Before production: legal check against Google's and Microsoft's brand guidelines
  * (docs/PROGRESS.md).
  *
  * Geometry follows the owners' published icons: Google's 2020 Workspace icons (Gmail, Calendar, Drive, Docs, Sheets,
@@ -488,6 +488,41 @@ export function MondayIcon({ className }: IconProps) {
       />
       <circle cx="94.5" cy="74.5" r="10.5" fill="#00d647" />
     </Svg>
+  );
+}
+
+/**
+ * A system without a clean mark of its own (Priority, מורנינג, iCount): our monogram, never an imitation of the owner's
+ * logo - its letters knocked out of a rounded plate in the owner's brand colour, with the same faint top light as the
+ * Office plates, so it stands at the size and weight of the drawn marks on night and on paper alike.
+ * The letters are drawn by a pseudo-element (`data-letters`), not as text in the page: inside a button named "iCount"
+ * the visible fragment "iC" would not match the button's name (axe label-content-name-mismatch). They scale with the
+ * plate (container units).
+ */
+export function MonogramMark({ text, color, className }: IconProps & { text: string; color: string }) {
+  const id = useSvgId();
+  return (
+    <span data-monogram="" className={cn("relative block [container-type:inline-size]", className)}>
+      <Svg viewBox="0 0 48 48" className="size-full">
+        <defs>
+          <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#fff" stopOpacity=".2" />
+            <stop offset=".55" stopColor="#fff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="2" width="44" height="44" rx="11" fill={color} />
+        <rect x="2" y="2" width="44" height="44" rx="11" fill={`url(#${id})`} />
+      </Svg>
+      <span
+        aria-hidden="true"
+        dir="ltr"
+        data-letters={text}
+        className={cn(
+          "absolute inset-0 grid place-items-center font-heading leading-none font-bold text-white before:content-[attr(data-letters)]",
+          text.length > 1 ? "text-[44cqw] tracking-[-0.02em]" : "text-[54cqw]",
+        )}
+      />
+    </span>
   );
 }
 

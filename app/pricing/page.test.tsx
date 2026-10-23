@@ -66,7 +66,10 @@ describe("/pricing", () => {
       .filter(Boolean);
     expect(names).toHaveLength(integrationsForPlan("basic").flatMap((g) => g.items).length + integrationsForPlan("pro").flatMap((g) => g.items).length);
     expect(within(connections).getByRole("button", { name: "בקשת מערכת" })).toBeInTheDocument();
-    for (const img of connections.querySelectorAll("img")) expect(decodeURIComponent(img.getAttribute("src")!)).toContain("/brand/integrations/night/");
+    // the official marks straight on the night stage: no picture tiles, no white chips
+    expect(connections.querySelector("img")).toBeNull();
+    expect(connections.querySelector(".bg-white")).toBeNull();
+    expect(connections.querySelectorAll("[data-mark='bare'] svg")).toHaveLength(names.length);
 
     // the questions about plans
     const faq = screen.getByRole("region", { name: "שאלות על המסלולים." });

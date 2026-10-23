@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { ServiceId, ServiceView } from "@/lib/connections/services";
 import Image from "next/image";
-import { SERVICE_ICON_STYLE, serviceTileSrc } from "@/lib/connections/service-tiles";
+import { SERVICE_ICON_STYLE, SERVICE_MARK, serviceTileSrc } from "@/lib/connections/service-tiles";
+import { INTEGRATIONS } from "@/lib/integrations/catalogue";
 import { cn } from "@/lib/utils";
+import { BareMark } from "./integrations/tile";
 import { ServiceGlyph } from "./service-icons";
 
 /**
@@ -19,8 +21,10 @@ import { ServiceGlyph } from "./service-icons";
  * A service the plan does not include ("במסלול פרו") is a link to the upgrade, with the same two-tap behaviour on touch.
  * An account that is not connected shows its services faded ("preview": "Gmail - יתחבר עם Google"), as buttons that
  * only explain - the row's "חיבור" is the way in.
- * Status is never colour alone: the name says it, the tile shape says it (solid sage / dark with a honey dot / dashed /
- * dark with a small honey ring).
+ * The icons are the products' official marks in colour, straight on the night surface (SERVICE_ICON_STYLE "marks").
+ * Status is never colour alone: the name says it, and so does the drawing - full colour when connected; faded with a
+ * honey dot when it needs an approval; faded inside a thin honey ring in pro; washed out behind a dashed edge when
+ * unavailable; quietly faded as a preview.
  */
 export function ServiceRow({ services, label, className }: { services: readonly ServiceView[]; label: string; className?: string }) {
   const [open, setOpen] = useState<ServiceId | null>(null);
@@ -92,6 +96,22 @@ const TILE_PICTURE: Record<ServiceView["status"], string> = {
   preview: "after:ring-cream/10 [&_img]:opacity-45 [&_img]:saturate-50 hover:[&_img]:opacity-80",
 };
 
+/**
+ * The official marks (SERVICE_ICON_STYLE "marks"): nothing behind the mark, so the status is its opacity and a thin edge
+ * in the tile's shape - none when connected, the honey ring in pro, the dashed edge when unavailable.
+ */
+const TILE_MARK: Record<ServiceView["status"], string> = {
+  connected: "hover:bg-cream/[0.07]",
+  needs_consent: "[&_[data-glyph]]:opacity-60 hover:bg-cream/[0.07] hover:[&_[data-glyph]]:opacity-100",
+  unavailable: "border border-dashed border-cream-muted/40 [&_[data-glyph]]:opacity-30 [&_[data-glyph]]:grayscale hover:border-cream-muted/60",
+  pro_only: "ring-1 ring-honey/55 ring-inset [&_[data-glyph]]:opacity-45 hover:bg-cream/[0.06] hover:[&_[data-glyph]]:opacity-90",
+  // not connected: a quiet preview of what connecting gives
+  preview: "[&_[data-glyph]]:opacity-45 [&_[data-glyph]]:saturate-50 hover:[&_[data-glyph]]:opacity-80",
+};
+
+/** the catalogue systems by id (a service draws its system's mark) */
+const SYSTEMS = new Map(INTEGRATIONS.map((i) => [i.id, i]));
+
 const DOT: Record<ServiceView["status"], string> = {
   connected: "bg-sage",
   needs_consent: "bg-honey",
@@ -136,12 +156,15 @@ function ServiceIconItem({
     }
   };
 
-  const pictures = SERVICE_ICON_STYLE === "tiles";
+  const style = SERVICE_ICON_STYLE;
+  const pictures = style === "tiles";
+  const system = style === "marks" ? SYSTEMS.get(SERVICE_MARK[view.id]) : undefined;
   const tile = cn(
     "relative grid size-9 place-items-center rounded-xl transition-[background-color,color,border-color] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-honey",
     // the status edge sits over the picture (an inset ring under it would be hidden)
     pictures ? "after:pointer-events-none after:absolute after:inset-0 after:rounded-xl after:ring-1 after:ring-transparent after:ring-inset [&_img]:transition-opacity [&_img]:duration-150" : null,
-    pictures ? TILE_PICTURE[view.status] : TILE[view.status],
+    system ? "[&_[data-glyph]]:transition-[opacity,filter] [&_[data-glyph]]:duration-150 motion-reduce:[&_[data-glyph]]:transition-none" : null,
+    system ? TILE_MARK[view.status] : pictures ? TILE_PICTURE[view.status] : TILE[view.status],
   );
   const common = {
     className: tile,
@@ -157,7 +180,11 @@ function ServiceIconItem({
   };
   const glyph = (
     <>
-      {pictures ? (
+      {system ? (
+        <span className="grid size-6 place-items-center">
+          <BareMark integration={system} />
+        </span>
+      ) : pictures ? (
         <span className="block size-full overflow-hidden rounded-xl">
           <Image src={serviceTileSrc(view.id)} alt="" width={36} height={36} sizes="36px" draggable={false} className="block size-full" />
         </span>
