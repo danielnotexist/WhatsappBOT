@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { BySession } from "@/components/auth/by-session";
+import { Connectors } from "@/components/brand/landing/connectors";
 import { DaySection } from "@/components/brand/landing/day-scenes";
 import { Faq } from "@/components/brand/landing/faq";
 import { FinalCta } from "@/components/brand/landing/final-cta";
@@ -21,10 +22,10 @@ export const metadata: Metadata = {
 };
 
 /**
- * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo → one working day in a pinned phone →
- * by profession → trust → pricing → FAQ → end card → footer. Static (prerendered); the client islands are the chat
- * demo, the day scene's switch (pinned version lazy-loaded on large screens) and Lenis. The only request-time parts
- * are two small holes that read the session cookie: "לאזור האישי" in the header and the hero's "כניסה" (BySession).
+ * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo (and the "עובדת עם" strip) → one working
+ * day in a pinned phone → by profession → trust → the systems she works with → pricing → FAQ → end card → footer.
+ * Static (prerendered); the client islands are the chat demo, the day scene's switch (pinned version lazy-loaded on
+ * large screens), the connection tiles' tooltips and Lenis. The only request-time parts are two small holes that read the session cookie: "לאזור האישי" in the header and the hero's "כניסה" (BySession).
  * The support chat ("שאלות ותמיכה") floats at the bottom of the inline-start side.
  */
 export default function HomePage() {
@@ -37,6 +38,7 @@ export default function HomePage() {
         <DaySection />
         <Professions />
         <Trust />
+        <Connectors />
         <Pricing />
         <Faq />
         <FinalCta />

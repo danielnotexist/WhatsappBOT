@@ -1,12 +1,15 @@
 import { Cta } from "@/components/brand/cta";
+import { IntegrationChipRow } from "@/components/brand/integrations/chip-row";
+import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import { cn } from "@/lib/utils";
 import { PRICING } from "./content";
 import { CONTAINER, H2, LEDE } from "./ui";
 
 /**
  * Pricing as a printed price list: one paper sheet on the night stage (the signup cards' paper), two columns split by
- * a rule. Prices, allowances and the trial come from lib/billing/plans.ts. One call to action: the plan is chosen in
- * WhatsApp after the free messages, not here.
+ * a rule. Prices, allowances and the trial come from lib/billing/plans.ts. Each plan ends with "כולל חיבור ל:" and
+ * the product tiles it connects to (lib/integrations/catalogue.ts - the same on both plans today, and the sheet says
+ * so). One call to action: the plan is chosen in WhatsApp after the free messages, not here.
  */
 export function Pricing() {
   return (
@@ -31,6 +34,8 @@ export function Pricing() {
             <article
               key={plan.id}
               aria-labelledby={`plan-${plan.id}`}
+              // the tooltips of the connection tiles stay inside the card (the sheet clips its overflow)
+              data-tip-bounds
               className={cn(
                 "flex flex-col px-6 py-9 sm:px-10 sm:py-12 lg:px-14 lg:py-14",
                 i > 0 && "border-t border-ink/15 md:border-s md:border-t-0",
@@ -58,14 +63,35 @@ export function Pricing() {
                   </li>
                 ))}
               </ul>
+              {/* pinned to the foot of the card, so both plans' rows line up */}
+              <div className="mt-auto pt-10">
+                <p id={`plan-${plan.id}-connections`} className="text-[0.9375rem] text-ink-muted">
+                  כולל חיבור ל:
+                </p>
+                <IntegrationChipRow
+                  groups={integrationsForPlan(plan.id)}
+                  labelledBy={`plan-${plan.id}-connections`}
+                  tone="paper"
+                  className="mt-3.5"
+                />
+              </div>
             </article>
           ))}
         </div>
 
         <div className="mt-10 flex flex-col gap-7 md:flex-row md:items-center md:justify-between md:gap-12">
-          <p className="max-w-[38rem] text-[0.9375rem] leading-[1.65] text-cream-muted">
-            {PRICING.vatNote}
-          </p>
+          <div className="max-w-[38rem] text-[0.9375rem] leading-[1.65] text-cream-muted">
+            <p>
+              {PRICING.connectionsNote}{" "}
+              <a
+                href="#connectors"
+                className="rounded-sm whitespace-nowrap text-cream underline decoration-cream-muted/50 underline-offset-4 hover:decoration-cream"
+              >
+                לכל החיבורים
+              </a>
+            </p>
+            <p className="mt-2">{PRICING.vatNote}</p>
+          </div>
           <Cta href="/start" className="flex-none max-sm:w-full">
             בואו נתחיל - לוקח דקה
           </Cta>

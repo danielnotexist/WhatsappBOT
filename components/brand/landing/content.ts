@@ -146,6 +146,8 @@ const vatPercent = Math.round(VAT_RATE * 100);
 export const PRICING = {
   trial: TRIAL_MESSAGES,
   vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
+  /** lib/integrations/catalogue.ts integrationsForPlan: the plans differ in messages and agents, not in connections */
+  connectionsNote: "החיבורים זהים בשני המסלולים וגם בהודעות החינמיות.",
   plans: [
     {
       id: "basic" as const,
