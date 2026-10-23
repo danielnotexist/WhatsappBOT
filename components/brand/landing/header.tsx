@@ -5,6 +5,7 @@ import { Wordmark } from "@/components/brand/wordmark";
 const SECTIONS = [
   { href: "#day", label: "איך זה עובד" },
   { href: "#professions", label: "לפי מקצוע" },
+  { href: "#connectors", label: "חיבורים" },
   { href: "#pricing", label: "מחירים" },
   { href: "#faq", label: "שאלות" },
 ] as const;

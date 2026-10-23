@@ -5,6 +5,8 @@ import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRAND } from "@/lib/brand";
 import { PLANS, TRIAL_MESSAGES, VAT_RATE } from "@/lib/billing/plans";
+import { INTEGRATIONS, availableIntegrations, featuredGroups } from "@/lib/integrations/catalogue";
+import { Connectors } from "./connectors";
 import { FAQ, HERO_SCRIPT, PRICING, PROFESSIONS, SCENES, TRUST } from "./content";
 import { DaySection } from "./day-scenes";
 import { DaySwitch } from "./day-switch";
@@ -114,6 +116,60 @@ describe("hero", () => {
     expect(
       screen.getByText(`${TRIAL_MESSAGES} הודעות ראשונות בחינם, בלי כרטיס אשראי.`),
     ).toBeInTheDocument();
+  });
+});
+
+describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
+  it("hero: a quiet 'עובדת עם' strip under the call to action - featured tiles as one toolbar, and a link to the list", async () => {
+    render(<Hero />);
+    await act(async () => {});
+    const strip = screen.getByRole("toolbar", { name: "עובדת עם" });
+    const featured = featuredGroups().flatMap((g) => g.items.map((i) => i.name));
+    expect(within(strip).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(featured);
+    expect(within(strip).getAllByRole("button").filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "כל החיבורים" })).toHaveAttribute("href", "#connectors");
+    // it follows the call to action and the trial line, never the headline
+    const h1 = screen.getByRole("heading", { level: 1 });
+    const cta = screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" });
+    expect(h1.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cta.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("pricing: each plan ends with 'כולל חיבור ל:' and the same available systems, and the sheet says the plans connect alike", () => {
+    render(<Pricing />);
+    const names = availableIntegrations().map((i) => i.name);
+    for (const plan of ["basic", "pro"] as const) {
+      const card = screen.getByRole("article", { name: PLANS[plan].nameHe });
+      expect(card).toHaveAttribute("data-tip-bounds");
+      const row = within(card).getByRole("toolbar", { name: "כולל חיבור ל:" });
+      expect(within(row).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(names);
+    }
+    expect(screen.getByText(/החיבורים זהים בשני המסלולים/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "לכל החיבורים" })).toHaveAttribute("href", "#connectors");
+  });
+
+  it("the full list: three groups, every system with its benefit, 'בקרוב' where it is not connected yet, and more to come", () => {
+    render(<Connectors />);
+    const section = screen.getByRole("region", { name: "מתחברת לכלים שכבר יש לכם." });
+    expect(section).toHaveAttribute("id", "connectors");
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Google", "Microsoft 365", "מערכות העסקבקרוב"]);
+    for (const i of INTEGRATIONS) {
+      const item = screen.getByText(i.name).closest("li")!;
+      expect(item, i.id).toHaveTextContent(i.benefit);
+      if (i.status === "soon") expect(item, i.id).toHaveTextContent("בקרוב");
+      else expect(item, i.id).not.toHaveTextContent("בקרוב");
+    }
+    expect(screen.getByText("ועוד בהמשך")).toBeInTheDocument();
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-labelledby"))).toEqual([
+      "connectors-google",
+      "connectors-microsoft",
+      "connectors-business",
+    ]);
+  });
+
+  it("the header links to the list", () => {
+    render(<LandingHeader />);
+    expect(screen.getByRole("link", { name: "חיבורים" })).toHaveAttribute("href", "#connectors");
   });
 });
 
