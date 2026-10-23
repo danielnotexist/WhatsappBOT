@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PRODUCT_NAME } from "@/lib/brand";
-import { morningSummaryTemplate, registerTemplates, reminderTemplate, templateDefinitions, templateParam } from "./templates";
+import { meetingSummaryReadyTemplate, morningSummaryTemplate, proactiveAlertTemplate, registerTemplates, reminderTemplate, templateDefinitions, templateParam } from "./templates";
 
 describe("WhatsApp templates", () => {
   it("flattens parameters the way Meta accepts them (no new lines / tabs / 5+ spaces, never empty)", () => {
@@ -24,6 +24,30 @@ describe("WhatsApp templates", () => {
       [1, "quick_reply", "rem:hour:11111111-1111-4111-8111-111111111111"],
       [2, "quick_reply", "rem:tmrw:11111111-1111-4111-8111-111111111111"],
     ]);
+  });
+
+  it("builds proactive_alert (the alert's action + al:off) and meeting_summary_ready (mt:show:<id> + mt:off)", () => {
+    const id = "22222222-2222-4222-8222-222222222222";
+    const a = proactiveAlertTemplate({ line: "מייל דחוף מ-רו״ח ברק:\nחתימה", actionId: `al:reply:${id}` });
+    expect(a).toEqual({
+      name: "proactive_alert",
+      params: ["מייל דחוף מ-רו״ח ברק:  חתימה"],
+      buttons: [
+        { index: 0, subType: "quick_reply", text: `al:reply:${id}` },
+        { index: 1, subType: "quick_reply", text: "al:off" },
+      ],
+    });
+    const m = meetingSummaryReadyTemplate({ title: "פגישת צוות", summary: "x".repeat(600), summaryId: id });
+    expect(m.name).toBe("meeting_summary_ready");
+    expect(m.params[0]).toBe("פגישת צוות");
+    expect(m.params[1]!.length).toBeLessThanOrEqual(400);
+    expect(m.buttons.map((b) => b.text)).toEqual([`mt:show:${id}`, "mt:off"]);
+    // the product name is fixed text in the definition, and the quick replies fit WhatsApp's 20 characters
+    const defs = templateDefinitions("https://app.example.co.il");
+    const body = (name: string) => (defs.find((d) => d.name === name)!.components.find((c) => c.type === "BODY") as { text: string }).text;
+    expect(body("proactive_alert")).toBe(`התראה: {{1}}\n\nאפשר לענות כאן, ו${PRODUCT_NAME} תטפל בזה.`);
+    expect(body("meeting_summary_ready")).toContain("שום דבר לא נשלח בלי אישור.");
+    for (const d of defs) for (const b of ((d.components.find((c) => c.type === "BUTTONS") as { buttons?: { text: string }[] } | undefined)?.buttons ?? [])) expect(b.text.length, b.text).toBeLessThanOrEqual(20);
   });
 
   it("matches the template JSON in docs/copy/wa-templates.md (body text, category, buttons)", () => {

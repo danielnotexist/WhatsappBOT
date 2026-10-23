@@ -8,6 +8,7 @@ import { googleForUser } from "@/lib/google";
 import { GmailReader } from "@/lib/google/gmail";
 import { GOOGLE_SCOPES, gmailReadActive, hasScope } from "@/lib/google/oauth";
 import { graphForUser } from "@/lib/ms";
+import { meetingWorkspace } from "@/lib/meetings/workspace-server";
 import { getWaSender } from "@/lib/wa";
 import type { JobDeps } from "./run";
 
@@ -23,11 +24,14 @@ export function getJobDeps(): JobDeps {
   // (AI_DAILY_BUDGET_USD — reserved before each call, settled after); no user turn behind them, so no per-user count
   const guard = spendGuardFromEnv(db);
   const ai = guard ? guard.anonymousAi(getAiProvider(), 20_000) : getAiProvider();
+  // a meeting summary is one strong-tier call over a long transcript (lib/meetings/summarize.ts): its own, longer deadline
+  const meetingAi = guard ? guard.anonymousAi(getAiProvider(), 150_000) : getAiProvider();
   return {
     db,
     wa: getWaSender(),
     now: () => new Date(),
     ai,
+    meetings: { workspace: meetingWorkspace(db), ai: meetingAi, appUrl: process.env.APP_URL || "http://localhost:3000" },
     async graphFor(user) {
       if (await paused(user, "microsoft")) return null;
       const g = await graphForUser(db, user);

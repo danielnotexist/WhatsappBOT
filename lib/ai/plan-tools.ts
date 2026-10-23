@@ -21,6 +21,8 @@ export const PLAN_TOOLS: Readonly<Record<string, ProFeature>> = {
   gdrive_save_doc: "file_create",
   // the consent link to drive.readonly (search every Drive file): a read only pro uses
   gdrive_read_status: "drive_full_read",
+  // "סיכום של הפגישה האחרונה" (lib/meetings/tools.ts)
+  meeting_summary: "meeting_summaries",
 };
 
 export const PRO_FEATURE_TOOL = "pro_feature";

@@ -49,7 +49,7 @@ describe("pro_feature: one short answer and the way to pro", () => {
 
   it("offers only what the plan lacks, and answers in the neutral plan line", async () => {
     const tool = proFeatureTool("basic");
-    expect((tool.input_schema.properties as { feature: { enum: string[] } }).feature.enum).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read", "proactive"]);
+    expect((tool.input_schema.properties as { feature: { enum: string[] } }).feature.enum).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read", "proactive", "meeting_summaries"]);
     expect(tool.readOnly).toBe(true);
     const out = (await tool.run({ feature: "sharepoint" }, ctx)) as { status: string; say: string };
     expect(out.status).toBe("not_in_plan");

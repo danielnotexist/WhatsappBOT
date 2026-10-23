@@ -1,5 +1,5 @@
 import { BRAND } from "@/lib/brand";
-import { COMING_SOON, PLANS, TRIAL_MESSAGES, entitlements, planFeatures, type Entitlements, type PaidPlan, type ProFlag } from "./plans";
+import { COMING_SOON, PLANS, TRIAL_MESSAGES, ZOOM_SOON_LINE, entitlements, planFeatures, type Entitlements, type PaidPlan, type ProFlag } from "./plans";
 
 /**
  * The full comparison of basic and pro (/pricing): every row generated from the entitlements and the plan specs in
@@ -64,7 +64,14 @@ export function planComparison(): CompareSection[] {
     {
       id: "day",
       title: "לאורך היום",
-      rows: [both("routine"), pro("proactive", "proactive"), pro("meetings", "meetingSummaries"), pro("business", "businessSystems")],
+      rows: [
+        both("routine"),
+        pro("proactive", "proactive"),
+        pro("meetings", "meetingSummaries"),
+        // Teams and Meet shipped; Zoom is "בקרוב" on pro (ZOOM_SOON_LINE), never on basic
+        { id: ZOOM_SOON_LINE.id, label: ZOOM_SOON_LINE.text, basic: NO, pro: p.meetingSummaries ? { kind: "soon" } : NO },
+        pro("business", "businessSystems"),
+      ],
     },
     {
       id: "agents",

@@ -8,7 +8,8 @@ import { isDemo } from "@/lib/demo";
 import { EnvError, msMocked } from "@/lib/env";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { getMsConfig } from "@/lib/ms";
-import { buildAdminConsentUrl, buildAuthorizeUrl, pkcePair } from "@/lib/ms/oauth";
+import { buildAdminConsentUrl, buildAuthorizeUrl, msAdminScopesFor, msScopesFor, pkcePair } from "@/lib/ms/oauth";
+import { entitlements } from "@/lib/billing/plans";
 
 /**
  * GET /api/auth/microsoft/start[?t=<one-time chat token>][&admin=1][&returnTo=onboarding]
@@ -19,6 +20,8 @@ import { buildAdminConsentUrl, buildAuthorizeUrl, pkcePair } from "@/lib/ms/oaut
  * The plan comes first (lib/connections/plan-gate.ts): on a one-account plan (basic, the trial) Microsoft 365 cannot
  * join an active Google connection; the refusal lands on the personal pay page with the reason. The admin consent
  * (`admin=1`, opened by the IT admin) grants the tenant and connects nothing, so it is not gated.
+ * Pro (entitlements.meetingSummaries) also asks for the Teams transcript pair (MS_MEETING_SCOPES), in both the user's
+ * and the admin's consent; when only that part needs an admin, the callback connects again without it.
  * DEMO_MODE=1 → no Microsoft at all: lib/auth/demo-connect.ts writes a fixture connection and we land right away.
  */
 export async function GET(request: Request) {
@@ -39,10 +42,10 @@ export async function GET(request: Request) {
   // where the callback lands: back into the signup flow or the personal area (fixed paths only — no open redirect)
   const returnTo = parseReturnTo(url.searchParams.get("returnTo"));
   const admin = url.searchParams.get("admin") === "1";
-  if (!admin) {
-    const gate = await planGateFor(db, user.id, "microsoft");
-    if (gate.reason) return Response.redirect(planGateUrl(process.env.APP_URL || url.origin, user.id, gate.reason), 303);
-  }
+  const gate = await planGateFor(db, user.id, "microsoft");
+  if (!admin && gate.reason) return Response.redirect(planGateUrl(process.env.APP_URL || url.origin, user.id, gate.reason), 303);
+  // pro: the Teams meeting transcripts too (meeting summaries, lib/meetings) — in the user's consent and in the admin's
+  const meetings = entitlements(gate.plan).meetingSummaries;
 
   // DEMO_MODE without LIVE_MS: no Microsoft — a fixture connection through the data layer, then the same landing as the callback
   if (isDemo() && msMocked()) {
@@ -60,9 +63,9 @@ export async function GET(request: Request) {
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
   const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
-  await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, started_at: new Date().toISOString(), via: t ? "chat" : "web", returnTo } } });
+  await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, meetings, started_at: new Date().toISOString(), via: t ? "chat" : "web", returnTo } } });
   const dest = admin
-    ? buildAdminConsentUrl(cfg, { state, redirectUri: cfg.redirectUri, tenant: url.searchParams.get("tenant") ?? "organizations" })
-    : buildAuthorizeUrl(cfg, { state, codeChallenge: challenge, loginHint: user.email });
+    ? buildAdminConsentUrl(cfg, { state, redirectUri: cfg.redirectUri, tenant: url.searchParams.get("tenant") ?? "organizations", scopes: msAdminScopesFor({ meetings }) })
+    : buildAuthorizeUrl(cfg, { state, codeChallenge: challenge, loginHint: user.email, scopes: msScopesFor({ meetings }) });
   return Response.redirect(dest, 303);
 }

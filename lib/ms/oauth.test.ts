@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDb } from "@/lib/db/memory";
-import { MS_ADMIN_SCOPES, MS_SCOPES, MS_SCOPES_V1, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, msHasScope, msRefreshScopes, normalizeMsScopes, parseIdToken, pkcePair, refreshTokens } from "./oauth";
+import { MS_ADMIN_SCOPES, MS_MEETING_SCOPES, MS_SCOPES, MS_SCOPES_V1, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, msAdminScopesFor, msHasScope, msRefreshScopes, msScopesFor, normalizeMsScopes, parseIdToken, pkcePair, refreshTokens } from "./oauth";
 import { getAccessToken, sealTokens } from "./token-store";
 
 const cfg = { clientId: "cid", clientSecret: "sec", tenant: "common", redirectUri: "https://app.example.co.il/api/auth/microsoft/callback" };
@@ -59,6 +59,23 @@ describe("Microsoft OAuth", () => {
     expect(admin).toContain("https://graph.microsoft.com/Tasks.ReadWrite");
     expect(admin).toContain("https://graph.microsoft.com/Sites.Read.All");
     expect(admin).not.toMatch(/Chat\./);
+  });
+
+  it("pro connects add the Teams transcript pair (meeting summaries) — in the user's consent and in the admin's; basic does not", () => {
+    expect(MS_MEETING_SCOPES).toEqual(["OnlineMeetings.Read", "OnlineMeetingTranscript.Read.All"]);
+    expect(msScopesFor()).toEqual([...MS_SCOPES]);
+    expect(msScopesFor({ meetings: true })).toEqual([...MS_SCOPES, "OnlineMeetings.Read", "OnlineMeetingTranscript.Read.All"]);
+    const pro = new URL(buildAuthorizeUrl(cfg, { state: "s", codeChallenge: "c", scopes: msScopesFor({ meetings: true }) })).searchParams.get("scope")!.split(" ");
+    expect(pro).toEqual(expect.arrayContaining(["OnlineMeetings.Read", "OnlineMeetingTranscript.Read.All", "Mail.ReadWrite"]));
+    expect(new URL(buildAuthorizeUrl(cfg, { state: "s", codeChallenge: "c" })).searchParams.get("scope")).not.toContain("OnlineMeeting");
+    const admin = new URL(buildAdminConsentUrl(cfg, { state: "s", redirectUri: cfg.redirectUri, scopes: msAdminScopesFor({ meetings: true }) })).searchParams.get("scope")!;
+    expect(admin).toContain("https://graph.microsoft.com/OnlineMeetingTranscript.Read.All");
+    expect(admin).toContain("https://graph.microsoft.com/OnlineMeetings.Read");
+    expect(admin).not.toContain("openid");
+    // the grant is normalised and kept on refresh (a connection without it never asks for it)
+    expect(normalizeMsScopes("https://graph.microsoft.com/onlinemeetingtranscript.read.all")).toEqual(["OnlineMeetingTranscript.Read.All"]);
+    expect(msRefreshScopes([...MS_SCOPES, ...MS_MEETING_SCOPES])).toEqual(expect.arrayContaining(["OnlineMeetings.Read", "OnlineMeetingTranscript.Read.All"]));
+    expect(msRefreshScopes([...MS_SCOPES])).not.toContain("OnlineMeetingTranscript.Read.All");
   });
 
   it("normalizes echoed scopes (Graph prefix, any case) and checks a connection's grant; nothing recorded = the v1 set", () => {

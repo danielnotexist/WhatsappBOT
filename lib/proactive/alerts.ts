@@ -1,10 +1,11 @@
 import { oneLineUntrusted } from "@/lib/ai/untrusted";
 import { alertButtons, pcopy } from "@/lib/copy/bot-proactive";
 import type { Db, JobRow, NewProactiveItem, UserRow } from "@/lib/db/types";
-import { activePhone, isWindowOpen } from "@/lib/jobs/proactive";
+import { activePhone, sendProactive } from "@/lib/jobs/proactive";
 import { proactiveAlertsOn, proactivePaused, type MorningDeps } from "@/lib/jobs/morning-summary";
 import { inRestTime } from "@/lib/time/rest-days";
 import { DEFAULT_TZ, dateKey, dayLabelHe, localDateOf, zonedParts } from "@/lib/time/zoned";
+import { proactiveAlertTemplate } from "@/lib/wa/templates";
 import type { ReplyButton } from "@/lib/wa/types";
 import { clockOf, findConflicts, pairKey, type EventPair } from "./calendar";
 import { explicitUrgency, isAutomatedMail, type ProactiveMail } from "./mail";
@@ -20,8 +21,10 @@ import { gatherSources } from "./sources";
  *     urgent ("דחוף", "urgent", "ASAP"… or the high-importance flag) — and the mail is not flagged as phishing.
  * The scan runs as a `proactive_scan` job (pg_cron schedule_proactive_scans(), migration 0013, every round hour; a
  * Microsoft new-mail notification queues one sooner). Each item is claimed in SQL (proactive_alert_claim: atomic per
- * user, never the same item twice, the daily cap). WhatsApp's 24-hour window: there is no approved template for an
- * alert (lib/wa/templates.ts), so outside the window nothing is sent — the item is recorded `deferred` and the next
+ * user, never the same item twice, the daily cap). WhatsApp's 24-hour window: inside it the alert is free text with
+ * buttons; outside it the UTILITY template `proactive_alert` (lib/wa/templates.ts, Daniel's approval of 23.10.2026) with
+ * the alert in one line and the same action payload on [לטפל עכשיו]. The same cap, hours and opt-out hold either way.
+ * When the send fails (the template not approved yet, WhatsApp down) the item is recorded `deferred` and the next
  * morning summary shows it (folded into "דברים שכדאי לא לפספס"). Over the cap: the same.
  */
 
@@ -80,7 +83,8 @@ export async function queueScanSoon(db: Db, user: UserRow, now: Date): Promise<J
 interface Candidate {
   item: Omit<NewProactiveItem, "user_id" | "local_day">;
   text: string;
-  buttons: ReplyButton[];
+  /** {{1}} of the `proactive_alert` template (outside the window) */
+  templateLine: string;
 }
 
 const who = (m: ProactiveMail) => oneLineUntrusted(m.from?.name || m.from?.address || "", 40) || "?";
@@ -137,34 +141,37 @@ async function scan(deps: AlertDeps, user: UserRow, now: Date, tz: string): Prom
     candidates.push({
       item: { item_key: `mail:${m.provider}:${m.id}`, kind: "urgent_mail", payload: { provider: m.provider, message_id: m.id, who: who(m), subject: subj(m) } },
       text: pcopy["alert.urgent.mail"](who(m), subj(m)),
-      buttons: [], // set after the claim (they carry the alert's id)
+      templateLine: pcopy["alert.template.mail"](who(m), subj(m)),
     });
   }
   if (!candidates.length) return { status: "done", sent: 0, deferred: 0, candidates: 0 };
 
-  const windowOpen = await isWindowOpen(deps.db, user.id, now);
   const localDay = dateKey(localDateOf(now, tz));
   let sent = 0;
   let deferred = 0;
   for (const c of candidates) {
-    const claim = await deps.db.claimProactiveAlert({ ...c.item, user_id: user.id, local_day: localDay }, { cap: ALERT_DAILY_CAP, deliver: windowOpen });
+    // every claim may deliver: inside the window as free text, outside it with the `proactive_alert` template
+    const claim = await deps.db.claimProactiveAlert({ ...c.item, user_id: user.id, local_day: localDay }, { cap: ALERT_DAILY_CAP, deliver: true });
     if (claim.result === "duplicate" || !claim.alert) continue;
     if (claim.result !== "claimed") {
       deferred++;
       continue;
     }
     const id = claim.alert.id;
+    // the buttons carry the alert's id, so they are set after the claim
+    const action = c.item.kind === "urgent_mail" ? `al:reply:${id}` : `al:conf:${id}`;
     const buttons: ReplyButton[] =
       c.item.kind === "urgent_mail"
-        ? [{ id: `al:reply:${id}`, title: alertButtons.reply }, { id: `al:remind:${id}`, title: alertButtons.remind }, { id: "al:off", title: alertButtons.off }]
-        : [{ id: `al:conf:${id}`, title: alertButtons.conflict }, { id: "al:off", title: alertButtons.off }];
+        ? [{ id: action, title: alertButtons.reply }, { id: `al:remind:${id}`, title: alertButtons.remind }, { id: "al:off", title: alertButtons.off }]
+        : [{ id: action, title: alertButtons.conflict }, { id: "al:off", title: alertButtons.off }];
     try {
-      const r = await deps.wa.sendButtons(phone, c.text, buttons);
-      await deps.db.insertMessage({ user_id: user.id, direction: "out", type: "button", text: c.text, wa_message_id: r.messageId || null });
-      await deps.db.addAudit({ user_id: user.id, action: "proactive.alert", target: c.item.kind, result: "sent" });
+      const r = await sendProactive(deps, user, { text: c.text, buttons, template: proactiveAlertTemplate({ line: c.templateLine, actionId: action }) });
+      if (!r.sent) throw new Error(r.reason);
+      await deps.db.addAudit({ user_id: user.id, action: "proactive.alert", target: c.item.kind, result: r.mode === "template" ? "sent_template" : "sent" });
       sent++;
     } catch (e) {
-      // the window closed after all (or WhatsApp failed): the next morning summary shows it instead
+      // WhatsApp failed (outside the window: the template is not approved yet, or Meta refused it): the next morning
+      // summary shows it instead
       console.warn(`[proactive] alert send failed for ${user.id}:`, (e as Error).message);
       await deps.db.setProactiveAlertStatus(user.id, id, "deferred");
       deferred++;
@@ -180,5 +187,9 @@ function conflictCandidate(p: EventPair, now: Date, tz: string): Candidate {
   const day = localDateOf(new Date(p.a.startMs), tz);
   const today = localDateOf(now, tz);
   const dayLabel = dateKey(day) === dateKey(today) ? "היום" : `ב${dayLabelHe(day)}`;
-  return { item: { item_key: pairKey("conflict", p), kind: "conflict", payload: { a, b, day_label: dayLabel, a_id: `${p.a.provider}:${p.a.id}`, b_id: `${p.b.provider}:${p.b.id}` } }, text: pcopy["alert.urgent.conflict"](dayLabel, a, b), buttons: [] };
+  return {
+    item: { item_key: pairKey("conflict", p), kind: "conflict", payload: { a, b, day_label: dayLabel, a_id: `${p.a.provider}:${p.a.id}`, b_id: `${p.b.provider}:${p.b.id}` } },
+    text: pcopy["alert.urgent.conflict"](dayLabel, a, b),
+    templateLine: pcopy["alert.template.conflict"](dayLabel, a, b),
+  };
 }

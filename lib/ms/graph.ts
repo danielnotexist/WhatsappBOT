@@ -522,6 +522,31 @@ export class GraphClient {
     return mapTodoTask(await this.request<RawTodoTask>("POST", `/me/todo/lists/${encodeURIComponent(listId)}/tasks`, body));
   }
 
+  // ---------- Teams meeting transcripts (pro: OnlineMeetings.Read + OnlineMeetingTranscript.Read.All) ----------
+
+  /**
+   * The online meeting behind a calendar event's join link (`$filter=JoinWebUrl eq '…'`, the organiser or an attendee),
+   * or null when Graph has none for this user.
+   */
+  async onlineMeetingByJoinUrl(joinUrl: string): Promise<{ id: string } | null> {
+    const filter = `JoinWebUrl eq '${joinUrl.replace(/'/g, "''")}'`;
+    const r = await this.request<{ value?: { id?: string }[] }>("GET", `/me/onlineMeetings?$filter=${encodeURIComponent(filter)}`);
+    const id = r?.value?.find((m) => typeof m.id === "string" && m.id)?.id;
+    return id ? { id } : null;
+  }
+
+  /** The meeting's transcripts (one per transcription started; a recurring meeting keeps every occurrence's). */
+  async meetingTranscripts(meetingId: string): Promise<{ id: string; createdDateTime: string; endDateTime: string | null }[]> {
+    const r = await this.request<{ value?: { id?: string; createdDateTime?: string; endDateTime?: string }[] }>("GET", `/me/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts`);
+    return (r?.value ?? []).filter((t) => t.id && t.createdDateTime).map((t) => ({ id: t.id!, createdDateTime: t.createdDateTime!, endDateTime: t.endDateTime ?? null }));
+  }
+
+  /** One transcript as WebVTT text. */
+  async transcriptVtt(meetingId: string, transcriptId: string): Promise<string> {
+    const { bytes } = await this.requestBytes(`/me/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts/${encodeURIComponent(transcriptId)}/content?$format=text/vtt`);
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
   // ---------- change notifications ----------
 
   async createSubscription(input: { resource: string; notificationUrl: string; clientState: string; expiresAt: Date; changeType?: string }): Promise<GraphSubscription> {

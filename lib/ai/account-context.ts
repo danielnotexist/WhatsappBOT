@@ -9,7 +9,7 @@ import {
   entitlements,
   isPaidPlan,
   missingProFeatures,
-  planFeatures,
+  proSoonTexts,
   type EffectivePlan,
   type Entitlements,
   type PaidPlan,
@@ -66,13 +66,14 @@ export function includesHe(e: Entitlements): string {
   if (e.driveFullRead) parts.push("חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides)");
   if (e.fileCreate) parts.push("שמירת מסמכים חדשים ב-Drive");
   if (e.proactive) parts.push("התראות יזומות (״דברים שכדאי לא לפספס״ בסיכום הבוקר, עד 2 התראות דחופות ביום) ואזהרות פישינג");
+  if (e.meetingSummaries) parts.push("סיכומי פגישות Teams ו-Google Meet מהתמליל של הפלטפורמה (מייל סיכום לאישור, מסמך משימות, משימות ברשימה)");
   return parts.join("; ");
 }
 
 /** One line per plan, from lib/billing/plans.ts — the only plan facts the model may state. */
 export function planFactsLines(): string[] {
   const builtins = (included: boolean, editable: boolean) => (included ? `שלושת הסוכנים המובנים (${BUILTIN_NAMES})${editable ? "" : " כמו שהם"}` : "בלי הסוכנים המובנים");
-  const soon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
+  const soon = proSoonTexts();
   const paid = (p: PaidPlan) => {
     const s = PLANS[p];
     const later = p === "pro" && soon.length ? ` בקרוב, עוד לא פעיל ובלי מועד: ${soon.join(", ")}.` : "";

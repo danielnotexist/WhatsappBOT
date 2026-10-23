@@ -48,12 +48,12 @@ describe("the upgrade face", () => {
       "חיפוש ב-SharePoint, בספריות המסמכים של הארגון",
       "שמירת מסמכים חדשים ב-Drive",
       `שלושת הסוכנים המובנים, ועד ${PLANS.pro.customAgents} סוכנים משלך`,
-      "סיכומי פגישות",
+      "סיכומי פגישות Teams ו-Google Meet",
       "התראות יזומות ואזהרות פישינג",
       "חיבור למערכות העסק, כמו monday.com",
     ]);
     expect(proAdds().slice(1)).toEqual(planFeatures("pro").lines);
-    expect(proAdds().filter((l) => l.soon).map((l) => l.id)).toEqual(["meetings", "business"]);
+    expect(proAdds().filter((l) => l.soon).map((l) => l.id)).toEqual(["business"]);
   });
 
   it("a connect the plan refused (?why=): its fixed notice above the offer", () => {

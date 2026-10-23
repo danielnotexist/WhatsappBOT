@@ -137,4 +137,38 @@ describe("Microsoft connect routes (memory mode)", () => {
     await db.upsertSubscription(user.id, { plan: "pro" });
     expect(new URL((await start()).headers.get("location")!).hostname).toBe("login.microsoftonline.com");
   });
+
+  it("pro asks for the Teams transcript pair (meeting summaries); when only that needs the IT admin, the connect goes on without it", async () => {
+    const APP = "https://app.example.co.il";
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    const start = (q = "") => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}${q}`));
+    const scopesOf = (r: Response) => new URL(r.headers.get("location")!).searchParams.get("scope")!.split(" ");
+    // the trial (and basic): the base set only
+    expect(scopesOf(await start())).not.toContain("OnlineMeetingTranscript.Read.All");
+    await db.upsertSubscription(user.id, { plan: "pro", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
+    const first = await start();
+    expect(scopesOf(first)).toEqual(expect.arrayContaining(["OnlineMeetings.Read", "OnlineMeetingTranscript.Read.All", "Mail.ReadWrite"]));
+    // the admin's consent of a pro user covers it too
+    expect(new URL((await start("&admin=1")).headers.get("location")!).searchParams.get("scope")).toContain("https://graph.microsoft.com/OnlineMeetingTranscript.Read.All");
+
+    // "Need admin approval" → "Return to the application without granting consent"
+    const state = new URL((await start()).headers.get("location")!).searchParams.get("state")!;
+    const back = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?error=access_denied&error_description=${encodeURIComponent("AADSTS65004: User declined to consent to access the app.")}&state=${state}`));
+    const again = new URL(back.headers.get("location")!);
+    expect(again.hostname).toBe("login.microsoftonline.com");
+    expect(again.searchParams.get("scope")).not.toContain("OnlineMeeting");
+    const fresh = (await db.getUser(user.id))!;
+    expect(fresh.profile.ms_meetings_consent).toBe("admin_required");
+    expect((fresh.profile.oauth_pending as { microsoft: { state: string; meetings: boolean } }).microsoft).toMatchObject({ state: again.searchParams.get("state"), meetings: false });
+    // the base connect completes
+    const done = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${again.searchParams.get("state")}`));
+    expect(new URL(done.headers.get("location")!).searchParams.get("notice")).toContain("הושלם");
+    expect(await db.listConnections(user.id)).toHaveLength(1);
+    // a second decline (no meeting scopes asked any more) is a plain failure, not a loop
+    const s2 = new URL((await start()).headers.get("location")!).searchParams.get("state")!;
+    await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { ...((await db.getUser(user.id))!.profile.oauth_pending as { microsoft: Record<string, unknown> }).microsoft, meetings: false } } });
+    const plain = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?error=access_denied&state=${s2}`));
+    expect(new URL(plain.headers.get("location")!).hostname).toBe("app.example.co.il");
+  });
 });

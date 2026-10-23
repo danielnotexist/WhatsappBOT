@@ -274,7 +274,12 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
     send_mail: wrap(async ({ graph }, p) => {
       const to = String(p.to_email ?? "").trim();
       if (!to) return "לא נמצאה כתובת מייל לנמען. אפשר לכתוב לי את הכתובת ואכין מחדש.";
-      await graph.sendMail({ to: [to], subject: String(p.subject ?? ""), body: String(p.body ?? ""), replyToMessageId: typeof p.reply_to === "string" ? p.reply_to : undefined });
+      // cc: the other attendees of a meeting summary mail (lib/meetings/actions.ts) — shown in the draft as "עותק"
+      const cc = String(p.cc ?? "")
+        .split(/[,;\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+      await graph.sendMail({ to: [to], ...(cc.length ? { cc } : {}), subject: String(p.subject ?? ""), body: String(p.body ?? ""), replyToMessageId: typeof p.reply_to === "string" ? p.reply_to : undefined });
       return copy["act.mail.sent"](String(p.to_name || to));
     }),
     create_event: wrap(async ({ graph, timeZone, connection }, p, action) => {

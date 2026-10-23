@@ -30,7 +30,7 @@ async function urgentSetup(opts: { at?: Date; window?: boolean; plan?: "pro" | "
 
 const alertsSent = (sent: { kind: string; body?: string }[]) => sent.filter((x) => x.kind === "buttons" && /^\*(מייל דחוף|התנגשות ביומן)/.test(x.body ?? ""));
 
-describe("urgent alerts — at most 2 a day, inside the window", () => {
+describe("urgent alerts — at most 2 a day, free text inside the window, the template outside it", () => {
   it("sends the clash and the newest urgent mail; the third is over the cap → deferred", async () => {
     const { h, user, deps } = await urgentSetup();
     expect(await runProactiveScanJob(deps, scanJob(user.id))).toEqual({ status: "done", sent: 2, deferred: 1, candidates: 3 });
@@ -65,9 +65,29 @@ describe("urgent alerts — at most 2 a day, inside the window", () => {
     expect(await runProactiveScanJob(deps, scanJob(user.id))).toMatchObject({ sent: 1 });
   });
 
-  it("outside the 24-hour window nothing is sent (no alert template) — the items wait for the next morning summary", async () => {
+  it("outside the 24-hour window: the `proactive_alert` template, under the same cap; [לטפל עכשיו] carries the alert's action", async () => {
     const { h, user, deps } = await urgentSetup({ window: false });
-    expect(await runProactiveScanJob(deps, scanJob(user.id))).toEqual({ status: "done", sent: 0, deferred: 3, candidates: 3 });
+    expect(await runProactiveScanJob(deps, scanJob(user.id))).toEqual({ status: "done", sent: 2, deferred: 1, candidates: 3 });
+    const templates = h.wa.sent.filter((x) => x.kind === "template");
+    expect(h.wa.sent.filter((x) => x.kind === "buttons")).toEqual([]);
+    expect(templates.map((t) => t.template!.name)).toEqual(["proactive_alert", "proactive_alert"]);
+    expect(templates[0]!.template!.params.map((p) => p.text)).toEqual(["התנגשות ביומן ביום ה׳ 22.10: 11:00 חתימה אצל הנוטריון חופפת ל-11:30 שיחה עם הבנק"]);
+    expect(templates[1]!.template!.params.map((p) => p.text)).toEqual(["מייל דחוף מ-עו״ד שפירא: תשובה לבית המשפט"]);
+    const rows = h.db.proactiveAlerts.filter((a) => a.channel === "urgent");
+    expect(templates[0]!.template!.buttons.map((b) => b.text)).toEqual([`al:conf:${rows[0]!.id}`, "al:off"]);
+    expect(templates[1]!.template!.buttons.map((b) => b.text)).toEqual([`al:reply:${rows[1]!.id}`, "al:off"]);
+    expect(rows.map((r) => r.status)).toEqual(["sent", "sent", "deferred"]);
+    const stored = (await h.db.recentMessages(user.id, 10)).filter((m) => m.direction === "out");
+    expect(stored.map((m) => m.type)).toEqual(["template", "template"]);
+    // a press on [לטפל עכשיו] (the template's quick reply) goes on as a request for a reply draft
+    await processInbound(h.ctx, h.inbound("לטפל עכשיו", { type: "template_button", reply: { id: `al:reply:${rows[1]!.id}`, title: "לטפל עכשיו" } }));
+    expect(h.ai.calls.some((c) => c.messages.some((m) => m.role === "user" && m.content.includes("לנסח תשובה למייל מ-עו״ד שפירא")))).toBe(true);
+  });
+
+  it("outside the window, when the template send fails (not approved yet): deferred — the items wait for the next morning summary", async () => {
+    const { h, user, deps } = await urgentSetup({ window: false });
+    const failing = { ...h.wa, sendTemplate: async () => Promise.reject(new Error("(#132001) Template name does not exist in the translation")) };
+    expect(await runProactiveScanJob({ ...deps, wa: failing as unknown as typeof h.wa }, scanJob(user.id))).toEqual({ status: "done", sent: 0, deferred: 3, candidates: 3 });
     expect(h.wa.sent.filter((x) => x.kind !== "read" && x.kind !== "reaction")).toEqual([]);
     // Thursday 07:30: the summary (template, the window is still closed) folds them in, once
     h.advance(21.5 * 3_600_000);

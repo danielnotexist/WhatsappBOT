@@ -39,6 +39,11 @@ describe("the full comparison (/pricing) comes from the entitlements", () => {
     }
   });
 
+  it("meeting summaries: Teams and Google Meet included in pro; Zoom 'בקרוב' in pro, not in basic", () => {
+    expect([kind(row("meetings").basic), kind(row("meetings").pro)]).toEqual(["no", "yes"]);
+    expect(row("meetings_zoom")).toEqual({ id: "meetings_zoom", label: "סיכומי פגישות Zoom", basic: { kind: "no" }, pro: { kind: "soon" } });
+  });
+
   it("agents: the built-ins on pro only, one custom agent on basic and three on pro", () => {
     expect([kind(row("builtin").basic), kind(row("builtin").pro)]).toEqual(["no", "yes"]);
     expect(row("custom").basic).toEqual({ kind: "text", text: "סוכן אחד" });

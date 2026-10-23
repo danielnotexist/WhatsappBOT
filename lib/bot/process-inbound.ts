@@ -24,6 +24,7 @@ import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./c
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
 import { rtlLines } from "@/lib/wa/rtl";
 import { handleAlertButton, handleAlertCommand } from "@/lib/proactive/actions";
+import { handleMeetingButton, handleMeetingCommand } from "@/lib/meetings/actions";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -160,6 +161,13 @@ async function afterStored(
     msg = { ...msg, type: "text", text: press.request };
   }
 
+  // 2a''. meeting summary buttons and the `meeting_summary_ready` template's quick replies (lib/meetings/actions.ts):
+  //       the summary, a mail draft (the usual approval card), the tasks document, the task list, on / off
+  if (isButton && msg.reply?.id.startsWith("mt:")) {
+    const press = await handleMeetingButton(ctx, user, to, msg.reply.id);
+    return { handled: true, note: press.note };
+  }
+
   // 2b. billing buttons (one-tap upgrade / retry / renew, cancel, card update) — work even while paused
   if (await handleBillingPress(ctx, user, msg)) return { handled: true, note: "billing button" };
 
@@ -179,6 +187,8 @@ async function afterStored(
 
   // 3a'. "בלי התראות" / "להחזיר התראות" — the proactive alerts' switch (pro), not counted, no model
   if (!draftAwaitsText && msg.type === "text" && msg.text && (await handleAlertCommand(ctx, user, to, msg.text))) return { handled: true, note: "alerts command" };
+  // 3a''. "בלי סיכומי פגישות" / "להחזיר סיכומי פגישות" — the automatic meeting summaries' switch (pro), no model
+  if (!draftAwaitsText && msg.type === "text" && msg.text && (await handleMeetingCommand(ctx, user, to, msg.text))) return { handled: true, note: "meetings command" };
 
   // 3b. onboarding questions (not while the agent flow waits for a typed name: that text belongs to the flow)
   if (onboardingOf(user) && !draftAwaitsText && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };

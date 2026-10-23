@@ -64,8 +64,28 @@ function toolOutput(req: CompletionRequest, names: string[]): Record<string, unk
 
 const TASK_TOOLS = { create: ["todo_create_task", "gtasks_create_task"], list: ["todo_list_tasks", "gtasks_list_tasks"] };
 
+/** A meeting summary (lib/meetings/summarize.ts) from the transcript's "Name: words" lines — deterministic, for dev and e2e. */
+function meetingSummary(req: CompletionRequest): Partial<CompletionResponse> {
+  const turns = lastUserText(req)
+    .split("\n")
+    .map((l) => l.match(/^([^:<>]{2,40}):\s+(.+)$/))
+    .filter((m): m is RegExpMatchArray => Boolean(m) && !/^(Meeting|Date|Invited|Part \d+)$/.test(m![1]!));
+  const speakers = [...new Set(turns.map((m) => m[1]!.trim()))];
+  const first = turns[0]?.[2]?.slice(0, 160) ?? "הפגישה עסקה בעדכונים שוטפים.";
+  return {
+    text: JSON.stringify({
+      summary: `בפגישה השתתפו ${speakers.join(", ") || "המשתתפים"}. ${first}`,
+      decisions: turns.length > 1 ? [turns[1]![2]!.slice(0, 160)] : [],
+      action_items: turns.slice(2, 4).map((m) => ({ task: m[2]!.slice(0, 120), owner: m[1]!.trim(), due: null })),
+      open_questions: [],
+    }),
+  };
+}
+
 function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   const text = lastUserText(req);
+  if (/one meeting transcript/.test(req.system)) return req.json ? meetingSummary(req) : { text: text.slice(0, 1500) };
+  if (/part of a meeting transcript/.test(req.system)) return { text: text.slice(0, 1500) };
   if (req.json) {
     // router classification
     const simple = /^(תודה|היי|שלום|בוקר טוב|ערב טוב|מה שלומך|אוקיי|סבבה|בסדר)/.test(text.trim()) || text.trim().length < 4;
@@ -74,8 +94,13 @@ function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   }
   const tools = new Set((req.tools ?? []).map((t) => t.name));
   // reminders (Milestone 5): pass the whole message as `when`; the parser finds the time and the text
-  const reminderReply = toolReply(req, ["create_reminder", "list_reminders", "cancel_reminder"]);
+  const reminderReply = toolReply(req, ["create_reminder", "list_reminders", "cancel_reminder", "meeting_summary"]);
   if (reminderReply) return { text: reminderReply };
+  // meeting summaries (lib/meetings/tools.ts): "סיכום של הפגישה האחרונה", "תסכמי את הפגישה עם כהן"
+  if (tools.has("meeting_summary") && /(סיכום|תסכמי|לסכם)\s+(של\s+|את\s+)?(ה)?פגישה/.test(text)) {
+    const query = text.match(/פגישה\s+(?:עם|של)\s+(.+?)[?.!]*$/)?.[1]?.trim() ?? "";
+    return { toolCalls: [{ id: "call_meeting_1", name: "meeting_summary", input: { query } }], stopReason: "tool_use", text: "" };
+  }
   // tasks (Microsoft To Do / Google Tasks): a consent line, the "added" echo, or the open tasks as a list
   const taskSay = toolReply(req, [...TASK_TOOLS.create, ...TASK_TOOLS.list], "say") ?? toolReply(req, TASK_TOOLS.create);
   if (taskSay) return { text: taskSay };

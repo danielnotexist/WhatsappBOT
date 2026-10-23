@@ -31,9 +31,12 @@ export const pcopy = {
   "alert.actions.body": () => "אפשר לטפל באחד מהם מכאן. שום דבר לא יוצא בלי אישור.",
   "alert.actions.button": () => "בחירת פעולה",
 
-  // ---- urgent alerts (at most 2 a day, 08:00–20:00, not on Shabbat or a holiday; inside the window only) ----
+  // ---- urgent alerts (at most 2 a day, 08:00–20:00, not on Shabbat or a holiday) ----
   "alert.urgent.mail": (who: string, subject: string) => `*מייל דחוף*\nמ-${who}: ${subject}\n\nאפשר לנסח תשובה לאישור, או להזכיר מחר.`,
   "alert.urgent.conflict": (dayLabel: string, a: string, b: string) => `*התנגשות ביומן ${dayLabel}*\n• ${a}\n• ${b}\n\nאפשר להזיז אחת מהן. כל שינוי מגיע קודם לאישור.`,
+  // outside the 24-hour window: {{1}} of the `proactive_alert` template (one line, docs/copy/wa-templates.md)
+  "alert.template.mail": (who: string, subject: string) => `מייל דחוף מ-${who}: ${subject}`,
+  "alert.template.conflict": (dayLabel: string, a: string, b: string) => `התנגשות ביומן ${dayLabel}: ${a} חופפת ל-${b}`,
 
   // ---- the phishing warning (morning summary, and when she reads or summarises a mail) ----
   "alert.phishing.warning": (reasons: string) => `⚠️ שימו לב: ${reasons}. כדאי לאמת בטלפון, מול מספר מוכר, לפני כל תשלום, ולא ללחוץ על קישורים במייל.`,

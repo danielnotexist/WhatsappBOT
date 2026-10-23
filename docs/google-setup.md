@@ -147,3 +147,14 @@
 6. **מסמך הגילוי** (`docs/legal/oauth-consent-screen-he.md` §3) עודכן ל-`tasks` ול-`drive.readonly` — לפרסם באתר לפני שהבקשה הזו יוצאת למשתמשים אמיתיים.
 
 **מה המשתמש רואה:** חיבור חדש מבקש את `tasks` עם שאר הבסיס, ואת `gmail.readonly` + `drive.readonly` כל עוד יש מקום (אפשר להוריד את הסימון — זו בחירה, לא תקלה). באזור האישי: Gmail, יומן, Tasks, Drive, Docs, Sheets, Slides, כל אחד "מחובר" / "צריך אישור נוסף" (לחיצה = הסכמה מצטברת ל-scope החסר בלבד) / "לא זמין" (קריאת Drive כבויה או שהתקרה מלאה לחשבון חדש).
+
+## 11. סיכומי פגישות Google Meet (פרו, 23.10.2026)
+
+> הקוד: `lib/meetings/find.ts` (`meetTranscript`), `lib/meetings/jobs.ts`, `lib/google/client.ts` (`attachments` / `conferenceId` באירוע). הטקסטים: `docs/copy/bot-copy-meetings.md`.
+
+- **מאיפה התמליל**: כשמפעילים "תמליל" בפגישת Meet (מנויי Google Workspace שכוללים תמלול — לא בחשבון Gmail פרטי), Meet שומרת Google Doc בתיקיית "Meet Recordings" ב-Drive של המארגן ומצרפת אותו לאירוע ביומן של המארגן. עלזה מחפשת קודם בקבצים המצורפים לאירוע (`attachments`), ואחר כך ב-Drive: מסמך Google Docs ששמו מכיל "Transcript" או "תמליל" ושהשתנה אחרי תחילת הפגישה — עדיפות לזה ששמו מכיל את שם הפגישה. הייצוא: `files.export` ל-`text/plain`.
+- **ההרשאה**: `drive.readonly` — היכולת "כל ה-Drive" של פרו (סעיפים 6 ו-10, תחת התקרה של אפליקציה לא מאומתת ו-`GOOGLE_DRIVE_READ_ENABLED`). אין scope חדש ואין מה ללחוץ ב-Google Cloud. בלי `drive.readonly` הסיכום האוטומטי לא מתוזמן לפגישות Meet, וכשמבקשים — קישור ההסכמה המצטברת (`feature=drive_read`).
+- **Meet REST API לא בשימוש**: `conferenceRecords.transcripts` דורש `meetings.space.readonly`, scope **מוגבל** (CASA) לפגישות שהאפליקציה לא יצרה (`meetings.space.created` מכסה רק מרחבים שהאפליקציה יצרה דרך ה-API, ואצלנו Meet נוצרת דרך היומן). מסלול ה-Drive נותן את אותו תמליל בלי scope נוסף.
+- **מי יכול לקרוא**: המארגן (הקובץ שלו). משתתף מאותו ארגון מקבל בדרך כלל שיתוף לקובץ, ואז `drive.readonly` מוצא אותו; אחרת — "אין לי גישה לתמליל" (רק כשביקשו).
+- **הזמן**: Meet מסיימת את המסמך בדרך כלל תוך דקות אחרי הפגישה (לפעמים עד ~45 דקות). הסיכום נבדק 10 דקות אחרי הסוף ושוב אחרי 15, 30 ו-60 דקות.
+- **מקורות** (לפי התיעוד הרשמי, 23.10.2026): support.google.com/meet/answer/12849897 (Use transcripts with Google Meet), developers.google.com/meet/api/guides/authenticate-authorize (Meet REST API scopes), developers.google.com/calendar/api/v3/reference/events (`attachments`, `conferenceData.conferenceId`). לבדוק שוב לפני הפעלה מול משתמשים אמיתיים.

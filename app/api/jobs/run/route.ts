@@ -29,7 +29,8 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * POST: runs one scheduled job (charge, renew_subscription, reminder, morning_summary, proactive_scan) and reports back with finish_job().
+ * POST: runs one scheduled job (charge, renew_subscription, reminder, morning_summary, proactive_scan, meeting_plan,
+ * meeting_summary) and reports back with finish_job().
  * Same trust model as /api/wa/worker: QStash signature when configured, otherwise the internal secret.
  */
 export async function POST(request: Request) {
@@ -66,6 +67,8 @@ export async function POST(request: Request) {
       case "reminder":
       case "morning_summary":
       case "proactive_scan":
+      case "meeting_plan":
+      case "meeting_summary":
         result = await runScheduledJob(getJobDeps(), { id: job.job_id, kind: job.kind, user_id: job.user_id, payload: job.payload ?? {} });
         break;
       default:

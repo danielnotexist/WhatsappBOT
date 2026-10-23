@@ -153,7 +153,7 @@ export interface PaymentRow {
   approval_id?: string | null;
 }
 
-export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan";
+export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan" | "meeting_plan" | "meeting_summary";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobRow {
@@ -436,6 +436,31 @@ export interface NewProactiveItem {
 /** claimed = send it now; cap / deferred = recorded as deferred (folded into the next morning summary); duplicate = known */
 export type ProactiveClaimResult = "claimed" | "cap" | "deferred" | "duplicate";
 
+// ---- meeting summaries (migration 0014, lib/meetings) ----
+
+/** What the summary's buttons did: the tasks document, the action items in a task list, the summary mail (recorded). */
+export type MeetingSummaryAction = "mail" | "doc" | "tasks";
+
+export interface MeetingSummaryRow {
+  id: string;
+  user_id: string;
+  provider: "microsoft" | "google";
+  /** <provider>:<event id>:<end ISO> — one row per occurrence */
+  event_key: string;
+  event_id: string;
+  title: string;
+  meeting_start: string;
+  meeting_end: string;
+  /** everyone on the invitation but the user */
+  attendees: { name: string; email: string }[];
+  /** the summary (lib/meetings/summarize.ts MeetingSummaryContent) — never the transcript */
+  content: Record<string, unknown>;
+  done: MeetingSummaryAction[];
+  created_at: string;
+}
+
+export type NewMeetingSummary = Omit<MeetingSummaryRow, "id" | "done" | "created_at">;
+
 export interface SupportTicketRow {
   id: string;
   created_at: string;
@@ -630,6 +655,15 @@ export interface Db {
   foldDeferredProactiveAlerts(userId: string, since: Date): Promise<ProactiveAlertRow[]>;
   /** sets an urgent alert's status (e.g. back to deferred when its send failed after the claim) */
   setProactiveAlertStatus(userId: string, id: string, status: ProactiveStatus): Promise<void>;
+
+  // meeting summaries (migration 0014) — lib/meetings
+  /** one row per (user, event_key): when it exists already, the existing row is returned unchanged */
+  saveMeetingSummary(row: NewMeetingSummary): Promise<MeetingSummaryRow>;
+  /** the user's own row (any other user's id → null) */
+  getMeetingSummary(userId: string, id: string): Promise<MeetingSummaryRow | null>;
+  findMeetingSummary(userId: string, eventKey: string): Promise<MeetingSummaryRow | null>;
+  /** SQL meeting_summary_mark(): records `action` once, atomically — false when it was recorded before (a second press) */
+  markMeetingSummaryAction(userId: string, id: string, action: MeetingSummaryAction): Promise<boolean>;
 
   // billing approvals (migration 0007) — expires_at is always created_at + 10 minutes (DB default + CHECK)
   createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow>;

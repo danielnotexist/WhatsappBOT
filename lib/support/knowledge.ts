@@ -1,4 +1,4 @@
-import { PLANS, TRIAL_MESSAGES, VAT_RATE, entitlements, planFeatures } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, entitlements, proSoonTexts } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
 import { SUPPORT_COPY, SUPPORT_SUGGESTIONS } from "./types";
 
@@ -43,9 +43,10 @@ const proNow = [
   ent.pro.driveFullRead && !ent.basic.driveFullRead && "חיפוש בכל ה-Drive",
   ent.pro.fileCreate && !ent.basic.fileCreate && "שמירת מסמכים",
   ent.pro.proactive && !ent.basic.proactive && "התראות יזומות ואזהרות פישינג",
+  ent.pro.meetingSummaries && !ent.basic.meetingSummaries && "סיכומי פגישות Teams ו-Meet",
   `שלושת הסוכנים המובנים ועד ${n(ent.pro.customAgents)} סוכנים משלך`,
 ].filter((x): x is string => Boolean(x));
-const proSoon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
+const proSoon = proSoonTexts();
 const listHe = (items: readonly string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} ו${items.at(-1)}`);
 
 export const KNOWLEDGE: readonly KnowledgeEntry[] = [
@@ -142,6 +143,15 @@ export const KNOWLEDGE: readonly KnowledgeEntry[] = [
       "במסלול פרו סיכום הבוקר נפתח ב״דברים שכדאי לא לפספס״: מיילים מאנשים שמחכים לתשובה יומיים עסקים ומעלה, מועדים שנכתבו במיילים, התנגשויות ביומן ופגישה עם גורם מחוץ לעסק. " +
       "בנוסף נשלחות עד 2 התראות דחופות ביום, רק בין 08:00 ל-20:00 ולא בשבת ובחג. מייל שנראה כמו פישינג, למשל בקשה לשנות פרטי חשבון בנק, מקבל אזהרה. " +
       "שום דבר לא יוצא בלי אישור, ואפשר לכבות בהודעה ״בלי התראות״ או בהגדרות באזור האישי.",
+  },
+  {
+    // lib/meetings, docs/copy/bot-copy-meetings.md
+    id: "meetings",
+    question: "את מסכמת פגישות?",
+    keywords: ["סיכום פגישה", "סיכומי פגישות", "לסכם פגישה", "לסכם פגישות", "מסכמת פגישות", "מסכמים פגישות", "מסכמת פגישה", "תמליל", "תמלילים", "תמלול", "teams", "טימס", "zoom", "זום", "meet", "מיט", "ישיבה", "ישיבות"],
+    answer:
+      "במסלול פרו, אחרי פגישת Teams או Google Meet שהופעל בה תמלול, אני לוקחת את התמליל שהפלטפורמה שמרה (בלי להצטרף לפגישה) ושולחת סיכום: החלטות, משימות עם אחראי ותאריך ושאלות פתוחות. " +
+      "משם אפשר להכין מייל סיכום למשתתפים, מסמך משימות או משימות ברשימה, ושום דבר לא נשלח בלי אישור. ב-Teams ההרשאה לתמלילים דורשת אישור חד-פעמי של מנהל ה-IT. Zoom בקרוב.",
   },
   {
     id: "files",

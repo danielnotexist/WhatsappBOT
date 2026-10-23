@@ -7,6 +7,7 @@ import type { SttProvider } from "@/lib/stt/types";
 import type { HypGateway } from "@/lib/hyp/client";
 import type { WaSender } from "@/lib/wa/sender";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
+import type { MeetingWorkspace } from "@/lib/meetings/workspace";
 
 /** Everything a bot handler needs — injected so tests run with MemoryDb + RecordingWaSender + MockProvider. */
 export interface BotContext {
@@ -28,6 +29,8 @@ export interface BotContext {
   spend?: SpendGuard | null;
   /** "לסמן כחשוד" on a phishing warning: the user's Microsoft 365 mailbox when it may be modified (lib/proactive/actions.ts) */
   mailMarker?: (user: UserRow) => Promise<{ markSuspicious(messageId: string): Promise<void> } | null>;
+  /** the user's calendars, Drive and task lists for the meeting summaries' buttons and tool (lib/meetings) */
+  meetingWorkspace?: MeetingWorkspace;
 }
 
 export const LINK = {

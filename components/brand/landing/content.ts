@@ -1,6 +1,6 @@
 import type { ChatStep } from "@/components/brand/chat-demo";
 import { BRAND } from "@/lib/brand";
-import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures, proSoonTexts } from "@/lib/billing/plans";
 import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import type { MascotPose } from "./mascot";
 
@@ -214,9 +214,9 @@ export const FAQ: readonly { q: string; a: string }[] = [
   },
 ];
 
-/** "בקרוב" in pro, in words: "סיכומי פגישות וחיבור למערכות העסק, כמו monday.com" (lib/billing/plans.ts COMING_SOON). */
+/** "בקרוב" in pro, in words: "סיכומי פגישות Zoom וחיבור למערכות העסק, כמו monday.com" (lib/billing/plans.ts: the soon lines). */
 function soonInPro(): string {
-  const soon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
+  const soon = proSoonTexts();
   return soon.length < 2 ? (soon[0] ?? "") : `${soon.slice(0, -1).join(", ")} ו${soon.at(-1)}`;
 }
 

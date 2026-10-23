@@ -2,27 +2,35 @@ import type { Db, JobKind, JobRow } from "@/lib/db/types";
 import type { Queue } from "@/lib/queue/types";
 import { runReminderJob } from "@/lib/reminders/service";
 import { runProactiveScanJob, scheduleProactiveScan } from "@/lib/proactive/alerts";
+import { runMeetingPlanJob, runMeetingSummaryJob, scheduleMeetingPlan } from "@/lib/meetings/jobs";
+import type { MeetingDeps } from "@/lib/meetings/workspace";
 import { runMorningSummaryJob, type MorningDeps } from "./morning-summary";
 
-export type JobDeps = MorningDeps;
+/** The meeting summaries' extras (lib/meetings): the workspaces, the summary's model, the site's URL. */
+export type JobDeps = MorningDeps & { meetings?: Pick<MeetingDeps, "workspace" | "ai" | "appUrl"> };
 
 /** Job kinds this module runs (the others — charge, renew_subscription — stay in app/api/jobs/run). */
-export const M5_JOB_KINDS: readonly JobKind[] = ["reminder", "morning_summary", "proactive_scan"];
+export const M5_JOB_KINDS: readonly JobKind[] = ["reminder", "morning_summary", "proactive_scan", "meeting_plan", "meeting_summary"];
 
-/** Runs one claimed `reminder` / `morning_summary` / `proactive_scan` job. Throws on transient failures (→ finish_job retry). */
+/** Runs one claimed `reminder` / `morning_summary` / `proactive_scan` / `meeting_*` job. Throws on transient failures (→ finish_job retry). */
 export async function runScheduledJob(deps: JobDeps, job: Pick<JobRow, "id" | "kind" | "user_id" | "payload">): Promise<unknown> {
   switch (job.kind) {
     case "reminder":
       return runReminderJob(deps, job);
     case "morning_summary": {
       const result = await runMorningSummaryJob(deps, job);
-      // pro: the day's urgent-alert scans follow the summary (pg_cron schedules them too; idempotent by key)
+      // pro: the day's urgent-alert scans and meeting plans follow the summary (pg_cron schedules them too; idempotent by key)
       const user = job.user_id ? await deps.db.getUser(job.user_id) : null;
       if (user) await scheduleProactiveScan(deps.db, user, deps.now()).catch(() => null);
+      if (user && deps.meetings) await scheduleMeetingPlan(deps.db, user, deps.now()).catch(() => null);
       return result;
     }
     case "proactive_scan":
       return runProactiveScanJob(deps, job);
+    case "meeting_plan":
+      return deps.meetings ? runMeetingPlanJob({ ...deps, ...deps.meetings }, job) : { status: "skipped", reason: "meetings not wired" };
+    case "meeting_summary":
+      return deps.meetings ? runMeetingSummaryJob({ ...deps, ...deps.meetings }, job) : { status: "skipped", reason: "meetings not wired" };
     default:
       throw new Error(`runScheduledJob: kind ${job.kind} is not handled here`);
   }

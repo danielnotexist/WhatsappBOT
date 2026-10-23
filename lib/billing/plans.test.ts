@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  COMING_SOON,
   PLANS,
   PRO_FEATURES,
   TRIAL_MESSAGES,
@@ -11,6 +12,7 @@ import {
   missingProFeatures,
   planFeatures,
   primaryProvider,
+  proSoonTexts,
   providerGate,
 } from "./plans";
 
@@ -64,7 +66,7 @@ describe("entitlements: the split of 23.10.2026 (Daniel)", () => {
   });
 
   it("the pro services missing on a plan (what pro_feature answers)", () => {
-    expect(missingProFeatures("basic")).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read", "proactive"]);
+    expect(missingProFeatures("basic")).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read", "proactive", "meeting_summaries"]);
     expect(missingProFeatures("trial")).toEqual(missingProFeatures("basic"));
     expect(missingProFeatures("pro")).toEqual([]);
     for (const f of Object.values(PRO_FEATURES)) expect(f.label).not.toMatch(/[–—]/);
@@ -82,7 +84,7 @@ describe("planFeatures: the plans in words, generated from the entitlements", ()
     expect(basic.lines.some((l) => l.soon)).toBe(false);
   });
 
-  it("pro: 'כל מה שבבסיסי, ובנוסף:' and only what pro adds; alerts and phishing warnings available, meeting summaries and business systems 'soon'", () => {
+  it("pro: 'כל מה שבבסיסי, ובנוסף:' and only what pro adds; alerts, phishing warnings and Teams / Meet summaries available; Zoom summaries and business systems 'soon'", () => {
     const pro = planFeatures("pro");
     expect(pro.lead).toBe("כל מה שבבסיסי, ובנוסף:");
     expect(pro.lines.map((l) => [l.id, Boolean(l.soon)])).toEqual([
@@ -92,11 +94,17 @@ describe("planFeatures: the plans in words, generated from the entitlements", ()
       ["sharepoint", false],
       ["file_create", false],
       ["agents", false],
-      ["meetings", true],
+      ["meetings", false],
       ["proactive", false],
       ["business", true],
     ]);
     expect(pro.lines.find((l) => l.id === "agents")!.text).toBe(`שלושת הסוכנים המובנים, ועד ${PLANS.pro.customAgents} סוכנים משלך`);
+    // meeting summaries shipped for Teams and Google Meet (lib/meetings); Zoom is the truthful "בקרוב"
+    expect(pro.lines.find((l) => l.id === "meetings")!.text).toBe("סיכומי פגישות Teams ו-Google Meet");
+    // Zoom: "בקרוב" where the coming things are listed, not a line of the compact card
+    expect(pro.lines.map((l) => l.id)).not.toContain("meetings_zoom");
+    expect(proSoonTexts()).toEqual(["סיכומי פגישות Zoom", "חיבור למערכות העסק, כמו monday.com"]);
+    expect(COMING_SOON).not.toContain("meetingSummaries");
   });
 
   it("site text: the short hyphen only, no slash gender forms", () => {

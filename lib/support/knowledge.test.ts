@@ -76,6 +76,9 @@ describe("matchKnowledge — the deterministic answer", () => {
     ["אני רוצה לדבר עם נציג", "support"],
     ["חויבתי פעמיים", "support"],
     ["מה זה סיכום בוקר?", "features"],
+    ["את מסכמת פגישות Teams?", "meetings"],
+    ["יש סיכום פגישה מזום?", "meetings"],
+    ["אתם עושים תמלול לישיבות?", "meetings"],
   ])("%s → %s", (q, id) => {
     expect(topic(q)).toBe(id);
   });

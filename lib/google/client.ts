@@ -76,6 +76,13 @@ export interface GoogleEvent {
   conferenceStatus: "pending" | "success" | "failure" | null;
   /** a meeting link written only in the location or the description (Zoom, Teams), when safe; else null */
   textJoinUrl: string | null;
+  /** the Meet code ("abc-defg-hij") of the event's conference, when it has one */
+  conferenceId?: string | null;
+  /**
+   * Drive files attached to the event — Meet attaches the recording, the transcript and Gemini's notes to the
+   * organiser's event when they are ready (lib/meetings/meet.ts). Reading one needs drive.readonly.
+   */
+  attachments?: { fileId: string; title: string; mimeType: string; fileUrl: string }[];
 }
 
 export interface NewGoogleEvent {
@@ -393,6 +400,8 @@ function mapEvent(e: RawEvent, calendarTz: string | null): GoogleEvent {
     hasConference: hasConference(e),
     conferenceStatus: conferenceStatusOf(e.conferenceData?.createRequest?.status?.statusCode),
     textJoinUrl: joinUrlInText(e.location, e.description),
+    conferenceId: typeof e.conferenceData?.conferenceId === "string" ? e.conferenceData.conferenceId : null,
+    attachments: (e.attachments ?? []).filter((a) => typeof a.fileId === "string" && a.fileId).map((a) => ({ fileId: a.fileId!, title: a.title ?? "", mimeType: a.mimeType ?? "", fileUrl: a.fileUrl ?? "" })),
   };
 }
 
@@ -453,6 +462,7 @@ interface RawEvent {
   organizer?: { email?: string; displayName?: string; self?: boolean };
   hangoutLink?: string;
   conferenceData?: { conferenceId?: string; createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] };
+  attachments?: { fileId?: string; title?: string; mimeType?: string; fileUrl?: string }[];
 }
 interface RawDriveFile {
   id: string;

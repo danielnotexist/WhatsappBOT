@@ -42,6 +42,9 @@ import type {
   ProactiveAlertRow,
   ProactiveClaimResult,
   ProactiveStatus,
+  MeetingSummaryAction,
+  MeetingSummaryRow,
+  NewMeetingSummary,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -786,6 +789,39 @@ export class SupabaseDb implements Db {
     if (status === "listed" || !UUID_RE.test(id)) return;
     const { error } = await this.client.from("proactive_alerts").update({ status }).eq("id", id).eq("user_id", userId).eq("channel", "urgent");
     if (error) this.fail("setProactiveAlertStatus", error);
+  }
+
+  // ---- meeting_summaries (0014) ----
+
+  private static readonly MEETING_COLS = "id, user_id, provider, event_key, event_id, title, meeting_start, meeting_end, attendees, content, done, created_at";
+
+  async saveMeetingSummary(row: NewMeetingSummary): Promise<MeetingSummaryRow> {
+    // one row per (user, event_key): a second save keeps the first summary (ignoreDuplicates), then reads it back
+    const { error } = await this.client.from("meeting_summaries").upsert(row, { onConflict: "user_id,event_key", ignoreDuplicates: true });
+    if (error) this.fail("saveMeetingSummary", error);
+    const saved = await this.findMeetingSummary(row.user_id, row.event_key);
+    if (!saved) this.fail("saveMeetingSummary", { message: "row not found after upsert" });
+    return saved;
+  }
+
+  async getMeetingSummary(userId: string, id: string): Promise<MeetingSummaryRow | null> {
+    if (!UUID_RE.test(id)) return null;
+    const { data, error } = await this.client.from("meeting_summaries").select(SupabaseDb.MEETING_COLS).eq("id", id).eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getMeetingSummary", error);
+    return (data as unknown as MeetingSummaryRow | null) ?? null;
+  }
+
+  async findMeetingSummary(userId: string, eventKey: string): Promise<MeetingSummaryRow | null> {
+    const { data, error } = await this.client.from("meeting_summaries").select(SupabaseDb.MEETING_COLS).eq("user_id", userId).eq("event_key", eventKey).maybeSingle();
+    if (error) this.fail("findMeetingSummary", error);
+    return (data as unknown as MeetingSummaryRow | null) ?? null;
+  }
+
+  async markMeetingSummaryAction(userId: string, id: string, action: MeetingSummaryAction): Promise<boolean> {
+    if (!UUID_RE.test(id)) return false;
+    const { data, error } = await this.client.rpc("meeting_summary_mark", { p_user: userId, p_id: id, p_action: action });
+    if (error) this.fail("markMeetingSummaryAction", error);
+    return data === true;
   }
 
   // ---- agents (0006). Every query is scoped by user_id, also when the id is known. ----

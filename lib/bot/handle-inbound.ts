@@ -15,6 +15,8 @@ import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispat
 import { googleExecutors, googleTools } from "@/lib/google/tools";
 import { gmailReadConsentLink } from "@/lib/google/gmail-tools";
 import { googleConsentLink } from "@/lib/google/consent";
+import { meetingSummaryTool } from "@/lib/meetings/tools";
+import { meetingWorkspace } from "@/lib/meetings/workspace-server";
 import { connectLinkFor, type BotContext } from "./context";
 import { registerExecutor } from "./pending";
 import { processInbound } from "./process-inbound";
@@ -44,8 +46,10 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
     for (const [kind, fn] of Object.entries(ex)) registerExecutor(kind as keyof typeof ex, fn);
     executorsRegistered = true;
   }
+  const workspace = meetingWorkspace(db);
   const ctx: BotContext = {
     db,
+    meetingWorkspace: workspace,
     wa: overrides.wa ?? getWaSender(),
     ai: getAiProvider(),
     now: () => new Date(),
@@ -71,6 +75,8 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
               entitlements: ent,
             })
           : []),
+        // pro: "סיכום של הפגישה האחרונה" (lib/meetings/tools.ts; the orchestrator gates it by name too)
+        ...(ent.meetingSummaries && (ms || g) ? [meetingSummaryTool({ workspace, user })] : []),
       ];
     },
     async mailMarker(user) {

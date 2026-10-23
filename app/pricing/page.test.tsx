@@ -48,8 +48,10 @@ describe("/pricing", () => {
     expect(within(table).getAllByRole("rowheader").map((h) => h.textContent)).toEqual(rows.map((r) => r.label));
     const sharepoint = within(table).getByRole("rowheader", { name: rows.find((r) => r.id === "sharepoint")!.label }).closest("tr")!;
     expect(within(sharepoint).getAllByRole("cell").map((c) => c.textContent)).toEqual(["לא כלול", "כלול"]);
-    const meetings = within(table).getByRole("rowheader", { name: "סיכומי פגישות" }).closest("tr")!;
-    expect(within(meetings).getAllByRole("cell").map((c) => c.textContent)).toEqual(["לא כלול", "בקרוב"]);
+    const meetings = within(table).getByRole("rowheader", { name: "סיכומי פגישות Teams ו-Google Meet" }).closest("tr")!;
+    expect(within(meetings).getAllByRole("cell").map((c) => c.textContent)).toEqual(["לא כלול", "כלול"]);
+    const zoom = within(table).getByRole("rowheader", { name: "סיכומי פגישות Zoom" }).closest("tr")!;
+    expect(within(zoom).getAllByRole("cell").map((c) => c.textContent)).toEqual(["לא כלול", "בקרוב"]);
     for (const s of planComparison()) expect(within(table).getByRole("columnheader", { name: s.title })).toBeInTheDocument();
 
     // every system each plan connects to, on the night set, by account
@@ -69,7 +71,7 @@ describe("/pricing", () => {
     // the questions about plans
     const faq = screen.getByRole("region", { name: "שאלות על המסלולים." });
     expect(faq.querySelectorAll("summary")).toHaveLength(PRICING_FAQ.length);
-    expect(faq).toHaveTextContent("סיכומי פגישות וחיבור למערכות העסק, כמו monday.com");
+    expect(faq).toHaveTextContent("סיכומי פגישות Zoom וחיבור למערכות העסק, כמו monday.com");
 
     expect(screen.getAllByRole("link", { name: "בואו נתחיל - לוקח דקה" })[0]).toHaveAttribute("href", "/start");
     expect(document.body.textContent).not.toMatch(/[–—]/);

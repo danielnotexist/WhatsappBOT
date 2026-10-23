@@ -43,6 +43,9 @@ import type {
   ProactiveAlertRow,
   ProactiveClaimResult,
   ProactiveStatus,
+  MeetingSummaryAction,
+  MeetingSummaryRow,
+  NewMeetingSummary,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -78,6 +81,7 @@ export class MemoryDb implements Db {
   billingApprovals: BillingApprovalRow[] = [];
   supportTickets: SupportTicketRow[] = [];
   proactiveAlerts: ProactiveAlertRow[] = [];
+  meetingSummaries: MeetingSummaryRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -176,6 +180,7 @@ export class MemoryDb implements Db {
     for (const key of [...this.aiSpendUsers.keys()]) if (key.endsWith(`|${id}`)) this.aiSpendUsers.delete(key); // the day totals stay
     for (const t of this.supportTickets) if (t.user_id === id) t.user_id = null; // SQL: on delete set null
     this.proactiveAlerts = this.proactiveAlerts.filter((a) => a.user_id !== id);
+    this.meetingSummaries = this.meetingSummaries.filter((s) => s.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -727,6 +732,34 @@ export class MemoryDb implements Db {
   async setProactiveAlertStatus(userId: string, id: string, status: ProactiveStatus): Promise<void> {
     const row = this.proactiveAlerts.find((a) => a.id === id && a.user_id === userId && a.channel === "urgent");
     if (row && status !== "listed") row.status = status;
+  }
+
+  // ---- meeting_summaries (migration 0014): one row per (user, event_key); meeting_summary_mark() ----
+
+  async saveMeetingSummary(row: NewMeetingSummary): Promise<MeetingSummaryRow> {
+    if (!this.users.has(row.user_id)) throw new Error(`meeting_summaries: unknown user ${row.user_id}`);
+    const existing = this.meetingSummaries.find((s) => s.user_id === row.user_id && s.event_key === row.event_key);
+    if (existing) return structuredClone(existing);
+    const saved: MeetingSummaryRow = { id: randomUUID(), ...structuredClone(row), done: [], created_at: iso(this.now()) };
+    this.meetingSummaries.push(saved);
+    return structuredClone(saved);
+  }
+
+  async getMeetingSummary(userId: string, id: string): Promise<MeetingSummaryRow | null> {
+    const row = this.meetingSummaries.find((s) => s.id === id && s.user_id === userId);
+    return row ? structuredClone(row) : null;
+  }
+
+  async findMeetingSummary(userId: string, eventKey: string): Promise<MeetingSummaryRow | null> {
+    const row = this.meetingSummaries.find((s) => s.user_id === userId && s.event_key === eventKey);
+    return row ? structuredClone(row) : null;
+  }
+
+  async markMeetingSummaryAction(userId: string, id: string, action: MeetingSummaryAction): Promise<boolean> {
+    const row = this.meetingSummaries.find((s) => s.id === id && s.user_id === userId);
+    if (!row || row.done.includes(action)) return false;
+    row.done.push(action);
+    return true;
   }
 
   // ---- agents: mirrors the 0006 constraints and the enforce_agent_rules trigger ----

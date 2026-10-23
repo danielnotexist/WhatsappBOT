@@ -90,6 +90,38 @@ export function paymentReceiptTemplate(p: { amount: string; plan: string; nextCh
   };
 }
 
+/**
+ * `proactive_alert` (pro; an urgent alert outside the 24-hour window, lib/proactive/alerts.ts): {{1}} the alert in one
+ * line. Quick replies: [לטפל עכשיו] carries the alert's own action (`al:reply:<id>` for a mail, `al:conf:<id>` for a
+ * calendar clash — the same payloads as the free-form buttons), [בלי התראות] carries `al:off`.
+ */
+export function proactiveAlertTemplate(p: { line: string; actionId: string }): TemplateSend {
+  return {
+    name: "proactive_alert",
+    params: [templateParam(p.line, 300)],
+    buttons: [
+      { index: 0, subType: "quick_reply", text: p.actionId },
+      { index: 1, subType: "quick_reply", text: "al:off" },
+    ],
+  };
+}
+
+/**
+ * `meeting_summary_ready` (pro; a meeting summary outside the 24-hour window, lib/meetings/jobs.ts): {{1}} the meeting's
+ * title, {{2}} the short summary. Quick replies: [לראות את הסיכום] (`mt:show:<id>` — the full summary with its action
+ * buttons), [בלי סיכומי פגישות] (`mt:off`).
+ */
+export function meetingSummaryReadyTemplate(p: { title: string; summary: string; summaryId: string }): TemplateSend {
+  return {
+    name: "meeting_summary_ready",
+    params: [templateParam(p.title, 80), templateParam(p.summary, 400)],
+    buttons: [
+      { index: 0, subType: "quick_reply", text: `mt:show:${p.summaryId}` },
+      { index: 1, subType: "quick_reply", text: "mt:off" },
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // definitions (registration) — the JSON of docs/copy/wa-templates.md; a test keeps them in sync
 // ---------------------------------------------------------------------------------------------
@@ -112,7 +144,7 @@ const quickAndUrl = (quickText: string, urlText: string, url: string, example: s
   ],
 });
 
-/** All 10 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
+/** All 12 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
 export function templateDefinitions(appUrl: string, productName: string = PRODUCT_NAME): TemplateDefinition[] {
   const base = appUrl.replace(/\/+$/, "");
   const def = (name: string, ...components: Record<string, unknown>[]): TemplateDefinition => ({ name, language: TEMPLATE_LANGUAGE, category: "UTILITY", components });
@@ -158,6 +190,15 @@ export function templateDefinitions(appUrl: string, productName: string = PRODUC
       "plan_limit_reached",
       body("הגעת ל-750 ההודעות של המסלול הבסיסי החודש. המכסה מתחדשת ב-{{1}}.\nתזכורות וסיכום הבוקר ממשיכים כרגיל. כדי להמשיך כבר עכשיו — מסלול פרו (299 ₪, עד 3,000 הודעות).", ["1.11.2026"]),
       urlButton("לשדרג לפרו", `${base}/upgrade/{{1}}`, `${base}/upgrade/u_7f3a9c`),
+    ),
+    def("proactive_alert", body(`התראה: {{1}}\n\nאפשר לענות כאן, ו${productName} תטפל בזה.`, ["מייל דחוף מ-רו״ח ברק: חתימה על הדוח"]), quick("לטפל עכשיו", "בלי התראות")),
+    def(
+      "meeting_summary_ready",
+      body("סיכום הפגישה ״{{1}}״ מוכן.\n\n{{2}}\n\nאפשר לראות את הסיכום המלא ולבחור מה לעשות איתו: מייל סיכום למשתתפים, מסמך משימות או משימות ברשימה. שום דבר לא נשלח בלי אישור.", [
+        "פגישת צוות שבועית",
+        "הוחלט להעביר את ההשקה ל-10.11. שלוש משימות פתוחות, שתיים מהן של דנה.",
+      ]),
+      quick("לראות את הסיכום", "בלי סיכומי פגישות"),
     ),
   ];
 }

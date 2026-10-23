@@ -36,3 +36,31 @@
 - חיבור שנוצר לפני 23.10.2026 ממשיך לעבוד: הרענון של הטוקן מבקש **רק את ההרשאות שהחיבור קיבל** (`msRefreshScopes`). בקשת רענון עם הרשאה שלא אושרה הייתה נכשלת ב-`AADSTS65001` ומסמנת את החיבור "פג תוקף".
 - באזור האישי Microsoft To Do ו-SharePoint מסומנים "צריך אישור נוסף"; הלחיצה היא החיבור הרגיל (ל-Microsoft אין הסכמה מצטברת), שמבקש את כל הרשימה מחדש. בשיחה הכלים `todo_*` ו-`sharepoint_search` (חיפוש אתרים) מחזירים את אותו קישור (`s.todo.consent`, `s.sharepoint.consent` ב-`docs/copy/bot-copy-services.md`).
 - חיבור בלי רשימת הרשאות שמורה נחשב כמו הרשימה הישנה (`MS_SCOPES_V1`).
+
+## 5. סיכומי פגישות Teams (פרו, עודכן 23.10.2026)
+
+> הקוד: `MS_MEETING_SCOPES` / `msScopesFor` / `msAdminScopesFor` ב-`lib/ms/oauth.ts`, `app/api/auth/microsoft/{start,callback}`, `lib/meetings/find.ts` (`teamsTranscript`), `lib/meetings/jobs.ts`. הטקסטים: `docs/copy/bot-copy-meetings.md`.
+
+| הרשאה (delegated) | בשביל מה | אישור מנהל |
+|---|---|---|
+| `OnlineMeetings.Read` **(חדש, פרו)** | מציאת הפגישה המקוונת לפי קישור ההצטרפות של האירוע ביומן (`GET /me/onlineMeetings?$filter=JoinWebUrl eq '…'`) | לא נדרש לפי הטבלה של Microsoft (אבל ראו סעיף 3 על מדיניות ברירת המחדל) |
+| `OnlineMeetingTranscript.Read.All` **(חדש, פרו)** | קריאת התמליל ש-Teams שמרה (`/onlineMeetings/{id}/transcripts` ו-`…/content?$format=text/vtt`) | **תמיד נדרש** |
+
+- **רק בחיבור של משתמש פרו**: נתיב ה-start בודק את המסלול (`entitlements(plan).meetingSummaries`) ומוסיף את שתי ההרשאות גם לבקשת המשתמש וגם לקישור אישור המנהל (`?admin=1`). בסיסי ותקופת הניסיון מבקשים את הרשימה הרגילה בלבד.
+- **כשרק ההרשאה הזו דורשת מנהל**: בארגון שבו משתמשים מאשרים בעצמם את שאר ההרשאות, `OnlineMeetingTranscript.Read.All` לבדה הייתה חוסמת את כל החיבור. לכן, כשחיבור פרו חוזר עם `consent_required` / `AADSTS65001` או עם `access_denied` / `AADSTS65004` (במסך "Need admin approval" לוחצים "Return to the application without granting consent"), ה-callback מבקש מ-Microsoft מחדש **בלי** שתי ההרשאות (state ו-PKCE חדשים), החיבור הרגיל מושלם, ונרשם `profile.ms_meetings_consent = "admin_required"`. כשמבקשים אחר כך סיכום של פגישת Teams, עלזה שולחת את קישור אישור המנהל (`mt.consent.teams_admin`). חיבור שני שנכשל כבר לא מנסה שוב (אין לולאה).
+- **מסך שאין ממנו חזרה**: אם מנהל ה-IT כיבה את הקישור "Return to the application", המשתמש נשאר במסך של Microsoft. במקרה כזה צריך אישור מנהל לפני החיבור (`?admin=1`), כמו בכל שאר ההרשאות בסעיף 3.
+- **חיבור קיים בלי ההרשאות**: הסיכום האוטומטי לא מתוזמן לפגישות Teams שלו (אין קריאות מיותרות ל-Graph), וכשמבקשים סיכום — קישור חיבור מחדש (`mt.consent.teams`). הרענון ממשיך לבקש רק את מה שהחיבור קיבל.
+- **מי יכול לקרוא תמליל**: Graph מחזיר תמלילים בעיקר למארגן הפגישה. למשתתף שאינו המארגן (או בפגישה של ארגון אחר) התשובה היא 403/404, ועלזה עונה "אין לי גישה לתמליל" (`mt.no_access`) — רק כשביקשו.
+- **התמליל עצמו**: נוצר רק כשמישהו בפגישה לחץ "Start transcription" (או שמדיניות הארגון מפעילה תמלול אוטומטי). בלי זה אין מה לסכם, והסיכום האוטומטי מוותר בשקט.
+
+### מה דניאל לוחץ ב-Entra (פעם אחת)
+
+1. https://entra.microsoft.com → **Identity → Applications → App registrations** → האפליקציה של עלזה.
+2. **API permissions → Add a permission → Microsoft Graph → Delegated permissions** → לחפש ולסמן **OnlineMeetings.Read** ו-**OnlineMeetingTranscript.Read.All** → **Add permissions**.
+3. ל-tenant של דניאל (בדיקה): **Grant admin consent for <הארגון>** — אחרת Teams של דניאל עצמו לא יסוכם עד שיאשר כמנהל.
+4. בדיקה: חשבון פרו, פגישת Teams עם "Start transcription", ואחרי 10–20 דקות מהסוף הסיכום מגיע בוואטסאפ (או "סיכום של הפגישה האחרונה").
+5. אין סוד חדש, Redirect URI חדש או משתנה סביבה חדש. **אין** צורך בהרשאות application (כמו `OnlineMeetingTranscript.Read.All` ברמת האפליקציה או application access policy) — הכול delegated, בשם המשתמש.
+
+### Zoom
+
+לא נתמך בשלב הזה ("בקרוב" במחירון): תמלילי ענן של Zoom דורשים אפליקציית OAuth ב-Zoom Marketplace שעוברת את הבדיקה של Zoom (scopes `cloud_recording:read`), ואצל המשתמש מנוי Zoom בתשלום עם הקלטה לענן. לא נבנה שלד בלי זה.

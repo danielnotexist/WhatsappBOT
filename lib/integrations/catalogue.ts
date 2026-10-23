@@ -13,6 +13,8 @@ import type { PaidPlan } from "@/lib/billing/plans";
  *    Word/Excel/PowerPoint text, To Do, and Teams links on the meetings she creates or updates when asked
  *    (`online_meeting` → isOnlineMeeting under Calendars.ReadWrite; work or school accounts with Teams only).
  *  - Business systems (docs/research/connectors-israel.md): monday.com, Priority, מורנינג, iCount - all planned.
+ * Meeting summaries (pro, lib/meetings) are a capability of Teams and Google Meet, not a system of their own: they are
+ * listed in the plans (lib/billing/plans.ts), with Zoom's as "בקרוב" there; Zoom is not in this catalogue.
  *
  * Trademarks: every product name and mark here belongs to its owner (Google LLC, Microsoft Corporation, monday.com
  * Ltd., Priority Software Ltd., Morning (Green Invoice) Ltd., iCount Ltd.). They appear only to say that she works

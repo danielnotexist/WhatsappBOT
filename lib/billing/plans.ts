@@ -73,7 +73,10 @@ export interface Entitlements {
   fileCreate: boolean;
   /** every file in Google Drive: search and read existing Docs / Sheets / Slides (the drive.readonly feature) */
   driveFullRead: boolean;
-  /** coming: meeting summaries */
+  /**
+   * meeting summaries of Teams and Google Meet meetings from the platform's own transcript, with a summary mail (draft
+   * to approve), a tasks document and the action items in a task list — lib/meetings. Zoom: "בקרוב" (ZOOM_SOON_LINE).
+   */
   meetingSummaries: boolean;
   /**
    * proactive alerts from mail and calendar ("דברים שכדאי לא לפספס" in the morning summary, up to 2 urgent alerts a
@@ -89,8 +92,11 @@ export interface Entitlements {
 
 /** The capabilities only pro has (basic and the trial have none of them). */
 export type ProFlag = "tasks" | "sharepoint" | "fileCreate" | "driveFullRead" | "meetingSummaries" | "proactive" | "businessSystems";
-/** The pro capabilities that are not built yet: part of pro, and every place that lists them says "בקרוב". */
-export const COMING_SOON: readonly ProFlag[] = ["meetingSummaries", "businessSystems"];
+/**
+ * The pro capabilities that are not built yet: part of pro, and every place that lists them says "בקרוב". Meeting
+ * summaries shipped for Teams and Google Meet (lib/meetings); their Zoom part is the separate "בקרוב" line below.
+ */
+export const COMING_SOON: readonly ProFlag[] = ["businessSystems"];
 const NONE: Record<ProFlag, false> = { tasks: false, sharepoint: false, fileCreate: false, driveFullRead: false, meetingSummaries: false, proactive: false, businessSystems: false };
 const ALL: Record<ProFlag, true> = { tasks: true, sharepoint: true, fileCreate: true, driveFullRead: true, meetingSummaries: true, proactive: true, businessSystems: true };
 
@@ -108,7 +114,7 @@ export function entitlements(plan: EffectivePlan): Entitlements {
  * A pro service the model may be asked for on a plan without it: the `pro_feature` tool answers with the plan line
  * (lib/ai/plan-tools.ts). `label` completes "במסלול פרו יש גם …".
  */
-export type ProFeature = "second_account" | "tasks" | "sharepoint" | "file_create" | "drive_full_read" | "proactive";
+export type ProFeature = "second_account" | "tasks" | "sharepoint" | "file_create" | "drive_full_read" | "proactive" | "meeting_summaries";
 export const PRO_FEATURES: Record<ProFeature, { label: string; included: (e: Entitlements) => boolean }> = {
   second_account: { label: "חיבור של Google ושל Microsoft יחד", included: (e) => e.maxProviders > 1 },
   tasks: { label: "משימות ב-Google Tasks וב-Microsoft To Do", included: (e) => e.tasks },
@@ -116,6 +122,7 @@ export const PRO_FEATURES: Record<ProFeature, { label: string; included: (e: Ent
   file_create: { label: "שמירת מסמכים חדשים ב-Google Drive", included: (e) => e.fileCreate },
   drive_full_read: { label: "חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides)", included: (e) => e.driveFullRead },
   proactive: { label: "התראות יזומות מהמייל ומהיומן ואזהרות פישינג", included: (e) => e.proactive },
+  meeting_summaries: { label: "סיכומי פגישות Teams ו-Google Meet מהתמליל, עם מייל סיכום ומשימות", included: (e) => e.meetingSummaries },
 };
 
 /** The pro services a plan does not include (empty on pro). */
@@ -136,6 +143,20 @@ export interface PlanFeatureLine {
 }
 
 const agentsHe = (n: number) => (n === 1 ? "סוכן אחד" : `עד ${n} סוכנים`);
+
+/**
+ * Zoom's meeting summaries are not built: Zoom's cloud-recording transcripts need a Zoom OAuth app that passes Zoom's
+ * Marketplace review (and cloud recording, a paid Zoom plan, on the user's side). "בקרוב" in pro wherever the coming
+ * things are listed (proSoonTexts: the FAQ, the support chat, the model's plan facts; a row of the /pricing table) —
+ * not a line of the compact price card, whose "סיכומי פגישות Teams ו-Google Meet" already says what is included.
+ */
+export const ZOOM_SOON_LINE: PlanFeatureLine = { id: "meetings_zoom", text: "סיכומי פגישות Zoom", soon: true };
+
+/** What pro will add and does not have yet, in words: Zoom's summaries, then the "בקרוב" lines of pro's list. */
+export function proSoonTexts(): string[] {
+  const zoom = entitlements("pro").meetingSummaries && !entitlements("basic").meetingSummaries ? [ZOOM_SOON_LINE.text] : [];
+  return [...zoom, ...proLines().filter((l) => l.soon).map((l) => l.text)];
+}
 
 /** Basic's list: what one account gives. */
 function basicLines(): PlanFeatureLine[] {
@@ -162,7 +183,7 @@ function proLines(): PlanFeatureLine[] {
     adds("sharepoint") && { id: "sharepoint", text: "חיפוש ב-SharePoint, בספריות המסמכים של הארגון" },
     adds("fileCreate") && { id: "file_create", text: "שמירת מסמכים חדשים ב-Drive" },
     adds("builtinAgents") && { id: "agents", text: `שלושת הסוכנים המובנים, ו${agentsHe(p.customAgents)} משלך` },
-    adds("meetingSummaries") && { id: "meetings", text: "סיכומי פגישות", soon: COMING_SOON.includes("meetingSummaries") },
+    adds("meetingSummaries") && { id: "meetings", text: "סיכומי פגישות Teams ו-Google Meet", soon: COMING_SOON.includes("meetingSummaries") },
     adds("proactive") && { id: "proactive", text: "התראות יזומות ואזהרות פישינג" },
     adds("businessSystems") && { id: "business", text: "חיבור למערכות העסק, כמו monday.com", soon: COMING_SOON.includes("businessSystems") },
   ];
