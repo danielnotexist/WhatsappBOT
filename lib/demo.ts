@@ -22,7 +22,9 @@
  * (ANTHROPIC_API_KEY, OPENROUTER_API_KEY) are allowed: they only answer the requests we make, nothing reaches a person,
  * and without LIVE_AI=1 they are not used at all. With `LIVE_WA=1` WA_ACCESS_TOKEN is allowed too: WhatsApp is real
  * (Meta's test number, which only reaches the recipients registered in Meta); `LIVE_MS=1` allows MS_CLIENT_SECRET and
- * `LIVE_GOOGLE=1` allows GOOGLE_CLIENT_SECRET (real OAuth with the real tenant / GCP project). Everything else stays refused.
+ * `LIVE_GOOGLE=1` allows GOOGLE_CLIENT_SECRET (real OAuth with the real tenant / GCP project); `LIVE_SUPPORT_MAIL=1` allows
+ * RESEND_API_KEY for the support-ticket email only (sign-in codes and every other mail stay on the console).
+ * Everything else stays refused.
  *
  * Dependency-free on purpose: lib/env.ts and proxy.ts import it.
  */
@@ -67,6 +69,11 @@ export function liveMsFlag(source: EnvSource = process.env): boolean {
 /** The raw LIVE_GOOGLE switch: inside the demo, Google OAuth and its APIs are real (lib/env.ts `liveGoogleInDemo()`). */
 export function liveGoogleFlag(source: EnvSource = process.env): boolean {
   return flagOn(source.LIVE_GOOGLE);
+}
+
+/** The raw LIVE_SUPPORT_MAIL switch: inside the demo, website support tickets are emailed for real (Resend). */
+export function liveSupportMailFlag(source: EnvSource = process.env): boolean {
+  return flagOn(source.LIVE_SUPPORT_MAIL);
 }
 
 /** A Supabase project is configured (any of its server variables) — the demo then keeps its data there. */
@@ -116,6 +123,7 @@ export function demoProblems(source: EnvSource = process.env): { forbidden: stri
     ...(liveWaFlag(source) ? ["WA_ACCESS_TOKEN"] : []),
     ...(liveMsFlag(source) ? ["MS_CLIENT_SECRET"] : []),
     ...(liveGoogleFlag(source) ? ["GOOGLE_CLIENT_SECRET"] : []),
+    ...(liveSupportMailFlag(source) ? ["RESEND_API_KEY"] : []),
   ];
   const forbidden = DEMO_FORBIDDEN_KEYS.filter((key) => !allowed.includes(key) && Boolean(source[key]?.trim()));
   const missing = isBase64Key32(source.TOKEN_ENC_KEY) ? [] : ["TOKEN_ENC_KEY"];

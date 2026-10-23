@@ -18,7 +18,7 @@ import { LocalQueue } from "@/lib/queue/local";
 import { getSttProvider } from "@/lib/stt";
 import { MockStt } from "@/lib/stt/mock";
 import { FallbackStt } from "@/lib/stt/fallback";
-import { EnvError, aiMocked, googleMocked, liveAiInDemo, liveGoogleInDemo, liveMsInDemo, liveWaInDemo, msMocked, sttMocked, waMocked } from "@/lib/env";
+import { EnvError, aiMocked, googleMocked, liveSupportMailInDemo, liveAiInDemo, liveGoogleInDemo, liveMsInDemo, liveWaInDemo, msMocked, sttMocked, waMocked } from "@/lib/env";
 import { getWaSender } from "@/lib/wa";
 import { DEV_PUBLIC_NUMBER, publicWaNumber } from "@/lib/wa/public-number";
 import { WaClient } from "@/lib/wa/client";
@@ -195,6 +195,16 @@ describe("DEMO_MODE=1 forces every integration factory to its mock", () => {
     // the other provider's secret is still refused
     stubDemo({ LIVE_MS: "1", MS_CLIENT_SECRET: "ms-real", GOOGLE_CLIENT_SECRET: "g-real" });
     expect(() => getMsConfig()).toThrow(/GOOGLE_CLIENT_SECRET/);
+  });
+
+  it("LIVE_SUPPORT_MAIL=1 in the demo allows RESEND_API_KEY, while the mailer of every other mail stays on the console", () => {
+    stubDemo({ LIVE_SUPPORT_MAIL: "1", RESEND_API_KEY: "re-real" });
+    expect(liveSupportMailInDemo()).toBe(true);
+    expect(getMailer()).toBeInstanceOf(ConsoleMailer);
+    vi.unstubAllEnvs();
+    reset();
+    stubDemo({ RESEND_API_KEY: "re-real" });
+    expect(() => getMailer()).toThrow(/RESEND_API_KEY/);
   });
 
   it("without DEMO_MODE the same keys mean the real clients (the switch is the demo, not the keys)", () => {

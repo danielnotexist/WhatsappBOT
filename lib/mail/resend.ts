@@ -43,8 +43,8 @@ export class ResendMailer implements Mailer {
 
   static fromEnv(productName: string): ResendMailer {
     const env = requireEnv(["RESEND_API_KEY", "APP_URL"]);
-    const host = new URL(env.APP_URL).hostname;
-    return new ResendMailer({ apiKey: env.RESEND_API_KEY, from: `${productName} <no-reply@${host}>`, productName });
+    const address = process.env.MAIL_FROM?.trim() || `no-reply@${new URL(env.APP_URL).hostname}`;
+    return new ResendMailer({ apiKey: env.RESEND_API_KEY, from: `${productName} <${address}>`, productName });
   }
 
   async sendOtp(mail: OtpMail): Promise<{ id: string | null }> {

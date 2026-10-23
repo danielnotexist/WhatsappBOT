@@ -1,8 +1,9 @@
 import "server-only";
-import { BRAND } from "@/lib/brand";
+import { BRAND, PRODUCT_NAME } from "@/lib/brand";
 import type { SupportTicketRow } from "@/lib/db/types";
-import { EnvError, integrationsMocked, requireEnv } from "@/lib/env";
+import { EnvError, integrationsMocked, liveSupportMailInDemo, requireEnv } from "@/lib/env";
 import { getMailer } from "@/lib/mail";
+import { ResendMailer } from "@/lib/mail/resend";
 import type { SupportTicketMail } from "@/lib/mail/types";
 
 /**
@@ -49,7 +50,8 @@ export function ticketMail(ticket: SupportTicketRow, to: string): SupportTicketM
  */
 export async function notifySupport(ticket: SupportTicketRow): Promise<boolean> {
   try {
-    const mailer = getMailer();
+    // the demo with LIVE_SUPPORT_MAIL=1: this one email is real; every other mail stays on the console
+    const mailer = liveSupportMailInDemo() ? ResendMailer.fromEnv(PRODUCT_NAME) : getMailer();
     if (!mailer.sendSupportTicket) return false;
     await mailer.sendSupportTicket(ticketMail(ticket, supportInbox()));
     return true;

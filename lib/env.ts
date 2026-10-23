@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoHasSupabase, isDemo, liveGoogleFlag, liveMsFlag, liveWaFlag } from "@/lib/demo";
+import { demoHasSupabase, isDemo, liveGoogleFlag, liveMsFlag, liveSupportMailFlag, liveWaFlag } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -76,6 +76,8 @@ export const serverSchema = z.object({
    * תיבת התמיכה: לאן נשלחות פניות מצ'אט התמיכה באתר (lib/support/notify.ts). חובה כשהמייל אמיתי (מחוץ להדגמה ול-memory);
    * בהדגמה ובפיתוח ברירת המחדל support@<הדומיין>, והמייל ממילא נרשם לקונסול.
    */
+  /** The sender address of real mail (a domain verified in Resend). Default: no-reply@<APP_URL host>. */
+  MAIL_FROM: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.email({ message: "MAIL_FROM חייב להיות כתובת מייל בדומיין מאומת ב-Resend, למשל no-reply@example.co.il" }).optional()),
   SUPPORT_EMAIL: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.email({ message: "SUPPORT_EMAIL חייב להיות כתובת מייל, למשל support@example.co.il" }).optional()),
 
   // ---- AI / תמלול / תמונות ----
@@ -184,6 +186,11 @@ export function liveGoogleInDemo(source: Record<string, string | undefined> = pr
 /** Google (lib/google) uses its fixtures: in DATA_MODE=memory and in the demo, except the demo with LIVE_GOOGLE=1. */
 export function googleMocked(source: Record<string, string | undefined> = process.env): boolean {
   return integrationsMocked(source) && !liveGoogleInDemo(source);
+}
+
+/** מצב "מייל תמיכה חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_SUPPORT_MAIL=1` — only the support-ticket email is real. */
+export function liveSupportMailInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveSupportMailFlag(source) && isDemo(source);
 }
 
 /**

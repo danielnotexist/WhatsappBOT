@@ -638,3 +638,9 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - **הצהרת הנגישות** (`docs/legal/accessibility-statement-he.md`, מוצגת ב-`/accessibility` ומקושרת מהפוטר): נוסף סעיף "תפריט הנגישות באתר", מגבלות ידועות (וואטסאפ, מסכי Microsoft/Google, עמוד הסליקה, הגדרות שנשמרות בדפדפן בלבד), ופנייה ל-`support@[domain]` כמו בתנאי השימוש.
 - **בדיקות:** `components/brand/accessibility-widget.test.tsx` (פתיחה/סגירה, Esc, מיקוד, כל מתג ← מאפיין ושמירה, דרגות טקסט, איפוס, טעינה מהשמירה, אחסון חסום, הסקריפט המוטמע זהה ל-`applySettings`, `useReducedMotion`), `app/(legal)/accessibility/page.test.tsx`, ו-e2e `e2e/accessibility.spec.ts` (מיקום, מקלדת, שמירה אחרי רענון בלי שגיאת hydration, `/start` בטלפון, קישור להצהרה).
 - **דרוש מדניאל:** שם החברה, ופרטי רכז/ת הנגישות (שם, טלפון, מייל) בהצהרה; בדיקה ידנית עם קורא מסך.
+
+## פניות התמיכה במייל אמיתי + פרטי הצהרת הנגישות (23.10)
+- `LIVE_SUPPORT_MAIL=1` (`lib/demo.ts`, `lib/env.ts` `liveSupportMailInDemo()`): בהדגמה רק המייל של פנייה מצ'אט התמיכה נשלח באמת דרך Resend (`lib/support/notify.ts`); קודי כניסה וכל שאר המיילים נשארים בקונסול. `MAIL_FROM` חדש (כתובת שולח בדומיין מאומת ב-Resend; ברירת מחדל no-reply@<APP_URL>).
+- ב-Vercel: `SUPPORT_EMAIL=danielnotexist@gmail.com` (בחירת דניאל), `MAIL_FROM` בדומיין secureops.co.il המאומת ב-Resend.
+- הצהרת הנגישות: שם החברה עלזה, רכז הנגישות דניאל כהן, 050-2164062, danielnotexist@gmail.com (מדניאל, 23.10). נשאר: מספר ח.פ.
+- שדרוג מבסיסי לפרו: כבר קיים - משלמים רק את ההפרש היחסי עד סוף התקופה (`quoteUpgrade` ב-`lib/billing/money.ts`), ומהחידוש הבא 299 ₪. הבקשה בשפה חופשית בוואטסאפ מטופלת בתיקוני איכות הבוט.
