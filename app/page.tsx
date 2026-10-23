@@ -7,7 +7,6 @@ import { FinalCta } from "@/components/brand/landing/final-cta";
 import { LandingFooter } from "@/components/brand/landing/footer";
 import { AccountCta, LandingHeader } from "@/components/brand/landing/header";
 import { Hero, SignInCta } from "@/components/brand/landing/hero";
-import { Meet } from "@/components/brand/landing/meet";
 import { Pricing } from "@/components/brand/landing/pricing";
 import { Professions } from "@/components/brand/landing/professions";
 import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
@@ -36,7 +35,6 @@ export default function HomePage() {
       <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
       <main id="main" className="flex-1">
         <Hero signIn={<BySession signedIn={null} signedOut={<SignInCta />} />} />
-        <Meet />
         <DaySection />
         <Professions />
         <Trust />
