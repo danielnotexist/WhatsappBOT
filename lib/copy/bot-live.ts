@@ -1,3 +1,5 @@
+import { BRAND } from "@/lib/brand";
+
 /**
  * The spend caps of the live AI (lib/ai/budget.ts) and the website chat (/demo/chat) — kept apart from lib/copy/bot.ts.
  * Ids are documented in docs/copy/bot-copy-live.md (a test checks it). Calm, neutral phrasing, short hyphens only:
@@ -11,7 +13,7 @@ export const liveCopy = {
   /** this user's daily message cap in the demo (DEMO_USER_DAILY_MESSAGES) */
   "budget.user_cap_demo": (limit: number) => `הגענו ל-${limit} הודעות היום, המכסה של גרסת הבדיקה. אפשר להמשיך מחר.`,
   /** sent once when no reply went out within a few seconds of a WhatsApp message (lib/bot/process-inbound.ts) */
-  "progress.wait": () => "רק שנייה…",
+  "progress.wait": () => `${BRAND.name} על זה…`,
 } as const;
 
 /** The reply for a blocked call. */

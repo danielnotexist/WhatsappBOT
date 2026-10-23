@@ -12,7 +12,7 @@ async function readyUser(h: ReturnType<typeof makeHarness>) {
 }
 
 describe("processInbound", () => {
-  it("sends one unstored \"רק שנייה…\" when no reply went out in time, and none when the answer is fast", async () => {
+  it("sends one unstored \"עלזה על זה…\" when no reply went out in time, and none when the answer is fast", async () => {
     vi.useFakeTimers();
     try {
       const h = makeHarness();
@@ -27,20 +27,20 @@ describe("processInbound", () => {
       });
       const run = processInbound(h.ctx, h.inbound("מה יש לי מחר?"));
       await vi.advanceTimersByTimeAsync(PROGRESS_NOTE_AFTER_MS + 10);
-      expect(h.wa.texts).toContain("רק שנייה…");
+      expect(h.wa.texts).toContain("עלזה על זה…");
       await vi.advanceTimersByTimeAsync(0);
       expect(h.wa.sent.at(-1)!.kind).toBe("read"); // the typing dots again after the note
       finish();
       await run;
-      expect(h.wa.texts.filter((t) => t === "רק שנייה…")).toHaveLength(1);
-      expect((await h.db.recentMessages(user.id, 10)).map((r) => r.text)).not.toContain("רק שנייה…");
+      expect(h.wa.texts.filter((t) => t === "עלזה על זה…")).toHaveLength(1);
+      expect((await h.db.recentMessages(user.id, 10)).map((r) => r.text)).not.toContain("עלזה על זה…");
       expect(h.wa.sent.at(-1)!.emoji).toBe("✅");
 
       const fast = makeHarness();
       await readyUser(fast);
       await processInbound(fast.ctx, fast.inbound("תודה"));
       await vi.advanceTimersByTimeAsync(PROGRESS_NOTE_AFTER_MS + 10);
-      expect(fast.wa.texts).not.toContain("רק שנייה…");
+      expect(fast.wa.texts).not.toContain("עלזה על זה…");
     } finally {
       vi.useRealTimers();
     }
