@@ -146,3 +146,13 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
 **בדיקה אחרי deploy:** `/api/health` → `"liveAi": true`. `/account` → "לבדוק את עלזה בצ'אט" → "מה יש לי מחר?" (יומן ה-fixture), "תנסחי מייל ל…" ואישור בכפתור, "תזכירי לי מחר ב-9", והקלטה קצרה בעברית. העלות בפועל: `select * from public.ai_spend order by day desc;`.
 
 **אבטחת המפתחות.** רק כמשתני Sensitive ב-Vercel; מקומית רק בקובץ עם הרשאות 600 מחוץ לריפו. אף פעם לא בריפו, בלוגים או בצ'אט. מפתח שנשלח פעם בצ'אט — להחליף (Anthropic: console → API keys → Revoke; OpenRouter: Keys → Delete) ולהכניס את החדש ישירות ב-Vercel.
+
+## 10. צ'אט התמיכה באתר ("שאלות ותמיכה")
+
+> `components/brand/support-chat.tsx`, `app/api/support/chat`, `app/api/support/ticket`, `lib/support/`, מיגרציה `0011_support_tickets.sql`. הטקסטים: `docs/copy/support-chat.md`.
+
+- **איפה:** דף הנחיתה, המסמכים המשפטיים והאזור האישי. לא בהרשמה, בכניסה וב-`/demo/chat`. לא צריך להתחבר.
+- **תשובות:** בלי מודל (DATA_MODE=memory, הדגמה בלי `LIVE_AI`) - תשובה קבועה ממאגר הידע (`lib/support/knowledge.ts`). עם מודל (production, או הדגמה עם `LIVE_AI=1`) - Haiku בלבד, עד 200 טוקנים, רק מתוך מאגר הידע, ו**רק תחת התקרה היומית**: `AI_DAILY_BUDGET_USD` (אותה תקרה, טבלת `ai_spend`). ב-production בלי `AI_DAILY_BUDGET_USD` הצ'אט לא קורא למודל בכלל (דף אנונימי לא קורא ל-API בתשלום בלי תקרה) ועונה ממאגר הידע. גם כשהתקרה נגמרה או בשגיאה של הספק.
+- **הגבלות:** 10 שאלות לדקה ו-60 ליום לכל IP, עד 500 תווים, עד 6 הודעות קודמות; 5 פניות לשעה ו-20 ליום לכל IP; Origin של אתר אחר נדחה; שדה מלכודת (honeypot) לבוטים. תוכן השיחה והפניות לא נרשם בלוגים.
+- **פניות:** נשמרות ב-`support_tickets` (RLS בלי policy - שרת בלבד; `user_id` רק למשתמש מחובר, null אחרי מחיקת החשבון) ונשלחות במייל ל-`SUPPORT_EMAIL` עם Reply-To של הפונה. בלי `SUPPORT_EMAIL` בפריסה אמיתית הפנייה נשמרת, ובלוג נרשמת שגיאה בעברית עם שם המשתנה.
+- **לפני שמדליקים, ב-Supabase:** להריץ את `supabase/migrations/0011_support_tickets.sql`. בדיקה מקומית: `supabase/tests/run-local.sh` (כולל `support_tickets.test.sql`).

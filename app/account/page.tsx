@@ -7,6 +7,7 @@ import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot } from "@/components/brand/mascot";
 import { ProviderLogo, WhatsappGlyph } from "@/components/brand/provider-logo";
+import { SupportChat } from "@/components/brand/support-chat";
 import { UsageMeter } from "@/components/brand/usage-meter";
 import { Wordmark } from "@/components/brand/wordmark";
 import { DELETE_CONFIRM_WORD } from "@/lib/account/service";
@@ -71,6 +72,7 @@ export default function AccountPage(props: PageProps<"/account">) {
           <Account searchParams={props.searchParams} />
         </Suspense>
       </main>
+      <SupportChat />
     </div>
   );
 }

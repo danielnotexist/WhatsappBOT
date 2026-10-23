@@ -31,6 +31,7 @@
 | 8 | HYP: שני מסופים (בדיקה + אמיתי), טוקנים, חיוב טוקן בלי CVV, J2, ת״ז לא חובה, HYP Invoice; הגדרות פורטל; `HYP_*` | `docs/hyp-setup.md` §1–3 | תשלום ראשון, חיוב חודשי, שדרוג/חידוש בלחיצה וקבלות בשיחה |
 | 9 | AI חי בהדגמה: מיגרציה 0009 ב-Supabase, ואז ב-Vercel `LIVE_AI=1` + `ANTHROPIC_API_KEY` + `OPENROUTER_API_KEY` כמשתני **Sensitive** (התקרות: `AI_DAILY_BUDGET_USD=3`, `DEMO_USER_DAILY_MESSAGES=60` הן ברירת המחדל) | `docs/deploy.md` §9 | הצ'אט באתר (`/demo/chat`) עונה עם המודל והתמלול האמיתיים |
 | 10 | **להחליף את מפתח OpenRouter** (נשלח בצ'אט) בסוף הבדיקות, ולהכניס את החדש ישירות ב-Vercel | openrouter.ai → Keys | המפתח נחשף בשיחה |
+| 11 | צ'אט התמיכה באתר: מיגרציה `0011_support_tickets.sql` ב-Supabase, `SUPPORT_EMAIL` ב-Vercel, ולאשר את הנוסח "נחזור אליך במייל תוך יום עסקים" ואת שמירת הפניות אחרי מחיקת חשבון (לבדיקת עו"ד) | `docs/deploy.md` §10, `docs/copy/support-chat.md` | בלי המיגרציה פנייה לא נשמרת; בלי `SUPPORT_EMAIL` היא לא נשלחת במייל |
 
 ## יומן
 
@@ -607,7 +608,7 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - `lib/demo.ts`: `liveMsFlag()` / `liveGoogleFlag()`; עם הדגל ההדגמה מתירה את `MS_CLIENT_SECRET` / `GOOGLE_CLIENT_SECRET` בהתאמה (ורק אותם).
 - `lib/env.ts`: `liveMsInDemo()`, `msMocked()`, `liveGoogleInDemo()`, `googleMocked()`. `lib/ms/index.ts` ו-`lib/google/index.ts` שואלים אותם: עם הדגל - OAuth אמיתי מול Entra / GCP, Graph ו-Google APIs אמיתיים, ובלי fixture. `/api/auth/{microsoft,google}/start` מדלגים על `demoConnect` כשהספק חי.
 - כתובות החזרה אומתו מול שני הספקים (`https://alze.vercel.app/api/auth/microsoft/callback`, `.../google/callback`). ה-webhook של Graph (`/api/graph/notify`) פתוח אחרי המעבר ל-Standard Protection.
-- חיבורי ההדגמה הישנים (fixture) נמחקו מ-Supabase, כדי שהחיבור האמיתי יחליף אותם.
+- חיבורי ההדגמה הישנים (fixture) לא נמחקו מהמסד (המחיקה נחסמה); דניאל ניתק אותם מהאזור האישי, והחיבור האמיתי מחליף אותם.
 - בדיקות: `lib/demo-factories.test.ts` - כל דגל פותח רק את הספק שלו, והסוד של הספק השני עדיין נדחה.
 
 ## בדיקה חיה של דניאל (23.10 לילה) - חשבון מיקרוסופט הלא נכון
@@ -618,3 +619,12 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 ## מחקר קונקטורים לשוק הישראלי (23.10)
 - `docs/research/connectors-israel.md`: Tier 1 - Microsoft To Do / Planner, קישורי Teams ו-Meet, Google Tasks ו-Contacts, מורנינג (חשבונית ירוקה), iCount, Hebcal / שער יציג / Waze, monday.com. Tier 2 ו-3 עם נימוקים ומקורות.
 - חשוב: ב-tenant עם הגדרות ברירת מחדל רוב ההרשאות של Mail / Calendars / Files דורשות אישור מנהל - כדאי לבקש את כל ההרשאות של Tier 1 בבקשת אישור המנהל הראשונה.
+
+## צ'אט התמיכה באתר ("שאלות ותמיכה")
+> בקשת דניאל: צ'אט שנפתח באתר, עונה על שאלות על השירות, ומאפשר לפתוח פנייה - בעיצוב שלנו. החלטת דניאל: Haiku בלבד ותשובות קצרות מאוד. (PLAN §0 אומר "אין צ'אט באתר" - הכוונה הייתה לעבודה עם העוזרת; זה צ'אט תמיכה על השירות בלבד.)
+- **הווידג'ט** (`components/brand/support-chat.tsx`): כפתור עגול עם הדוכיפת בפינה התחתונה בצד ימין (`start-*`, כפתור הנגישות בצד שמאל), `aria-label="שאלות ותמיכה"`. חלון קטן ב"לילה ירוק": פתיחה מעלזה, ארבעה נושאים ("מה עלזה עושה?", "כמה זה עולה?", "איך מתחברים?", "האם המידע שלי מאובטח?"), שדה שאלה, נקודות "מקלידה", ו"פתיחת פנייה". הבועות (`Bubble`, `TypingDots`) - כרטיס הלילה לעלזה ודבש לשואל. Esc סוגר והפוקוס חוזר לכפתור; פתיחה מעבירה פוקוס לשדה; `role="log"` מכריז על תשובות חדשות; בטלפון - גיליון תחתון ברוחב מלא. מוצג בדף הנחיתה, במסמכים המשפטיים ובאזור האישי בלבד.
+- **תשובות** (`app/api/support/chat`, `lib/support/answer.ts`): מאגר ידע עברי (`lib/support/knowledge.ts`) מ-PLAN, מ-`lib/billing/plans.ts` (מחירים ומכסות מחושבים מהקוד), מהטקסטים של דף הנחיתה ומהטיוטות המשפטיות - כולל "פרנקפורט, האיחוד האירופי" ולא "שרתים בישראל". עם מודל: Haiku (שכבת ה-router), `max_tokens` 200, 1-3 משפטים, רק מתוך המאגר, סירוב לשאלות מחוץ לתחום, וסימון `[[פנייה]]` כשצריך פנייה. רק תחת התקרה היומית: `SpendGuard.anonymousAi` (`lib/ai/budget.ts`) שומר מקום ב-`ai_spend` ומתקן לעלות בפועל, בלי מכסה למשתמש (אין חשבון). בלי מודל, בלי תקרה מוגדרת, תקרה מלאה, שגיאה או תשובה חתוכה - התאמת מילות מפתח (כולל תחיליות ואותיות סופיות), או "לא בטוחה שהבנתי - אפשר לבחור נושא או לפתוח פנייה" עם הנושאים.
+- **הגבלות:** 10 לדקה ו-60 ליום ל-IP, 500 תווים, עד 6 הודעות קודמות (zod), Origin (`lib/same-origin.ts`, משותף עם `/api/demo/chat`), בלי התחברות, ובלי רישום תוכן השיחה.
+- **פניות** (`app/api/support/ticket`): שם, אימייל (ממולא מראש למשתמש מחובר, `GET`), נושא (לא חובה), תיאור, ובחירה לצרף את השיחה (עד 20 הודעות). zod עם שגיאה בעברית לכל שדה, honeypot, 5 לשעה ו-20 ליום ל-IP. נשמר בטבלה חדשה `support_tickets` (מיגרציה `0011_support_tickets.sql`, RLS בלי policy, `user_id` → null במחיקת חשבון) דרך `Db.createSupportTicket` (MemoryDb + SupabaseDb), ונשלח במייל ל-`SUPPORT_EMAIL` (`Mailer.sendSupportTicket`, Resend עם Reply-To; בהדגמה לקונסול, בלי התוכן). מייל שנכשל לא מכשיל את הפנייה. אישור: "הפנייה התקבלה. נחזור אליך במייל תוך יום עסקים."
+- **טקסטים:** `docs/copy/support-chat.md`. **פריסה:** `docs/deploy.md` §10, `.env.example` (`SUPPORT_EMAIL`).
+- **בדיקות:** `lib/support/knowledge.test.ts` (נושאים, מחירים מהקוד, בלי "בישראל", קול האתר, התאמות), `app/api/support/chat/support-chat-route.test.ts` (מאגר, Origin, 10 לדקה / 60 ליום, ולידציה, Haiku + 200 + הקשר, סימון פנייה, תקרה → מאגר בלי קריאה, שגיאת ספק / חיתוך → מאגר, בלי תקרה ב-production → בלי מודל), `app/api/support/ticket/support-ticket-route.test.ts` (שמירה, מייל, משתמש מחובר ומילוי מראש, ולידציה, honeypot, Origin, הגבלה, מייל שנכשל, `SUPPORT_EMAIL`), `components/brand/support-chat.test.tsx` (פתיחה, נושאים, שליחה, Esc ופוקוס, טופס הפנייה), `lib/ai/budget.test.ts` (`anonymousAi`), SQL `supabase/tests/support_tickets.test.sql`.

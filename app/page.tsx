@@ -9,6 +9,7 @@ import { Hero, SignInCta } from "@/components/brand/landing/hero";
 import { Pricing } from "@/components/brand/landing/pricing";
 import { Professions } from "@/components/brand/landing/professions";
 import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
+import { SupportChat } from "@/components/brand/support-chat";
 import { Trust } from "@/components/brand/landing/trust";
 import { BRAND } from "@/lib/brand";
 import "@/components/brand/landing/landing.css";
@@ -24,6 +25,7 @@ export const metadata: Metadata = {
  * by profession → trust → pricing → FAQ → end card → footer. Static (prerendered); the client islands are the chat
  * demo, the day scene's switch (pinned version lazy-loaded on large screens) and Lenis. The only request-time parts
  * are two small holes that read the session cookie: "לאזור האישי" in the header and the hero's "כניסה" (BySession).
+ * The support chat ("שאלות ותמיכה") floats at the bottom of the inline-start side.
  */
 export default function HomePage() {
   return (
@@ -40,6 +42,7 @@ export default function HomePage() {
         <FinalCta />
       </main>
       <LandingFooter />
+      <SupportChat />
     </div>
   );
 }

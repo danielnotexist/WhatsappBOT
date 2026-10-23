@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { SupportChat } from "@/components/brand/support-chat";
 import { Wordmark } from "@/components/brand/wordmark";
 
 // Drafts until a lawyer signs off: keep them out of search engines (round plan §3).
@@ -42,6 +43,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
           {children}
         </article>
       </main>
+      <SupportChat />
     </div>
   );
 }

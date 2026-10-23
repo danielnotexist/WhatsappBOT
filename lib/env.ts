@@ -72,6 +72,11 @@ export const serverSchema = z.object({
   // ---- תפעול ----
   /** אופציונלי: כתובת מייל להתראות תפעול (למשל תקרת המשתמשים של Google ב-80 וב-95). ריק = רק לוג + דגל ב-DB. */
   OPERATOR_EMAIL: z.preprocess((v) => (v === "" ? undefined : v), z.email().optional()),
+  /**
+   * תיבת התמיכה: לאן נשלחות פניות מצ'אט התמיכה באתר (lib/support/notify.ts). חובה כשהמייל אמיתי (מחוץ להדגמה ול-memory);
+   * בהדגמה ובפיתוח ברירת המחדל support@<הדומיין>, והמייל ממילא נרשם לקונסול.
+   */
+  SUPPORT_EMAIL: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.email({ message: "SUPPORT_EMAIL חייב להיות כתובת מייל, למשל support@example.co.il" }).optional()),
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,

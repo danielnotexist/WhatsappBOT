@@ -36,6 +36,8 @@ import type {
   PendingActionStatus,
   ReminderRow,
   ReminderStatus,
+  NewSupportTicket,
+  SupportTicketRow,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -69,6 +71,7 @@ export class MemoryDb implements Db {
   reminders: ReminderRow[] = [];
   agents: AgentRow[] = [];
   billingApprovals: BillingApprovalRow[] = [];
+  supportTickets: SupportTicketRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -165,6 +168,7 @@ export class MemoryDb implements Db {
     this.agents = this.agents.filter((a) => a.user_id !== id);
     this.billingApprovals = this.billingApprovals.filter((a) => a.user_id !== id);
     for (const key of [...this.aiSpendUsers.keys()]) if (key.endsWith(`|${id}`)) this.aiSpendUsers.delete(key); // the day totals stay
+    for (const t of this.supportTickets) if (t.user_id === id) t.user_id = null; // SQL: on delete set null
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -664,6 +668,14 @@ export class MemoryDb implements Db {
 
   async addAudit(entry: AuditEntry): Promise<void> {
     this.audit.push({ ...entry, created_at: iso() });
+  }
+
+  // ---- support_tickets (migration 0011) ----
+  async createSupportTicket(row: NewSupportTicket): Promise<SupportTicketRow> {
+    if (row.user_id && !this.users.has(row.user_id)) throw new Error(`support_tickets: unknown user ${row.user_id}`); // the SQL foreign key
+    const ticket: SupportTicketRow = { id: randomUUID(), created_at: iso(this.now()), status: "open", ...row };
+    this.supportTickets.push(ticket);
+    return ticket;
   }
 
   // ---- agents: mirrors the 0006 constraints and the enforce_agent_rules trigger ----

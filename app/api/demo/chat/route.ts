@@ -10,6 +10,7 @@ import { DEMO_CHAT_AUDIO_TYPES, DEMO_CHAT_LIMITS, DEMO_CHAT_RATE, type ChatError
 import { isDemo } from "@/lib/demo";
 import { EnvError, liveAiInDemo } from "@/lib/env";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
+import { sameOrigin } from "@/lib/same-origin";
 import { oggOpusDurationMs } from "@/lib/stt/ogg";
 import { webmDurationMs } from "@/lib/stt/webm";
 
@@ -53,18 +54,6 @@ async function demoUser(): Promise<UserRow | Response> {
   if (!session) return fail("unauthorized");
   const user = await getDb().getUser(session.userId);
   return user ?? fail("unauthorized");
-}
-
-/** A browser's POST must come from this site (the session cookie is SameSite=Lax; this is the second lock). */
-function sameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    const host = new URL(origin).host;
-    return host === new URL(request.url).host || host === request.headers.get("host") || (Boolean(process.env.APP_URL) && host === new URL(process.env.APP_URL!).host);
-  } catch {
-    return false;
-  }
 }
 
 /**
