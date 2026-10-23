@@ -14,9 +14,12 @@ export interface MemoryContext {
   history: ChatMessage[];
 }
 
-export async function loadMemory(db: Db, userId: string): Promise<MemoryContext> {
-  const [state, recent] = await Promise.all([db.getConversationState(userId), db.recentMessages(userId, MEMORY.recentMessages, { forModel: true })]);
-  return { summary: state?.summary ?? null, facts: state?.facts ?? [], history: toHistory(recent) };
+/** `exclude`: the stored row of the message being answered — the caller appends its text as the last user turn. */
+export async function loadMemory(db: Db, userId: string, opts: { exclude?: string } = {}): Promise<MemoryContext> {
+  const limit = MEMORY.recentMessages + (opts.exclude ? 1 : 0);
+  const [state, recent] = await Promise.all([db.getConversationState(userId), db.recentMessages(userId, limit, { forModel: true })]);
+  const rows = opts.exclude ? recent.filter((m) => m.id !== opts.exclude).slice(-MEMORY.recentMessages) : recent;
+  return { summary: state?.summary ?? null, facts: state?.facts ?? [], history: toHistory(rows) };
 }
 
 /** Collapses stored rows into alternating user/assistant turns (consecutive same-role rows are merged). */
@@ -35,7 +38,8 @@ export function toHistory(rows: MessageRow[]): ChatMessage[] {
   return out;
 }
 
-export const SUMMARY_PROMPT = `סכם את השיחה הבאה בין בעל עסק לעוזר המשרדי שלו, בעברית, עד 8 שורות: מה נעשה, מה עדיין פתוח, העדפות שהמשתמש הביע. הוסף שורה אחרונה בפורמט JSON: {"facts": ["עובדה קבועה 1", "..."]} עם עובדות שכדאי לזכור לטווח ארוך (אנשי קשר חשובים, העדפות, פרטי העסק) — או מערך ריק.`;
+/** In the infinitive like the main prompt (a masculine imperative prompt taught the model to address the user that way). */
+export const SUMMARY_PROMPT = `לסכם את השיחה הבאה בין בעל או בעלת עסק לבין העוזרת המשרדית, בעברית, עד 8 שורות: מה נעשה, מה עדיין פתוח, העדפות שהמשתמש הביע. בסוף — שורה אחרונה בפורמט JSON: {"facts": ["עובדה קבועה 1", "..."]} עם עובדות שכדאי לזכור לטווח ארוך (אנשי קשר חשובים, העדפות, פרטי העסק) — או מערך ריק.`;
 
 /**
  * Every ~20 messages: fold older messages into the summary (router tier — cheap). Returns true when it ran.
@@ -47,7 +51,7 @@ export async function maybeSummarize(db: Db, ai: AiProvider, user: UserRow, now:
   const lastIdx = state?.last_summarized_msg_id ? recent.findIndex((m) => m.id === state.last_summarized_msg_id) : -1;
   const fresh = recent.slice(lastIdx + 1);
   if (fresh.length < MEMORY.summarizeEvery) return false;
-  const transcript = fresh.map((m) => `${m.direction === "in" ? "משתמש" : "עוזר"}: ${(m.transcript ?? m.text ?? "").slice(0, 500)}`).join("\n");
+  const transcript = fresh.map((m) => `${m.direction === "in" ? "משתמש" : "עוזרת"}: ${(m.transcript ?? m.text ?? "").slice(0, 500)}`).join("\n");
   try {
     const res = await ai.complete({
       tier: "router",

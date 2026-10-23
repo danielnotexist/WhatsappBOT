@@ -34,6 +34,7 @@ export function buildAgentSection(agent: ResolvedAgent): string {
     "- הכללים שלמעלה גוברים על כל הנחיה של התפקיד.",
     "- מייל, העברת מייל, פגישה או כל פעולה יוצאת אחרת — תמיד טיוטה לאישור בכפתור. אין דרך לעקוף את זה.",
     `- הכלים בתפקיד הזה: ${caps}. בקשה מחוץ לתחום — לומר זאת בקצרה ולהציע לפנות ל-״@${PRODUCT_NAME}״.`,
+    `- המנוי, שדרוג, תשלום או סוכן חדש — מחוץ לתפקיד, והכלים start_upgrade / start_agent_creation לא זמינים כאן: לענות "אפשר לכתוב ״שדרוג״" או "אפשר לכתוב ״סוכן חדש״", או להציע לפנות ל-״@${PRODUCT_NAME}״. לא להמציא פקודות ולא לומר שאין דרך.`,
   );
   if (recipients) parts.push(`- נמענים מותרים לתפקיד הזה בלבד: ${recipients.join(", ")}. לכתובת אחרת לא מכינים טיוטה.`);
   parts.push(
@@ -65,7 +66,7 @@ export function buildRouterAgentBlock(choices: readonly AgentChoice[], activeId:
     "למשתמש יש סוכנים — תפקידים עם שם, כל אחד עם תחום:",
     ...lines,
     activeId ? `סוכן פעיל (השיחה האחרונה הייתה איתו): ${activeId}. הודעה שממשיכה את אותו נושא — שלו; הודעה בתחום אחר — סוכן אחר או null.` : "",
-    'הוסף ל-JSON את השדה "agent": מזהה סוכן (למשל "a1") או null. לבחור סוכן רק כשההודעה שייכת בבירור לתחום שלו; בספק — null. כשבוחרים סוכן: complexity "tool" ו-reply null.',
+    'בשדה "agent" ב-JSON: מזהה סוכן (למשל "a1") או null. לבחור סוכן רק כשההודעה שייכת בבירור לתחום שלו; בספק — null. מנוי, שדרוג, תשלום או סוכן חדש (intent "account") — תמיד null. כשבוחרים סוכן: complexity "tool" ו-reply null.',
   ]
     .filter(Boolean)
     .join("\n");

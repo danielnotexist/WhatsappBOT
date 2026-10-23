@@ -1,7 +1,34 @@
 import { describe, expect, it } from "vitest";
 import type { UserRow } from "@/lib/db/types";
-import { agentDraftAwaitsText } from "./commands";
+import { BRAND } from "@/lib/brand";
+import { agentDraftAwaitsText, parseAgentCommand } from "./commands";
 import { AGENT_DRAFT_TTL_MS } from "./policy";
+
+describe("parseAgentCommand — natural requests for a new agent start the create flow (Daniel's live test, 23.10.2026)", () => {
+  it("starts the flow for the ways people actually ask", () => {
+    for (const t of [
+      "אתה יכול ליצור לי סוכן",
+      "את יכולה ליצור לי סוכן?",
+      "תיצרי לי סוכן",
+      "תיצור לי סוכן חדש",
+      "אפשר ליצור סוכן?",
+      "איך יוצרים סוכן?",
+      "אני רוצה ליצור סוכן",
+      "רוצה סוכן חדש",
+      "להוסיף עוד סוכן",
+      "תבני לי סוכן משלי",
+      `${BRAND.name}, תיצרי לי סוכן`,
+      "סוכן חדש",
+      "ליצור סוכן",
+    ]) {
+      expect(parseAgentCommand(t), t).toEqual({ kind: "new", template: null });
+    }
+  });
+
+  it("leaves other sentences with the word to the assistant", () => {
+    for (const t of ["תזכירי לי לדבר עם סוכן הביטוח", "סוכן הביטוח התקשר", "מה זה סוכן?", "תיצרי לי טיוטה למייל"]) expect(parseAgentCommand(t), t).toBeNull();
+  });
+});
 
 const now = new Date("2026-10-22T10:00:00Z");
 const fresh = new Date(now.getTime() - 60_000).toISOString();

@@ -25,9 +25,10 @@ export const CAPABILITIES: Record<Capability, { label: string; kind: CapabilityK
 
 /**
  * Tools only the main assistant gets. `remember_fact` writes to the shared memory — an agent's instructions must not
- * be able to plant facts that later steer עלזה (invariant I6). Agents still read the memory.
+ * be able to plant facts that later steer עלזה (invariant I6). Agents still read the memory. The account tools
+ * (upgrade, a new agent) are about the account, not a role's work.
  */
-export const MAIN_ONLY_TOOLS: readonly string[] = ["remember_fact"];
+export const MAIN_ONLY_TOOLS: readonly string[] = ["remember_fact", "start_upgrade", "start_agent_creation"];
 
 const TOOL_TO_CAPABILITY = new Map<string, Capability>(CAPABILITY_IDS.flatMap((c) => CAPABILITIES[c].tools.map((t) => [t, c] as const)));
 

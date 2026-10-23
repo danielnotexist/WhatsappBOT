@@ -1,4 +1,5 @@
-import { agentDraftAwaitsText, handleAgentMessage, updateStickyAfterTurn } from "@/lib/agents/commands";
+import { agentDraftAwaitsText, handleAgentMessage, startAgentCreation, updateStickyAfterTurn } from "@/lib/agents/commands";
+import { accountContextOf } from "@/lib/ai/account-context";
 import { BudgetExceededError, type SpendBlock, type SpendTurn } from "@/lib/ai/budget";
 import { maybeSummarize } from "@/lib/ai/memory";
 import { runAssistant } from "@/lib/ai/orchestrator";
@@ -11,20 +12,24 @@ import { budgetReply, liveCopy } from "@/lib/copy/bot-live";
 import type { MessageRow, MessageType, UserRow } from "@/lib/db/types";
 import { handleReminderButton } from "@/lib/reminders/service";
 import type { InboundMessage } from "@/lib/wa/types";
-import { basicLimitReached, handleBillingPress, handleBillingText, pausedAccount } from "./billing";
+import { basicLimitReached, handleBillingPress, handleBillingText, pausedAccount, upgradeOffer } from "./billing";
 import { connectLinkFor, type BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
-import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
+import { afterFirstTask, awaitingAnswer, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
 import { handleLoginKeyword } from "./login-link";
 import { transcribeVoiceNote } from "./voice";
 import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
+import { rtlLines } from "@/lib/wa/rtl";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
 
 const MEDIA_HE: Record<string, string> = { other: "סוג ההודעה הזה", audio: "הקלטות", image: "תמונות", document: "קבצים" };
+
+/** WhatsApp's limit for the body of a reply-buttons message; a longer reply goes out as plain text. */
+const MAX_BUTTON_BODY = 1024;
 
 /**
  * The conversation pipeline for one inbound message (PLAN §2):
@@ -159,10 +164,11 @@ async function afterStored(
 
   // 3a. billing commands ("קבלה", "שדרוג", "ביטול מנוי", "עדכון כרטיס"…) — not counted, work even while paused.
   //     Not while the agent flow waits for typed text: "חשבוניות" there is an agent's name, not "send my receipts".
-  if (!agentDraftAwaitsText(user, ctx.now()) && (await handleBillingText(ctx, user, msg))) return { handled: true, note: "billing command" };
+  const draftAwaitsText = agentDraftAwaitsText(user, ctx.now());
+  if (!draftAwaitsText && (await handleBillingText(ctx, user, msg))) return { handled: true, note: "billing command" };
 
-  // 3b. onboarding questions
-  if (onboardingOf(user) && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };
+  // 3b. onboarding questions (not while the agent flow waits for a typed name: that text belongs to the flow)
+  if (onboardingOf(user) && !draftAwaitsText && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };
 
   // 4. media we cannot process (voice notes were transcribed in 1b)
   if (msg.type !== "text" && !(isButton && msg.text)) {
@@ -222,17 +228,22 @@ async function afterStored(
     const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
     const link = connectLinkFor(ctx, user.id, connectProvider);
     await say((expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link)) + (await connectHeadsUpSuffix(ctx.db, connections, connectProvider)));
+    // a link while an onboarding question is open: the question again, so "חיברתי" afterwards is not taken as the answer
+    if (awaitingAnswer(freshUser)) await afterFirstTask(ctx, freshUser, to);
     return { handled: true, note: "connect link" };
   }
   const reconnect = reconnectProviderFor(ask, connections);
   if (reconnect) {
     await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)) + (await connectHeadsUpSuffix(ctx.db, connections, reconnect)));
+    if (awaitingAnswer(freshUser)) await afterFirstTask(ctx, freshUser, to);
     return { handled: true, note: "connection expired" };
   }
 
   // 7. assistant or agent (Graph / Google tools when a connection is active; reminder tools always). An agent's reply
   //    opens with its name (§5.5) and the agent stays sticky for 10 minutes (§5.3).
   let reply: string;
+  let ranFlow = false;
+  let morningTimeSet = false;
   try {
     const out = await runAssistant({
       db: ctx.db,
@@ -246,13 +257,33 @@ async function afterStored(
       agentVia: routing.via,
       agentChoices: routing.choices,
       activeAgentKey: routing.activeKey,
+      account: accountContextOf(sub, remaining, ctx.now()),
+      inboundId: stored.id,
     });
     const header = out.agent ? `${acopy["agent.reply_header"](out.agent.name)}\n` : "";
-    reply = out.text.trim() ? `${header}${out.text}` : out.text;
-    // A pending action is rendered by us (draft + buttons); the model's one-liner would be redundant.
-    if (reply.trim() && out.pendingActions.length === 0) await ctx.wa.sendText(to, reply);
+    reply = out.text.trim() ? rtlLines(`${header}${out.text}`) : out.text;
+    // A pending action is rendered by us (draft + buttons), and a flow (upgrade, a new agent) sends its own messages:
+    // the model's one-liner would be redundant — unless the text also answers something else in the same message.
+    // Reply buttons (a reminder's "move to the next date") ride on the reply.
+    const flowOnly = out.flows.length > 0 && !out.textBeyondFlows;
+    const rendered = out.pendingActions.length > 0 || flowOnly;
+    let withButtons = out.replyButtons.length > 0 && reply.length <= MAX_BUTTON_BODY;
+    if (reply.trim() && !rendered) {
+      if (withButtons) {
+        // the buttons are an extra; the answer itself (a reminder's confirmation) must never be lost with them
+        withButtons = await ctx.wa.sendButtons(to, reply, out.replyButtons).then(
+          () => true,
+          (e: unknown) => (console.warn("[bot] reply buttons failed, sending text:", (e as Error).message), false),
+        );
+      }
+      if (!withButtons) await ctx.wa.sendText(to, reply);
+    }
     for (const action of out.pendingActions) await presentPendingAction(ctx, to, action);
-    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length ? "button" : "text", text: reply || `[${out.pendingActions.map((a) => a.kind).join(",")}]`, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
+    const storedText = (flowOnly ? "" : reply) || `[${[...out.pendingActions.map((a) => a.kind), ...out.flows].join(",")}]`;
+    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length || withButtons ? "button" : "text", text: storedText, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
+    for (const flow of out.flows) await (flow === "upgrade" ? upgradeOffer(ctx, freshUser, to) : startAgentCreation(ctx, freshUser, to, sub));
+    ranFlow = out.flows.length > 0;
+    morningTimeSet = out.toolsUsed.includes("set_morning_time");
     await updateStickyAfterTurn(ctx, user, out.agent?.key ?? null, Boolean(routing.activeKey) || routing.clearSticky);
   } catch (e) {
     if (e instanceof BudgetExceededError) return capReached(e.reason); // the cap was reached between the check and a call
@@ -267,8 +298,8 @@ async function afterStored(
   if (remaining === 3 && onTrial) await say(copy["bill.trial_left_3"]());
   else if (remaining === 1 && onTrial) await say(copy["bill.trial_left_1"](payLink));
 
-  // 9. onboarding continues after the first task
-  await afterFirstTask(ctx, freshUser, to);
+  // 9. onboarding continues after the first task (not on top of a flow that just asked its own question)
+  if (!ranFlow) await afterFirstTask(ctx, freshUser, to, { morningTimeSet });
 
   // 10. memory (best effort)
   await maybeSummarize(ctx.db, ctx.ai, freshUser, ctx.now());

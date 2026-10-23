@@ -5,7 +5,7 @@ import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
 import { GraphClient } from "@/lib/ms/graph";
 import { graphTools } from "@/lib/ms/tools";
 import { MockProvider } from "./mock";
-import { parseRouterVerdict, runAssistant } from "./orchestrator";
+import { ROUTER_SCHEMA, distinctButtons, parseRouterVerdict, runAssistant } from "./orchestrator";
 
 describe("runAssistant", () => {
   it("answers simple messages from the router without touching the strong model", async () => {
@@ -48,6 +48,116 @@ describe("runAssistant", () => {
     const toolMsgs = ai.calls[3]!.messages.filter((m) => m.role === "tool");
     expect(toolMsgs.length).toBeGreaterThan(0);
     expect(out.text).toContain("לא הצלחתי");
+  });
+
+  it("tells the model only the active connections, the newest per provider — no half-active second account (Daniel's test)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const old = db.seedConnection(user.id, "microsoft", "old@levi-law.co.il");
+    const expired = db.seedConnection(user.id, "google", "expired@gmail.com");
+    await db.setConnectionStatus(expired.id, "expired");
+    db.seedConnection(user.id, "microsoft", "dana@levi-law.co.il");
+    await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { state: "s", verifier: "v", started_at: "2026-10-23T00:40:00Z" } } });
+    const ai = new MockProvider().enqueue({ text: '{"intent":"meta","complexity":"simple","needs_tools":false,"reply":"יש חיבור אחד."}' });
+    await runAssistant({ db, ai, user: (await db.getUser(user.id))!, connections: await db.listConnections(user.id), text: "כמה חיבורים יש לי?" });
+    const system = ai.calls[0]!.system;
+    expect(system).toContain("- Microsoft 365 מחובר (dana@levi-law.co.il):");
+    expect(system).not.toContain(old.account_email!);
+    expect(system).not.toContain("expired@gmail.com");
+    expect(system).toContain("- Google לא מחובר.");
+    expect(system).not.toContain("oauth_pending");
+  });
+
+  it("collects the flows the account tools request, and suppresses nothing else", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const ai = new MockProvider().enqueue(
+      { text: '{"intent":"account","complexity":"tool","needs_tools":true,"reply":null}' },
+      { toolCalls: [{ id: "c1", name: "start_upgrade", input: {} }, { id: "c2", name: "start_upgrade", input: {} }], stopReason: "tool_use" },
+      { text: "" },
+    );
+    const out = await runAssistant({ db, ai, user, connections: [], text: "רוצה לעבור לגרסה הגדולה" });
+    expect(out.flows).toEqual(["upgrade"]);
+    expect(out.text).toBe(""); // no "לא הצלחתי" filler: the flow is the answer
+  });
+
+  it("never sends the router's own reply on the account, upgrade, agents or permissions — the strong model answers (review 23.10.2026)", async () => {
+    const cases: [string, string][] = [
+      ['{"intent":"account","complexity":"simple","needs_tools":false,"reply":"לא, אני לא יכולה ליצור סוכנים.","agent":null}', "אתה יכול ליצור לי סוכן"],
+      ['{"intent":"account","complexity":"simple","needs_tools":false,"reply":"כתוב \'מנוי פרו\' ואשלח לך את דף השדרוג.","agent":null}', "אני רוצה לשדרג למנוי פרו"],
+      ['{"intent":"meta","complexity":"simple","needs_tools":false,"reply":"יש לי גישה חלקית לדרייב.","agent":null}', "תהיה לך גישה לדרייב ולמיט?"],
+      ['{"intent":"smalltalk","complexity":"simple","needs_tools":false,"reply":"בשמחה. אם תרצה, אפשר להתחיל בסיכום הבוקר.","agent":null}', "תודה רבה!"],
+      ['{"intent":"smalltalk","complexity":"simple","needs_tools":false,"reply":"בשמחה, דניאל. אני כאן כשתצטרך.","agent":null}', "תודה רבה!"],
+    ];
+    for (const [verdict, text] of cases) {
+      const db = new MemoryDb();
+      const user = await db.createUser("a@b.co");
+      const ai = new MockProvider().enqueue({ text: verdict }, { text: "תשובה מהמודל החזק." });
+      const out = await runAssistant({ db, ai, user, connections: [], text });
+      expect(out.route, text).toBe("strong");
+      expect(out.text, text).toBe("תשובה מהמודל החזק.");
+      expect(ai.calls.map((c) => c.tier), text).toEqual(["router", "strong"]);
+    }
+    // a neutral thank-you reply is still the router's
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const ai = new MockProvider().enqueue({ text: '{"intent":"smalltalk","complexity":"simple","needs_tools":false,"reply":"בשמחה. אם יעלה משהו, אני כאן.","agent":null}' });
+    expect((await runAssistant({ db, ai, user, connections: [], text: "תודה רבה!" })).route).toBe("router");
+  });
+
+  it("asks the router for its verdict as structured output (a JSON schema), never plain text", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const ai = new MockProvider();
+    await runAssistant({ db, ai, user, connections: [], text: "תודה!" });
+    expect(ai.calls[0]!.json).toBe(true);
+    expect(ai.calls[0]!.jsonSchema).toEqual(ROUTER_SCHEMA);
+    expect(ROUTER_SCHEMA).toMatchObject({ additionalProperties: false, required: ["intent", "complexity", "needs_tools", "reply", "agent"] });
+  });
+
+  it("sends the user's message once: the stored inbound row is left out of the history (review 23.10.2026)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    await db.insertMessage({ user_id: user.id, direction: "in", type: "text", text: "שלום" });
+    await db.insertMessage({ user_id: user.id, direction: "out", type: "text", text: "היי" });
+    const row = (await db.insertMessage({ user_id: user.id, direction: "in", type: "text", text: "@מזכירה מה יש לי מחר?" }))!;
+    const ai = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null,"agent":null}' }, { text: "מחר פנוי." });
+    await runAssistant({ db, ai, user, connections: [], text: "מה יש לי מחר?", inboundId: row.id });
+    for (const call of ai.calls) {
+      expect(call.messages).toEqual([
+        { role: "user", content: "שלום" },
+        { role: "assistant", content: "היי" },
+        { role: "user", content: "מה יש לי מחר?" },
+      ]);
+    }
+  });
+
+  it("a flow with another answer in the same message keeps the text; a flow alone does not (review 23.10.2026)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const long = "המייל האחרון: רונית כהן, ״הסכם שכירות — טיוטה שנייה״, היום ב-08:12. היא מבקשת הערות עד יום ראשון. את פרטי השדרוג שולחת המערכת עכשיו.";
+    const ai = new MockProvider().enqueue(
+      { text: '{"intent":"email","complexity":"tool","needs_tools":true,"reply":null,"agent":null}' },
+      { toolCalls: [{ id: "c1", name: "list_reminders", input: {} }, { id: "c2", name: "start_upgrade", input: {} }], stopReason: "tool_use" },
+      { text: long },
+    );
+    const both = await runAssistant({ db, ai, user, connections: [], text: "תביאי לי את המייל האחרון ואיך משדרגים?" });
+    expect(both.flows).toEqual(["upgrade"]);
+    expect(both.textBeyondFlows).toBe(true);
+    const ai2 = new MockProvider().enqueue(
+      { text: '{"intent":"account","complexity":"tool","needs_tools":true,"reply":null,"agent":null}' },
+      { toolCalls: [{ id: "c1", name: "start_upgrade", input: {} }], stopReason: "tool_use" },
+      { text: long },
+    );
+    expect((await runAssistant({ db, ai: ai2, user, connections: [], text: "איך משדרגים?" })).textBeyondFlows).toBe(false);
+  });
+
+  it("reply buttons: at most 3, distinct ids and distinct titles", () => {
+    expect(distinctButtons([{ id: "a", title: "ליום ש׳ 24.10" }, { id: "b", title: "ליום ש׳ 24.10" }, { id: "a", title: "x" }, { id: "c", title: "y" }, { id: "d", title: "z" }, { id: "e", title: "w" }])).toEqual([
+      { id: "a", title: "ליום ש׳ 24.10" },
+      { id: "c", title: "y" },
+      { id: "d", title: "z" },
+    ]);
   });
 
   it("parses router verdicts leniently", () => {

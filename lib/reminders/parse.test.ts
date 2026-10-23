@@ -89,6 +89,8 @@ const ONCE: OnceCase[] = [
   ["בעוד שעתיים", "2026-10-21 23:30", "2026-10-22 01:30"],
   ["בעוד רבע שעה", "2026-10-21 23:50", "2026-10-22 00:05"],
   ["מחר ב-9", "2026-10-22 00:30", "2026-10-22 09:00"], // after midnight "מחר" = the coming morning
+  ["מחר בשעה תשע", "2026-10-23 03:43", "2026-10-23 09:00"], // Daniel's voice note at 03:43
+  ["מחר ב-9", "2026-10-22 04:59", "2026-10-22 09:00"],
   ["מחר ב-9", "2026-10-22 05:00", "2026-10-23 09:00"],
   ["בחצות", "2026-10-21 21:00", "2026-10-22 00:00"],
   ["ב-2 בלילה", "2026-10-21 22:00", "2026-10-22 02:00"],
@@ -200,6 +202,20 @@ describe("parseHebrewWhen — no time / not a time", () => {
     expect(parseHebrewWhen(input, { now: il(WED), timeZone: TZ })).toBeNull();
   });
 
+  it("'מחר' in the small hours: the coming morning, with the next date kept as the other reading", () => {
+    const r = parseHebrewWhen("תזכירי אותי מחר בשעה תשע על לאכול", { now: il("2026-10-23 03:43"), timeZone: TZ });
+    expect(r?.kind).toBe("once");
+    if (r?.kind !== "once") return;
+    expect(local(r.at)).toBe("2026-10-23 09:00");
+    expect(local(r.nextDay!)).toBe("2026-10-24 09:00");
+    expect(r.rest).toBe("לאכול");
+    // during the day, or when the coming morning already passed (an exact time before now), there is one reading only
+    expect(parseHebrewWhen("מחר ב-9", { now: il("2026-10-23 10:00"), timeZone: TZ })).not.toHaveProperty("nextDay");
+    const early = parseHebrewWhen("מחר ב-02:00", { now: il("2026-10-23 03:43"), timeZone: TZ });
+    expect(early?.kind === "once" && local(early.at)).toBe("2026-10-24 02:00");
+    expect(early).not.toHaveProperty("nextDay");
+  });
+
   it("does not take a quantity for an hour", () => {
     const r = parseHebrewWhen("מחר להעביר ב-3 תשלומים", { now: il(WED), timeZone: TZ });
     expect(r?.kind === "once" && local(r.at)).toBe("2026-10-22 09:00");
@@ -218,5 +234,14 @@ describe("helpers", () => {
     expect(formatWhenAbs(il("2026-10-29 16:30"), now, TZ)).toBe("יום ה׳ 29.10, 16:30");
     expect(formatWhenAbs(il("2027-01-01 10:00"), now, TZ)).toBe("יום ו׳ 1.1.2027, 10:00");
     expect(formatWhenAbs(il("2026-10-22 00:05"), now, TZ)).toBe("מחר, 00:05");
+    expect(formatWhenAbs(il("2026-10-22 09:00"), now, TZ, { dated: true })).toBe("מחר, יום ה׳ 22.10, 9:00");
+  });
+
+  it("in the small hours 'היום' / 'מחר' always carry the date (they are ambiguous after midnight)", () => {
+    const night = il("2026-10-23 03:43");
+    expect(formatWhenAbs(il("2026-10-23 09:00"), night, TZ)).toBe("היום, יום ו׳ 23.10, 9:00");
+    expect(formatWhenAbs(il("2026-10-24 09:00"), night, TZ)).toBe("מחר, יום ש׳ 24.10, 9:00");
+    expect(formatWhenAbs(il("2026-10-27 09:00"), night, TZ)).toBe("יום ג׳ 27.10, 9:00");
+    expect(formatWhenAbs(il("2026-10-23 09:00"), il("2026-10-23 05:00"), TZ)).toBe("היום, 9:00");
   });
 });

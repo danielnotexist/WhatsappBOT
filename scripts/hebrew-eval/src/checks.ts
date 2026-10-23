@@ -45,6 +45,20 @@ export function claimsCompletion(text: string): boolean {
   return re.test(text);
 }
 
+/**
+ * Gendered address of the user (docs/copy/style-guide.md: neutral phrasing only) — the forms Daniel's live test found:
+ * a masculine / feminine imperative, "אם תרצה", "אחרי שתאשר", "את או אתה", a pronoun as the subject.
+ */
+const GENDERED = /(?<![א-ת])(?:כתוב|כתבי|שלח\/י|אתה|תרצה|תרצי|תצטרך|תצטרכי|שתאשר|שתאשרי)(?![א-ת])|את או אתה|(?<![א-ת])את (?:על|ב|נמצאת)(?![א-ת])/g;
+export function genderedAddress(text: string): string[] {
+  return [...new Set(text.match(GENDERED) ?? [])];
+}
+
+/** An internal retry or correction told to the user (the 03:43 reminder; "(תיקון: …)" after a status message). */
+export function narratedRetry(text: string): boolean {
+  return /בניסיון הראשון|ביטלתי וקבעתי|קבעתי מחדש|נקבעה בטעות|\(תיקון|הכלי החזיר שגיאה|טעיתי קודם/.test(text);
+}
+
 const NO_TOOL_INTENTS = /(small_talk|smalltalk|greeting|thanks|chit|general|confirm|clarif|none|off_topic|unclear|ack)/i;
 
 /** Acceptable tools derived from the dataset item (expected_tools > must_do mentions > intent keywords). */
@@ -76,6 +90,8 @@ export function expectedToolsFor(message: DatasetMessage): { tools: string[]; no
     tools.add('get_file_text');
   }
   if (has(/remind|תזכורת|להזכיר/)) tools.add('create_reminder');
+  if (has(/upgrade|שדרוג|לשדרג/)) tools.add('start_upgrade');
+  if (has(/new_agent|create_agent|סוכן חדש|ליצור סוכן/)) tools.add('start_agent_creation');
   if (has(/morning|daily|briefing|summary_of_day|day_summary|סיכום בוקר|סיכום יומי/)) tools.add('get_morning_summary');
 
   const noToolsExpected =
@@ -94,8 +110,10 @@ export function runChecks(message: DatasetMessage, text: string, toolCalls: Tool
   const unconfirmedSend = toolCalls.some((c) => c.name === 'send_email' && c.input['user_confirmed'] === true) && !userConfirmed;
   const calledOutbound = toolCalls.some((c) => OUTBOUND_TOOLS.has(c.name));
   const claimedCompletion = !userConfirmed && claimsCompletion(text) && (calledOutbound || !toolCalls.length || true);
+  // a flow tool (upgrade offer, agent creation) answers by itself — the product sends its messages, no text is needed
+  const flowAnswered = toolCalls.some((c) => c.name === 'start_upgrade' || c.name === 'start_agent_creation');
   return {
-    hasResponse: text.trim().length > 0,
+    hasResponse: text.trim().length > 0 || flowAnswered,
     hebrewRatio: hebrewRatio(text),
     brokenDirectionLines: broken.count,
     brokenLineSamples: broken.samples,
@@ -107,5 +125,7 @@ export function runChecks(message: DatasetMessage, text: string, toolCalls: Tool
     claimedCompletion,
     unnecessaryToolCall: noToolsExpected && toolsCalled.length > 0,
     toolLoopTruncated,
+    genderedAddress: genderedAddress(text),
+    narratedRetry: narratedRetry(text),
   };
 }

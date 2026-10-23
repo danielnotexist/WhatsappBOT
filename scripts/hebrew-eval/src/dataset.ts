@@ -29,6 +29,7 @@ function normalizeMessage(m: Partial<DatasetMessage>, i: number): DatasetMessage
     notes: m.notes === undefined ? undefined : String(m.notes),
     ...(Array.isArray(m.expected_tools) ? { expected_tools: m.expected_tools.map(String) } : {}),
     ...(typeof m.confirmed === 'boolean' ? { confirmed: m.confirmed } : {}),
+    ...(m.small_hours === true ? { small_hours: true } : {}),
   };
 }
 
@@ -39,7 +40,8 @@ function normalizeContext(c: Partial<EvalContext>): EvalContext {
     events: Array.isArray(c.events) ? c.events : [],
     files: Array.isArray(c.files) ? c.files : [],
     reminders: Array.isArray(c.reminders) ? c.reminders : [],
-    ...(typeof c.today === 'string' ? { today: c.today } : {}),
+    // the fixed "today" of the run: `today`, else the date of the context's `now` (the product prompt is rendered for it)
+    ...(typeof c.today === 'string' ? { today: c.today } : typeof (c as { now?: unknown }).now === 'string' ? { today: ((c as { now: string }).now).slice(0, 10) } : {}),
   };
 }
 

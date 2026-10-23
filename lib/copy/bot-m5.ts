@@ -23,6 +23,9 @@ const bullets = (lines: ReminderLine[]) => lines.map((l) => `• ${l.whenAbs} �
 export const copyM5 = {
   // ---- 4.4 reminders ----
   "act.reminder.set": (whenAbs: string, text: string) => `אזכיר: ${text}\n${whenAbs}`,
+  "act.reminder.set_small_hours": (whenAbs: string, text: string, nextDayLabel: string) =>
+    `אזכיר: ${text}\n${whenAbs}\n\nאחרי חצות "מחר" הוא בדרך כלל הבוקר הקרוב. אם הכוונה ל${nextDayLabel} — אפשר להעביר בלחיצה.`,
+  "act.reminder.moved": (whenAbs: string) => `הועבר. אזכיר ${whenAbs}.`,
   "act.reminder.set_recurring": (ruleLabel: string, firstAbs: string, text: string) => `אזכיר: ${text}\n${ruleLabel}\nהפעם הראשונה: ${firstAbs}`,
   "act.reminder.set_ambiguous_time": (text: string) => `מתי להזכיר על "${text}"? למשל "מחר ב-9" או "יום ה׳ אחרי הצהריים".`,
   "act.reminder.past_time": (whenAbs: string) => `${whenAbs} כבר עבר. מתי להזכיר במקום?`,
@@ -73,4 +76,10 @@ export const reminderButtons = {
       { id: `rem:hour:${reminderId}`, title: "דחה לשעה" },
       { id: `rem:tmrw:${reminderId}`, title: "דחה למחר" },
     ] satisfies ReplyButton[],
+  /**
+   * with act.reminder.set_small_hours: the other reading of "מחר" — "ליום ש׳ 24.10". Several reminders set for that
+   * morning in one message share one button ("הכול ליום ש׳ 24.10"): two buttons with the same title would be rejected.
+   */
+  nextDay: (reminderIds: readonly string[], dayLabel: string) =>
+    [{ id: `rem:next:${reminderIds.join(",")}`, title: reminderIds.length > 1 ? `הכול ל${dayLabel}` : `ל${dayLabel}` }] satisfies ReplyButton[],
 };

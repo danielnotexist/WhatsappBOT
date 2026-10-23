@@ -76,7 +76,7 @@ export async function runMessage(
     }
     const round = rounds;
     const results: ToolResult[] = last.toolCalls.map((c) => {
-      const ex = executeTool(c.name, c.input, context, userConfirmed);
+      const ex = executeTool(c.name, c.input, context, userConfirmed, { smallHours: message.small_hours === true });
       toolCalls.push({ id: c.id, name: c.name, input: c.input, result: ex.output, round });
       return { id: c.id, name: c.name, output: ex.output, isError: ex.isError };
     });
@@ -110,7 +110,7 @@ export async function runEval(args: CliArgs): Promise<string> {
   const runId = args.runId ?? timestampId(args.dryRun ? 'dry-' : '');
   const outDir = path.join(RESULTS_DIR, runId);
   const ledger = new SpendLedger(outDir, 'eval', args.dryRun ? undefined : args.budgetUsd);
-  const system = buildSystemPrompt(dataset.context);
+  const systemFor = (message: DatasetMessage) => buildSystemPrompt(dataset.context, message);
   const providers = models.map((m) => createProvider(m, { dryRun: args.dryRun }));
 
   // Re-running with the same --run-id (other models / subset) merges into the existing run.json.
@@ -166,7 +166,7 @@ export async function runEval(args: CliArgs): Promise<string> {
         return; // nothing appended → the pair stays pending and can be resumed with the same --run-id
       }
       try {
-        const { run, attempts } = await runMessage(provider, message, system, dataset.context, { timeoutMs: args.timeoutMs, retries: args.retries, maxRounds: args.maxRounds });
+        const { run, attempts } = await runMessage(provider, message, systemFor(message), dataset.context, { timeoutMs: args.timeoutMs, retries: args.retries, maxRounds: args.maxRounds });
         record.result = run;
         record.attempts = attempts;
         ledger.add(run.costUsd);

@@ -2089,5 +2089,191 @@
       "missing-data",
       "outbound"
     ]
+  },
+  {
+    "id": "msg-101",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "איזה מנוי אני",
+    "expected_intent": "account.status",
+    "expected_complexity": "simple",
+    "must_do": [
+      "עונה מהסעיף \"החשבון\": תקופת ניסיון, ו-6 הודעות שנשארו",
+      "ניסוח ניטרלי: \"המסלול שלך\" / \"נשארו לך\""
+    ],
+    "must_not_do": [
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")",
+      "אומר שאין לו נתון על המנוי",
+      "ממציא מסלול או מחיר"
+    ],
+    "notes": "Daniel's live test 23.10.2026: \"אין לי נתון… את או אתה במסגרת ניסיון\". Live eval: \"אתה בתקופת ניסיון\" 3 of 3.",
+    "tags": [
+      "account",
+      "live-test"
+    ]
+  },
+  {
+    "id": "msg-102",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "אתה יכול ליצור לי סוכן",
+    "expected_intent": "account.new_agent",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-start_agent_creation"
+    ],
+    "must_not_do": [
+      "אומר שאי אפשר ליצור סוכנים",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Daniel's live test: Haiku answered \"לא, אני לא יכולה ליצור סוכנים חדשים\".",
+    "tags": [
+      "account",
+      "live-test"
+    ],
+    "expected_tools": [
+      "start_agent_creation"
+    ]
+  },
+  {
+    "id": "msg-103",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "אני רוצה לשדרג למנוי פרו",
+    "expected_intent": "account.upgrade",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-start_upgrade"
+    ],
+    "must_not_do": [
+      "ממציא פקודה (\"כתוב 'מנוי פרו'\")",
+      "מפנה לתמיכה או אומר שאין דרך לשדרג מכאן",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Daniel's live test: \"כתוב 'מנוי פרו' ואשלח לך את דף השדרוג\". In the product the command is caught before the model; this measures the model alone.",
+    "tags": [
+      "account",
+      "live-test"
+    ],
+    "expected_tools": [
+      "start_upgrade"
+    ]
+  },
+  {
+    "id": "msg-104",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "אני רוצה לשדרוג מה הבעיה אחי",
+    "expected_intent": "account.upgrade",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-start_upgrade",
+      "בלי התנצלויות חוזרות"
+    ],
+    "must_not_do": [
+      "\"אין לי כלי לשדרג מנוי\"",
+      "מפנה לתמיכה",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Daniel's live test, the third try.",
+    "tags": [
+      "account",
+      "live-test"
+    ],
+    "expected_tools": [
+      "start_upgrade"
+    ]
+  },
+  {
+    "id": "msg-105",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "תהיה לך גישה גם לגוגל דרייב שלי ולגוגל Meeting?",
+    "expected_intent": "account.capabilities",
+    "expected_complexity": "simple",
+    "must_do": [
+      "Drive: רק קבצים שנוצרו או נפתחו דרכי (drive.file), אחרי חיבור Google",
+      "Meet: קישור Meet לפגישה ביומן Google, אחרי אישור בכפתור",
+      "אפשר לחבר: \"לחבר את גוגל\""
+    ],
+    "must_not_do": [
+      "\"יתברר רק אחרי האישור\" / \"לא הייתי רוצה להבטיח\"",
+      "טוען גישה לקבצים ששותפו עם המשתמש",
+      "שורה שמתחילה ב-\"Google Drive:\"",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Daniel's live test (voice). Live eval: Sonnet added \"או ששותפו איתי\" in 1 of 2 runs.",
+    "tags": [
+      "account",
+      "capabilities",
+      "live-test"
+    ]
+  },
+  {
+    "id": "msg-106",
+    "persona": "lawyer",
+    "category": "reminder",
+    "text": "תזכירי אותי מחר בשעה תשע על לאכול",
+    "expected_intent": "reminder.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-create_reminder פעם אחת, עם \"מחר בשעה תשע\" כמו שנאמר",
+      "עונה בנוסח של reply, כולל התאריך המפורש והכפתור להעברה"
+    ],
+    "must_not_do": [
+      "מבטל וקובע מחדש",
+      "מספר על ניסיון ראשון או תיקון (\"בניסיון הראשון…\", \"ביטלתי וקבעתי מחדש\")",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Daniel's live test at 03:43: the model re-did the tool's result and narrated it.",
+    "tags": [
+      "reminder",
+      "small-hours",
+      "live-test"
+    ],
+    "expected_tools": [
+      "create_reminder"
+    ],
+    "small_hours": true
+  },
+  {
+    "id": "msg-107",
+    "persona": "lawyer",
+    "category": "smalltalk",
+    "text": "תודה רבה!",
+    "expected_intent": "smalltalk.thanks",
+    "expected_complexity": "simple",
+    "must_do": [
+      "שורה אחת, חמה וניטרלית (\"אם יעלה משהו, אני כאן\")"
+    ],
+    "must_not_do": [
+      "\"אם תרצה\" / \"אם תצטרך\" / \"כשתצטרך\"",
+      "מציע שירותים"
+    ],
+    "notes": "Live eval: the router's reply was gendered in 6 of 8 runs.",
+    "tags": [
+      "smalltalk",
+      "live-test"
+    ]
+  },
+  {
+    "id": "msg-108",
+    "persona": "lawyer",
+    "category": "account",
+    "text": "כמה הודעות נשארו לי?",
+    "expected_intent": "account.status",
+    "expected_complexity": "simple",
+    "must_do": [
+      "6 הודעות מתוך 10 (ההודעה הנוכחית כבר נספרה)"
+    ],
+    "must_not_do": [
+      "\"(תיקון: …)\" על הודעה קודמת",
+      "לא פונה למשתמש בלשון זכר או נקבה (\"כתוב\", \"אם תרצה\", \"אחרי שתאשר\", \"את או אתה\", \"אתה על…\")"
+    ],
+    "notes": "Live eval: a parenthetical correction of an earlier status message.",
+    "tags": [
+      "account",
+      "live-test"
+    ]
   }
 ]

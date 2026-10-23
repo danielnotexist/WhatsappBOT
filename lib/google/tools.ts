@@ -104,7 +104,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         input_schema: { type: "object", properties: { title: str("כותרת הפגישה"), date: str("YYYY-MM-DD"), start: str("HH:MM"), end: str("HH:MM"), location: str("מקום או ריק"), attendees: { type: "array", items: { type: "string" }, description: "כתובות מייל של משתתפים (ריק אם אין)" } }, required: ["title", "date", "start", "end", "location", "attendees"], additionalProperties: false },
         run: async (input, ctx) => {
           const pending = await ctx.createPending("create_event", { provider: "google", title: String(input.title ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), attendees: Array.isArray(input.attendees) ? input.attendees.map(String).filter(Boolean) : [] });
-          return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי אישור. ענה במשפט קצר בלבד." };
+          return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי אישור. לענות במשפט קצר בלבד." };
         },
       },
       {
@@ -117,7 +117,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
           if (attendees && !Array.isArray(attendees)) return attendees;
           const pending = await ctx.createPending("update_event", { provider: "google", id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
-          return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
+          return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
         },
       },
       {
@@ -130,7 +130,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
           if (attendees && !Array.isArray(attendees)) return attendees;
           const pending = await ctx.createPending("delete_event", { provider: "google", id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
-          return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
+          return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
         },
       },
     );
@@ -207,7 +207,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           body: String(input.body ?? ""),
           ...(attachmentId ? { attachment_file_id: attachmentId, attachment_name: attachmentName } : {}),
         });
-        return { status: "pending_approval", pending_action_id: pending.id, note: "הטיוטה מוצגת למשתמש עם כפתורי שלח/ערוך/בטל. ענה במשפט קצר בלבד." };
+        return { status: "pending_approval", pending_action_id: pending.id, note: "הטיוטה מוצגת למשתמש עם כפתורי שלח/ערוך/בטל. לענות במשפט קצר בלבד." };
       },
     });
   }

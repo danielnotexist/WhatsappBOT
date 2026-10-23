@@ -54,7 +54,11 @@ export function createMockProvider(cfg: ModelConfig): Provider {
         } else if (/קובץ|מסמך|הסכם|חוזה|קבצים/.test(t)) {
           toolCalls = [{ id: `mock_${Date.now()}_1`, name: 'search_files', input: { query: t.replace(/[?!.]/g, '').split(' ').slice(-2).join(' '), limit: 5 } }];
         } else if (/תזכיר|תזכורת/.test(t)) {
-          toolCalls = [{ id: `mock_${Date.now()}_1`, name: 'create_reminder', input: { text: t, due_at: '2026-10-20T16:00:00+03:00' } }];
+          toolCalls = [{ id: `mock_${Date.now()}_1`, name: 'create_reminder', input: { text: t, when: 'מחר ב-9' } }];
+        } else if (/שדרג|שדרוג|מנוי פרו/.test(t)) {
+          toolCalls = [{ id: `mock_${Date.now()}_1`, name: 'start_upgrade', input: {} }];
+        } else if (/סוכן/.test(t)) {
+          toolCalls = [{ id: `mock_${Date.now()}_1`, name: 'start_agent_creation', input: {} }];
         }
       }
 
@@ -101,7 +105,9 @@ export function createMockProvider(cfg: ModelConfig): Provider {
           const results = (data?.['results'] as Array<Record<string, unknown>> | undefined) ?? [];
           text = results.length ? `מצאתי: ${results.map((f) => String(f['name'])).join(', ')}` : 'לא מצאתי קובץ מתאים.';
         } else if (first.name === 'create_reminder') {
-          text = 'התזכורת נקבעה.';
+          text = String((first.output as { reply?: unknown })?.reply ?? 'התזכורת נקבעה.');
+        } else if (first.name === 'start_upgrade' || first.name === 'start_agent_creation') {
+          text = glitch < 0.1 ? 'כתוב ״שדרוג״ ואשלח לך את הקישור.' : 'מיד נשלח ההמשך.';
         } else {
           text = 'טופל.';
         }

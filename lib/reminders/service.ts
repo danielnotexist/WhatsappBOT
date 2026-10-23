@@ -1,7 +1,7 @@
 import { copyM5, reminderButtons, type ReminderLine } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, ReminderRow, UserRow } from "@/lib/db/types";
 import { sendProactive, type ProactiveDeps } from "@/lib/jobs/proactive";
-import { DEFAULT_TZ, formatStampHe, formatWhenAbs } from "@/lib/time/zoned";
+import { DEFAULT_TZ, addDays, compareDates, dayLabelHe, formatStampHe, formatWhenAbs, localDateOf, zonedParts, zonedToUtc } from "@/lib/time/zoned";
 import { reminderTemplate } from "@/lib/wa/templates";
 import { parseHebrewWhen } from "./parse";
 import { describeRecurrence, isRecurrenceRule, nextOccurrence } from "./recurrence";
@@ -29,7 +29,15 @@ export async function scheduleReminderJob(db: Db, reminder: ReminderRow, opts: {
 }
 
 export type CreateReminderResult =
-  | { status: "created"; reminder: ReminderRow; whenAbs: string; recurring: string | null; reply: string }
+  | {
+      status: "created";
+      reminder: ReminderRow;
+      whenAbs: string;
+      recurring: string | null;
+      reply: string;
+      /** "מחר" in the small hours was read as the coming morning: the next date, offered as a one-tap move */
+      nextDay?: { at: Date; label: string };
+    }
   | { status: "need_time"; reply: string }
   | { status: "past"; whenAbs: string; reply: string }
   | { status: "error"; error: "empty_text" | "limit"; reply: string };
@@ -55,6 +63,12 @@ export async function createReminder(db: Db, user: UserRow, input: { text: strin
     if (parsed.inPast) return { status: "past", whenAbs, reply: copyM5["act.reminder.past_time"](whenAbs) };
     const reminder = await scheduleReminderJob(db, await db.createReminder({ user_id: user.id, text, due_at: parsed.at }));
     await db.addAudit({ user_id: user.id, action: "reminder.create", target: reminder.id, result: "ok" });
+    if (parsed.nextDay) {
+      // never a silent guess: the concrete date, and the other reading one tap away (reminderButtons.nextDay)
+      const label = dayLabelHe(localDateOf(parsed.nextDay, tz));
+      const dated = formatWhenAbs(parsed.at, now, tz, { dated: true });
+      return { status: "created", reminder, whenAbs: dated, recurring: null, reply: copyM5["act.reminder.set_small_hours"](dated, text, label), nextDay: { at: parsed.nextDay, label } };
+    }
     return { status: "created", reminder, whenAbs, recurring: null, reply: copyM5["act.reminder.set"](whenAbs, text) };
   }
 
@@ -122,6 +136,35 @@ export async function snoozeReminder(db: Db, user: UserRow, reminderId: string, 
   return copyM5["act.reminder.snoozed"](formatWhenAbs(due, now, tz));
 }
 
+/**
+ * `rem:next:<id>` — a one-off reminder set for the coming morning after midnight moves to the same time on the next
+ * date. Idempotent: once the reminder is no longer on the date it was created, a second press only repeats the answer.
+ */
+export async function moveReminderToNextDay(db: Db, user: UserRow, reminderId: string, now: Date): Promise<string | null> {
+  const r = await db.getReminder(reminderId);
+  if (!r || r.user_id !== user.id || r.status !== "scheduled" || isRecurrenceRule(r.recurrence)) return null;
+  const tz = tzOf(user);
+  const current = new Date(r.due_at);
+  const p = zonedParts(current, tz);
+  if (compareDates(p, localDateOf(new Date(r.created_at), tz)) !== 0) return copyM5["act.reminder.moved"](formatWhenAbs(current, now, tz, { dated: true }));
+  const due = zonedToUtc({ ...addDays(p, 1), hour: p.hour, minute: p.minute }, tz);
+  if (r.job_id) await db.cancelJob(r.job_id);
+  const moved = await db.updateReminder(r.id, { due_at: due.toISOString(), job_id: null });
+  if (moved) await scheduleReminderJob(db, moved);
+  await db.addAudit({ user_id: user.id, action: "reminder.move_next_day", target: r.id, result: "ok" });
+  return copyM5["act.reminder.moved"](formatWhenAbs(due, now, tz, { dated: true }));
+}
+
+/** `rem:next:<id>,<id>` — every reminder of the button; one line per moved reminder (null when none was found). */
+async function moveAllToNextDay(db: Db, user: UserRow, reminderIds: readonly string[], now: Date): Promise<string | null> {
+  const lines: string[] = [];
+  for (const id of reminderIds) {
+    const moved = await moveReminderToNextDay(db, user, id, now);
+    if (moved) lines.push(reminderIds.length > 1 ? `${(await db.getReminder(id))?.text ?? ""}: ${moved}`.replace(/^: /, "") : moved);
+  }
+  return lines.length ? lines.join("\n") : null;
+}
+
 export async function markReminderDone(db: Db, user: UserRow, reminderId: string): Promise<string | null> {
   const r = await db.getReminder(reminderId);
   if (!r || r.user_id !== user.id) return null;
@@ -179,17 +222,27 @@ export async function runReminderJob(deps: ProactiveDeps, job: Pick<JobRow, "id"
   return { status: "sent", mode: sent.mode, next };
 }
 
-/** Reminder buttons (`rem:done|hour|tmrw:<id>`) from the free-form message or the template's quick replies. */
-export function parseReminderButton(id: string): { verb: "done" | "hour" | "tmrw"; reminderId: string } | null {
-  const m = id.match(/^rem:(done|hour|tmrw):([0-9a-f-]{36})$/);
-  return m ? { verb: m[1] as "done" | "hour" | "tmrw", reminderId: m[2]! } : null;
+/**
+ * Reminder buttons (`rem:done|hour|tmrw|next:<id>`) from the free-form message or the template's quick replies.
+ * `rem:next:` may carry several ids ("הכול ליום ש׳ 24.10" — the reminders of one message set after midnight).
+ */
+export function parseReminderButton(id: string): { verb: "done" | "hour" | "tmrw" | "next"; reminderId: string; reminderIds: string[] } | null {
+  const m = id.match(/^rem:(done|hour|tmrw):([0-9a-f-]{36})$/) ?? id.match(/^rem:(next):([0-9a-f-]{36}(?:,[0-9a-f-]{36}){0,4})$/);
+  if (!m) return null;
+  const ids = m[2]!.split(",");
+  return { verb: m[1] as "done" | "hour" | "tmrw" | "next", reminderId: ids[0]!, reminderIds: ids };
 }
 
 export async function handleReminderButton(deps: ProactiveDeps, user: UserRow, to: string, buttonId: string): Promise<boolean> {
   const parsed = parseReminderButton(buttonId);
   if (!parsed) return false;
   const now = deps.now();
-  const reply = parsed.verb === "done" ? await markReminderDone(deps.db, user, parsed.reminderId) : await snoozeReminder(deps.db, user, parsed.reminderId, parsed.verb === "hour" ? "hour" : "tomorrow", now);
+  const reply =
+    parsed.verb === "done"
+      ? await markReminderDone(deps.db, user, parsed.reminderId)
+      : parsed.verb === "next"
+        ? await moveAllToNextDay(deps.db, user, parsed.reminderIds, now)
+        : await snoozeReminder(deps.db, user, parsed.reminderId, parsed.verb === "hour" ? "hour" : "tomorrow", now);
   const text = reply ?? copyM5["act.reminder.not_found"]();
   await deps.wa.sendText(to, text);
   await deps.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });

@@ -36,6 +36,8 @@ export interface CompletionRequest {
   maxTokens?: number;
   /** ask for JSON-only output (router classification) */
   json?: boolean;
+  /** with `json`: the JSON schema the output must follow (Anthropic: structured outputs, output_config.format) */
+  jsonSchema?: Record<string, unknown>;
   /** aborts the call (and the SDK's retries) — the spend guard's per-turn deadline in the demo (lib/ai/budget.ts) */
   signal?: AbortSignal;
 }

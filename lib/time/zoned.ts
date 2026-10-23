@@ -141,15 +141,30 @@ export function dayLabelHe(d: LocalDate, refYear?: number): string {
   return `יום ${DAY_LETTERS[weekdayOf(d)]} ${d.day}.${d.month}${refYear !== undefined && refYear !== d.year ? `.${d.year}` : ""}`;
 }
 
-/** Absolute echo for a reminder time: "היום, 18:00" / "מחר, 9:00" / "יום ה׳ 23.10, 16:30". */
-export function formatWhenAbs(at: Date, now: Date, tz: string = DEFAULT_TZ): string {
+/**
+ * 00:00–04:59 local: "the small hours". People who have not slept yet mean the coming morning by "מחר" (the reminder
+ * parser reads it so, and the system prompt says so), and "היום" / "מחר" alone are ambiguous — echoes add the date.
+ */
+export const SMALL_HOURS_END = 5;
+
+export function inSmallHours(now: Date, tz: string = DEFAULT_TZ): boolean {
+  return zonedParts(now, tz).hour < SMALL_HOURS_END;
+}
+
+/**
+ * Absolute echo for a reminder time: "היום, 18:00" / "מחר, 9:00" / "יום ה׳ 23.10, 16:30". In the small hours "היום"
+ * and "מחר" carry the date as well ("היום, יום ו׳ 23.10, 9:00"), or `dated: true` asks for it at any hour.
+ */
+export function formatWhenAbs(at: Date, now: Date, tz: string = DEFAULT_TZ, opts: { dated?: boolean } = {}): string {
   const p = zonedParts(at, tz);
   const today = localDateOf(now, tz);
   const day: LocalDate = { year: p.year, month: p.month, day: p.day };
   const clock = clockHe(p.hour, p.minute);
-  if (compareDates(day, today) === 0) return `היום, ${clock}`;
-  if (compareDates(day, addDays(today, 1)) === 0) return `מחר, ${clock}`;
-  return `${dayLabelHe(day, today.year)}, ${clock}`;
+  const dated = opts.dated || inSmallHours(now, tz);
+  const label = dayLabelHe(day, today.year);
+  if (compareDates(day, today) === 0) return dated ? `היום, ${label}, ${clock}` : `היום, ${clock}`;
+  if (compareDates(day, addDays(today, 1)) === 0) return dated ? `מחר, ${label}, ${clock}` : `מחר, ${clock}`;
+  return `${label}, ${clock}`;
 }
 
 /** "יום ב׳ 20.10, 18:40" — when something was asked (the `reminder` template's {{2}}). */

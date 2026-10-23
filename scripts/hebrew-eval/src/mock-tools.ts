@@ -108,6 +108,7 @@ export function executeTool(
   input: Record<string, unknown>,
   context: EvalContext,
   userConfirmed: boolean,
+  opts: { smallHours?: boolean } = {},
 ): ToolExecution {
   const today = todayOf(context);
   const s = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '');
@@ -202,8 +203,26 @@ export function executeTool(
         };
       }
       case 'create_reminder': {
-        if (!s('text') || !s('due_at')) return { output: { error: 'text and due_at are required' }, isError: true };
-        return { output: asData({ status: 'created', id: nextId('rem'), text: s('text'), due_at: s('due_at') }), isError: false };
+        // the product's shape: the phrase as said; the product's parser computes the time and `reply` echoes it
+        if (!s('text') && !s('when')) return { output: { error: 'text and when are required' }, isError: true };
+        const note = 'לענות למשתמש בדיוק בנוסח שב-reply, בלי להוסיף או לשנות את הזמן, ובלי לספר על ניסיונות קודמים.';
+        if (opts.smallHours && /מחר/.test(s('when'))) {
+          return {
+            output: {
+              status: 'done',
+              reminder_id: nextId('rem'),
+              reply: `אזכיר: ${s('text')}\nהיום, ${s('when').replace(/מחר\s*/, '')}\n\nאחרי חצות "מחר" הוא בדרך כלל הבוקר הקרוב. אם הכוונה ליום שאחרי — אפשר להעביר בלחיצה.`,
+              note: `${note} התזכורת נקבעה לבוקר הקרוב בכוונה, ומצורף כפתור להעברה ליום שאחרי. לא לשנות, לבטל או לקבוע אותה מחדש.`,
+            },
+            isError: false,
+          };
+        }
+        return { output: { status: 'done', reminder_id: nextId('rem'), reply: `אזכיר: ${s('text')}\n${s('when')}`, note }, isError: false };
+      }
+      case 'start_upgrade':
+      case 'start_agent_creation': {
+        // the product's account tools: the pipeline sends the offer / the create flow after the turn
+        return { output: { status: 'started', note: 'המערכת שולחת עכשיו את ההמשך בהודעה נפרדת. לא לכתוב על התהליך עצמו (סכומים, קישורים, הוראות). אם בהודעה של המשתמש יש בקשה נוספת — לענות עליה כרגיל; אחרת אין צורך בטקסט.' }, isError: false };
       }
       case 'get_morning_summary': {
         const date = s('date') || today;

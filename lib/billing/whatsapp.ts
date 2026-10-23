@@ -23,7 +23,7 @@ import { formatIls, vatOf } from "./money";
 import { activePhone, sendInvoice, shortDateHe } from "./notify";
 import { executeClaimedCharge, finishApproval, quoteFor, savedCard, stateOf, type OfferKind, type Quote, type SavedCard } from "./one-tap";
 import { payLinkFor } from "./pay-link";
-import { PLANS, type PaidPlan } from "./plans";
+import { PLANS, TRIAL_MESSAGES, type PaidPlan } from "./plans";
 import { nextChargeRun, renewalPlan, scheduleCharge } from "./subscription";
 
 export type { OfferKind } from "./one-tap";
@@ -389,7 +389,9 @@ export async function sendInvoiceList(ctx: BillingContext, user: UserRow, to: st
 async function sendStatus(ctx: BillingContext, user: UserRow, to: string): Promise<void> {
   const st = stateOf(await ctx.db.getSubscription(user.id), ctx.now());
   if (!st.paid || !st.sub) {
-    await reply(ctx, user, to, billCopy["bill.trial_pay_link"](payLinkFor(ctx.appUrl, user.id)));
+    // the trial: how many of its messages are left, and the way to a plan ("איזה מנוי אני?")
+    const usage = await ctx.db.getCurrentUsage(user.id);
+    await reply(ctx, user, to, copy["bill.status_trial"](usage ? Math.max(0, usage.free_remaining) : TRIAL_MESSAGES, payLinkFor(ctx.appUrl, user.id)));
     return;
   }
   const plan = st.sub.plan as PaidPlan;
