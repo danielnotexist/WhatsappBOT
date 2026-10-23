@@ -8,6 +8,7 @@ import { GOOGLE_SCOPES, GoogleOAuthError, exchangeGoogleCode, hasScope, isGoogle
 import { sealGoogleTokens, storedGoogleRefreshToken } from "@/lib/google/token-store";
 import { googleConnectShowsUnverified, keepGrantedGmailRead, recordGoogleGrants, type GmailReadKeep } from "@/lib/google/user-cap";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
+import { replaceOtherConnections } from "@/lib/account/service";
 import { getWaSender } from "@/lib/wa";
 
 /** A pending state older than this is refused (the consent screen takes seconds; a stale tab is suspicious). */
@@ -119,6 +120,7 @@ export async function GET(request: Request) {
     const existing = (await db.listConnections(user.id)).find((c) => c.provider === "google" && c.account_email === email);
     const refreshToken = tokens.refreshToken ?? (existing ? await storedGoogleRefreshToken(db, existing).catch(() => null) : null);
     const connection = await db.upsertConnection({ user_id: user.id, provider: "google", account_email: email, tenant_id: null, scopes, consent_type: "user", ...sealGoogleTokens(user.id, { ...tokens, refreshToken }) });
+    await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[google:callback] replacing older connections failed:", (e as Error).message));
 
     // gmail.readonly riding along a plain connect is optional: unticking it is a choice, not a failed connect
     const optional: string[] = feature ? [] : [GOOGLE_SCOPES.gmailReadonly];

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { MemoryDb } from "@/lib/db/memory";
-import { DELETE_CONFIRM_WORD, cancelSubscriptionFor, deleteAccountFor, disconnectConnectionFor, unlinkPhoneFor } from "./service";
+import { activeGoogleConnection } from "@/lib/google";
+import { activeMicrosoftConnection } from "@/lib/ms";
+import { DELETE_CONFIRM_WORD, cancelSubscriptionFor, deleteAccountFor, disconnectConnectionFor, replaceOtherConnections, unlinkPhoneFor } from "./service";
 
 describe("account service", () => {
   it("disconnects only the owner's connection and audits it", async () => {
@@ -15,6 +17,23 @@ describe("account service", () => {
     expect(r.message).toContain("Microsoft 365");
     expect((await db.listConnections(a.id))[0]!.status).toBe("revoked");
     expect(db.audit.some((x) => x.action === "connection.revoke" && x.user_id === a.id)).toBe(true);
+  });
+
+  it("one account per provider: a new connect replaces the older one, and the tools use the newest", async () => {
+    const db = new MemoryDb();
+    const a = await db.createUser("a@b.co");
+    const admin = db.seedConnection(a.id, "microsoft", "admin@tenant.onmicrosoft.com");
+    const google = db.seedConnection(a.id, "google", "a@gmail.com");
+    const real = db.seedConnection(a.id, "microsoft", "daniel@office.co.il");
+    // before the replacement (rows from before this fix): the newest active account wins
+    expect(activeMicrosoftConnection(await db.listConnections(a.id))!.id).toBe(real.id);
+    const revoked: string[] = [];
+    expect(await replaceOtherConnections(db, a.id, real, async (_db, c) => void revoked.push(c.id))).toBe(1);
+    expect(revoked).toEqual([admin.id]);
+    const rows = await db.listConnections(a.id);
+    expect(rows.find((c) => c.id === admin.id)!.status).toBe("revoked");
+    expect(rows.find((c) => c.id === real.id)!.status).toBe("active");
+    expect(activeGoogleConnection(rows)!.id).toBe(google.id); // the other provider is untouched
   });
 
   it("unlinks a phone", async () => {

@@ -35,8 +35,9 @@ export function googleForConnection(db: Db, connection: ConnectionRow): GoogleCl
   });
 }
 
+/** The account the assistant works with: the most recently connected active one (the list is oldest first). */
 export function activeGoogleConnection(connections: ConnectionRow[]): ConnectionRow | null {
-  return connections.find((c) => c.provider === "google" && c.status === "active") ?? null;
+  return connections.findLast((c) => c.provider === "google" && c.status === "active") ?? null;
 }
 
 /** Google client + time zone for the user's active Google connection, or null. */

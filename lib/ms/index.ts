@@ -36,8 +36,9 @@ export function graphForConnection(db: Db, connection: ConnectionRow): GraphClie
   });
 }
 
+/** The account the assistant works with: the most recently connected active one (the list is oldest first). */
 export function activeMicrosoftConnection(connections: ConnectionRow[]): ConnectionRow | null {
-  return connections.find((c) => c.provider === "microsoft" && c.status === "active") ?? null;
+  return connections.findLast((c) => c.provider === "microsoft" && c.status === "active") ?? null;
 }
 
 /** Graph + time zone for the user's active Microsoft connection, or null. */

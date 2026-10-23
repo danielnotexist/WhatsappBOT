@@ -609,3 +609,8 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - כתובות החזרה אומתו מול שני הספקים (`https://alze.vercel.app/api/auth/microsoft/callback`, `.../google/callback`). ה-webhook של Graph (`/api/graph/notify`) פתוח אחרי המעבר ל-Standard Protection.
 - חיבורי ההדגמה הישנים (fixture) נמחקו מ-Supabase, כדי שהחיבור האמיתי יחליף אותם.
 - בדיקות: `lib/demo-factories.test.ts` - כל דגל פותח רק את הספק שלו, והסוד של הספק השני עדיין נדחה.
+
+## בדיקה חיה של דניאל (23.10 לילה) - חשבון מיקרוסופט הלא נכון
+- **התקלה:** דניאל חיבר שני חשבונות Microsoft באותו tenant (קודם חשבון ה-admin של onmicrosoft.com בלי תיבת דואר, אחר כך daniel@secureops.co.il). `activeMicrosoftConnection` בחר את הראשון ברשימה (הישן), ולכן כל קריאה למייל ול-OneDrive החזירה "התיבה לא פעילה".
+- **התיקון:** `activeMicrosoftConnection` / `activeGoogleConnection` בוחרים את החיבור הפעיל האחרון. ה-callback של כל ספק מנתק עכשיו חיבורים קודמים של אותו ספק (`replaceOtherConnections` ב-`lib/account/service.ts`, דרך אותו ניתוק של האזור האישי) - חשבון אחד לכל ספק.
+- בדיקה: `lib/account/service.test.ts`.

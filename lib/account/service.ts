@@ -19,6 +19,21 @@ export async function disconnectConnectionFor(db: Db, userId: string, connection
   return { ok: true, message: `החיבור ל-${row.provider === "microsoft" ? "Microsoft 365" : "Google"} נותק.` };
 }
 
+/**
+ * One account per provider: after a new connect, every other active connection of the same provider is disconnected
+ * (provider revoke + local tokens wiped), so the tools never keep working with an older account — e.g. an admin
+ * account without a mailbox connected first, then the real one.
+ */
+export async function replaceOtherConnections(db: Db, userId: string, keep: ConnectionRow, revoke: ProviderRevoker = revokeAtProvider): Promise<number> {
+  let replaced = 0;
+  for (const c of await db.listConnections(userId)) {
+    if (c.id === keep.id || c.provider !== keep.provider || c.status !== "active") continue;
+    const result = await disconnectConnectionFor(db, userId, c.id, revoke).catch(() => null);
+    if (result?.ok) replaced++;
+  }
+  return replaced;
+}
+
 export async function unlinkPhoneFor(db: Db, userId: string, identityId: string): Promise<AccountActionResult> {
   if (!identityId) return { ok: false, message: "לא נבחר מספר." };
   const ok = await db.unlinkWaIdentity(userId, identityId);

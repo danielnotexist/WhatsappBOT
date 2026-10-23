@@ -5,6 +5,7 @@ import { EnvError } from "@/lib/env";
 import { copy } from "@/lib/copy/bot";
 import { activeMicrosoftConnection, getMsConfig, graphForConnection } from "@/lib/ms";
 import { MsOAuthError, exchangeCode, parseIdToken } from "@/lib/ms/oauth";
+import { replaceOtherConnections } from "@/lib/account/service";
 import { ensureInboxSubscription } from "@/lib/ms/subscriptions";
 import { sealTokens } from "@/lib/ms/token-store";
 import { getWaSender } from "@/lib/wa";
@@ -86,6 +87,7 @@ export async function GET(request: Request) {
     const accountEmail = (claims.email ?? claims.preferred_username ?? user.email).toLowerCase();
     const connection = await db.upsertConnection({ user_id: user.id, provider: "microsoft", account_email: accountEmail, tenant_id: claims.tid, scopes: tokens.scope, consent_type: pending.admin ? "admin" : "user", ...sealTokens(user.id, tokens) });
     await db.addAudit({ user_id: user.id, action: "ms.connect", target: accountEmail, result: "ok" });
+    await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[ms:callback] replacing older connections failed:", (e as Error).message));
     try {
       const graph = graphForConnection(db, activeMicrosoftConnection([connection]) ?? connection);
       const me = await graph.me();
