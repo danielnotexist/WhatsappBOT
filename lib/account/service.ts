@@ -1,5 +1,6 @@
 import type { ConnectionRow, Db } from "@/lib/db/types";
 import { revokeAtProvider } from "@/lib/google/revoke";
+import { setAlertsEnabled } from "@/lib/proactive/actions";
 
 /** Business logic of the personal area — framework-free so it is unit-testable with MemoryDb. */
 export type AccountActionResult = { ok: true; message: string } | { ok: false; message: string };
@@ -32,6 +33,14 @@ export async function replaceOtherConnections(db: Db, userId: string, keep: Conn
     if (result?.ok) replaced++;
   }
   return replaced;
+}
+
+/** /account → הגדרות: proactive alerts on / off (pro only — another plan gets the pro line as the error). */
+export async function setProactiveAlertsFor(db: Db, userId: string, enabled: boolean, now: Date): Promise<AccountActionResult> {
+  const user = await db.getUser(userId);
+  if (!user) return { ok: false, message: "החשבון לא נמצא." };
+  const r = await setAlertsEnabled(db, user, enabled, now, "account");
+  return r.ok ? { ok: true, message: enabled ? "ההתראות היזומות פעילות." : "ההתראות היזומות כבויות." } : { ok: false, message: r.message };
 }
 
 export async function unlinkPhoneFor(db: Db, userId: string, identityId: string): Promise<AccountActionResult> {

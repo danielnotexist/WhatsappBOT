@@ -23,6 +23,7 @@ import { transcribeVoiceNote } from "./voice";
 import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
 import { rtlLines } from "@/lib/wa/rtl";
+import { handleAlertButton, handleAlertCommand } from "@/lib/proactive/actions";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -151,6 +152,14 @@ async function afterStored(
     return { handled: true, note: "reminder button" };
   }
 
+  // 2a'. proactive alert buttons and list rows (lib/proactive/actions.ts): a reminder or a mark right here; a reply
+  //      draft, a brief or a meeting change goes on to the assistant as a request (the usual approval cards)
+  if (isButton && msg.reply?.id.startsWith("al:")) {
+    const press = await handleAlertButton(ctx, user, to, msg.reply.id);
+    if (press.handled) return { handled: true, note: press.note };
+    msg = { ...msg, type: "text", text: press.request };
+  }
+
   // 2b. billing buttons (one-tap upgrade / retry / renew, cancel, card update) — work even while paused
   if (await handleBillingPress(ctx, user, msg)) return { handled: true, note: "billing button" };
 
@@ -167,6 +176,9 @@ async function afterStored(
   //     Not while the agent flow waits for typed text: "חשבוניות" there is an agent's name, not "send my receipts".
   const draftAwaitsText = agentDraftAwaitsText(user, ctx.now());
   if (!draftAwaitsText && (await handleBillingText(ctx, user, msg))) return { handled: true, note: "billing command" };
+
+  // 3a'. "בלי התראות" / "להחזיר התראות" — the proactive alerts' switch (pro), not counted, no model
+  if (!draftAwaitsText && msg.type === "text" && msg.text && (await handleAlertCommand(ctx, user, to, msg.text))) return { handled: true, note: "alerts command" };
 
   // 3b. onboarding questions (not while the agent flow waits for a typed name: that text belongs to the flow)
   if (onboardingOf(user) && !draftAwaitsText && (await handleOnboarding(ctx, user, msg))) return { handled: true, note: "onboarding" };

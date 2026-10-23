@@ -15,6 +15,8 @@ export interface MorningSummaryParts {
   meetings: string[];
   emails: string[];
   reminders: string[];
+  /** pro: "דברים שכדאי לא לפספס" (docs/copy/bot-copy-proactive.md) — first, right under the greeting */
+  dontMiss?: string[];
   closer: string;
 }
 
@@ -43,6 +45,7 @@ export const copyM5 = {
   "act.morning.summary": (p: MorningSummaryParts) =>
     [
       `*בוקר טוב. ${p.dayLabel}*`,
+      p.dontMiss?.length ? `*דברים שכדאי לא לפספס*\n${p.dontMiss.join("\n")}` : "",
       p.meetings.length ? `*פגישות היום*\n${p.meetings.join("\n")}` : "",
       p.emails.length ? `*מיילים שמחכים לתשובה*\n${p.emails.join("\n")}` : "",
       p.reminders.length ? `*תזכורות*\n${p.reminders.join("\n")}` : "",

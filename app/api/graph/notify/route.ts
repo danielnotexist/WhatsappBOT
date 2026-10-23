@@ -1,9 +1,10 @@
 import { getDb } from "@/lib/db";
+import { queueScanSoon } from "@/lib/proactive/alerts";
 
 /**
  * Microsoft Graph change notifications (PLAN §2): validation handshake (echo validationToken as text/plain),
- * then notifications whose clientState matches a stored subscription. Answers 202 fast; the actual
- * "new mail" handling (morning summary / proactive nudges) arrives with Milestone 5 — here we only audit.
+ * then notifications whose clientState matches a stored subscription. Answers 202 fast; a
+ * new mail queues a proactive scan (pro, lib/proactive/alerts.ts); everything is audited.
  */
 export async function POST(request: Request) {
   const url = new URL(request.url);
@@ -25,6 +26,11 @@ export async function POST(request: Request) {
     accepted++;
     const connection = await db.getConnection(sub.connection_id);
     await db.addAudit({ user_id: connection?.user_id ?? null, action: "graph.notification", target: n.resource ?? "", result: n.changeType ?? "" });
+    // new mail → a proactive scan soon (pro with alerts on, in alert hours; at most one per 10 minutes — lib/proactive/alerts.ts)
+    if (connection?.user_id && n.changeType === "created") {
+      const user = await db.getUser(connection.user_id);
+      if (user) await queueScanSoon(db, user, new Date()).catch((e: unknown) => console.warn("[graph] scan queue failed:", (e as Error).message));
+    }
   }
   return Response.json({ accepted }, { status: 202 });
 }

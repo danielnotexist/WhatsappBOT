@@ -39,6 +39,10 @@ import type {
   ReminderStatus,
   NewSupportTicket,
   SupportTicketRow,
+  NewProactiveItem,
+  ProactiveAlertRow,
+  ProactiveClaimResult,
+  ProactiveStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -73,6 +77,7 @@ export class MemoryDb implements Db {
   agents: AgentRow[] = [];
   billingApprovals: BillingApprovalRow[] = [];
   supportTickets: SupportTicketRow[] = [];
+  proactiveAlerts: ProactiveAlertRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -170,6 +175,7 @@ export class MemoryDb implements Db {
     this.billingApprovals = this.billingApprovals.filter((a) => a.user_id !== id);
     for (const key of [...this.aiSpendUsers.keys()]) if (key.endsWith(`|${id}`)) this.aiSpendUsers.delete(key); // the day totals stay
     for (const t of this.supportTickets) if (t.user_id === id) t.user_id = null; // SQL: on delete set null
+    this.proactiveAlerts = this.proactiveAlerts.filter((a) => a.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -677,6 +683,50 @@ export class MemoryDb implements Db {
     const ticket: SupportTicketRow = { id: randomUUID(), created_at: iso(this.now()), status: "open", ...row };
     this.supportTickets.push(ticket);
     return ticket;
+  }
+
+  // ---- proactive_alerts (migration 0013): mirrors proactive_alert_claim() and the (user, channel, item, day) key ----
+
+  async claimProactiveAlert(item: NewProactiveItem, opts: { cap: number; deliver: boolean }): Promise<{ result: ProactiveClaimResult; alert: ProactiveAlertRow | null }> {
+    if (!this.users.has(item.user_id)) throw new Error(`proactive_alerts: unknown user ${item.user_id}`);
+    const known = this.proactiveAlerts.some((a) => a.user_id === item.user_id && a.item_key === item.item_key && (a.channel === "urgent" || a.local_day === item.local_day));
+    if (known) return { result: "duplicate", alert: null };
+    const sent = this.proactiveAlerts.filter((a) => a.user_id === item.user_id && a.channel === "urgent" && a.local_day === item.local_day && a.status === "sent").length;
+    const capped = opts.deliver && sent >= Math.max(opts.cap, 0);
+    const deliver = opts.deliver && !capped;
+    const row: ProactiveAlertRow = { id: randomUUID(), ...item, payload: structuredClone(item.payload), channel: "urgent", status: deliver ? "sent" : "deferred", created_at: iso(this.now()) };
+    this.proactiveAlerts.push(row);
+    return { result: deliver ? "claimed" : capped ? "cap" : "deferred", alert: structuredClone(row) };
+  }
+
+  async addProactiveSummaryItem(item: NewProactiveItem): Promise<ProactiveAlertRow> {
+    if (!this.users.has(item.user_id)) throw new Error(`proactive_alerts: unknown user ${item.user_id}`);
+    const existing = this.proactiveAlerts.find((a) => a.user_id === item.user_id && a.channel === "summary" && a.item_key === item.item_key && a.local_day === item.local_day);
+    if (existing) {
+      existing.payload = structuredClone(item.payload);
+      return structuredClone(existing);
+    }
+    const row: ProactiveAlertRow = { id: randomUUID(), ...item, payload: structuredClone(item.payload), channel: "summary", status: "listed", created_at: iso(this.now()) };
+    this.proactiveAlerts.push(row);
+    return structuredClone(row);
+  }
+
+  async getProactiveAlert(userId: string, id: string): Promise<ProactiveAlertRow | null> {
+    const row = this.proactiveAlerts.find((a) => a.id === id && a.user_id === userId);
+    return row ? structuredClone(row) : null;
+  }
+
+  async foldDeferredProactiveAlerts(userId: string, since: Date): Promise<ProactiveAlertRow[]> {
+    const rows = this.proactiveAlerts
+      .filter((a) => a.user_id === userId && a.channel === "urgent" && a.status === "deferred" && Date.parse(a.created_at) >= since.getTime())
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    for (const r of rows) r.status = "folded";
+    return rows.map((r) => structuredClone(r));
+  }
+
+  async setProactiveAlertStatus(userId: string, id: string, status: ProactiveStatus): Promise<void> {
+    const row = this.proactiveAlerts.find((a) => a.id === id && a.user_id === userId && a.channel === "urgent");
+    if (row && status !== "listed") row.status = status;
   }
 
   // ---- agents: mirrors the 0006 constraints and the enforce_agent_rules trigger ----

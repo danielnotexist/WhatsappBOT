@@ -65,6 +65,7 @@ export function includesHe(e: Entitlements): string {
   if (e.sharepoint) parts.push("SharePoint");
   if (e.driveFullRead) parts.push("חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides)");
   if (e.fileCreate) parts.push("שמירת מסמכים חדשים ב-Drive");
+  if (e.proactive) parts.push("התראות יזומות (״דברים שכדאי לא לפספס״ בסיכום הבוקר, עד 2 התראות דחופות ביום) ואזהרות פישינג");
   return parts.join("; ");
 }
 

@@ -53,7 +53,7 @@ describe("the upgrade face", () => {
       "חיבור למערכות העסק, כמו monday.com",
     ]);
     expect(proAdds().slice(1)).toEqual(planFeatures("pro").lines);
-    expect(proAdds().filter((l) => l.soon).map((l) => l.id)).toEqual(["meetings", "proactive", "business"]);
+    expect(proAdds().filter((l) => l.soon).map((l) => l.id)).toEqual(["meetings", "business"]);
   });
 
   it("a connect the plan refused (?why=): its fixed notice above the offer", () => {

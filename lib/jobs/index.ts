@@ -1,4 +1,6 @@
 import "server-only";
+import { getAiProvider } from "@/lib/ai";
+import { spendGuardFromEnv } from "@/lib/ai/budget";
 import { effectivePlan, providerGate } from "@/lib/billing/plans";
 import { getDb } from "@/lib/db";
 import type { ConnectionProvider, UserRow } from "@/lib/db/types";
@@ -17,14 +19,19 @@ export function getJobDeps(): JobDeps {
     const [sub, connections] = await Promise.all([db.getSubscription(user.id), db.listConnections(user.id)]);
     return providerGate(connections, effectivePlan(sub, new Date())).paused.includes(provider);
   };
+  // the proactive checks' cheap model calls (lib/proactive/classify.ts) pass the daily spend cap when one is configured
+  // (AI_DAILY_BUDGET_USD — reserved before each call, settled after); no user turn behind them, so no per-user count
+  const guard = spendGuardFromEnv(db);
+  const ai = guard ? guard.anonymousAi(getAiProvider(), 20_000) : getAiProvider();
   return {
     db,
     wa: getWaSender(),
     now: () => new Date(),
+    ai,
     async graphFor(user) {
       if (await paused(user, "microsoft")) return null;
       const g = await graphForUser(db, user);
-      return g ? { graph: g.graph, accountEmail: g.connection.account_email } : null;
+      return g ? { graph: g.graph, accountEmail: g.connection.account_email, scopes: g.connection.scopes } : null;
     },
     async googleFor(user) {
       if (await paused(user, "google")) return null;

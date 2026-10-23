@@ -295,7 +295,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
 
   // gmail.readonly granted AND the feature on: GOOGLE_GMAIL_READ_ENABLED=false stops reading for every connection
   if (hasScope(granted, GOOGLE_SCOPES.gmailReadonly) && (deps.gmailReadEnabled ?? gmailReadActive())) {
-    tools.push(...gmailReadTools({ google: deps.google, timeZone: deps.timeZone, accountEmail: deps.accountEmail }));
+    tools.push(...gmailReadTools({ google: deps.google, timeZone: deps.timeZone, accountEmail: deps.accountEmail, phishing: plan.proactive }));
   } else {
     // Without this, a Google-only user asking "what's new in my mail?" would be told to connect an account.
     // Under the user cap it answers with the incremental-consent link; at the cap / when off — one line.

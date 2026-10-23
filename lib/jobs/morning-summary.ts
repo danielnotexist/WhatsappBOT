@@ -9,8 +9,16 @@
  * `morning_summary:<user>:<YYYY-MM-DD>:<HHMM>` — created by SQL `schedule_morning_summaries()` (pg_cron,
  * migration 0005) and by `scheduleMorningSummary()` here (after each run, and when the time changes).
  * The job re-checks everything at run time, so stale jobs (time changed, turned off) are harmless.
+ *
+ * Pro (entitlements.proactive, checked here on the server) with alerts on (profile.alerts_disabled is not true): the
+ * section "דברים שכדאי לא לפספס" (lib/proactive/digest.ts) opens the summary, and inside the window a list of actions
+ * follows it ("לנסח תשובה", "להזכיר מחר"…). Outside the window the template carries the section's lines in its two
+ * sections and its [לנסח תשובה] quick reply carries the first mail. Basic and the trial get the summary as before.
  */
+import type { AiProvider } from "@/lib/ai/types";
 import { oneLineUntrusted } from "@/lib/ai/untrusted";
+import { effectivePlan, entitlements } from "@/lib/billing/plans";
+import { pcopy } from "@/lib/copy/bot-proactive";
 import { copy } from "@/lib/copy/bot";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
@@ -20,7 +28,11 @@ import type { GraphClient, GraphEvent } from "@/lib/ms/graph";
 import { emailsAwaitingReply, type MailLike, type SentRef } from "./awaiting-reply";
 import { DEFAULT_TZ, addDays, clockHe, dateKey, dayLabelHe, localDateOf, parseClock, parseDateKey, weekdayOf, zonedParts, zonedToUtc, type LocalDate } from "@/lib/time/zoned";
 import { morningSummaryTemplate } from "@/lib/wa/templates";
-import { sendProactive, type ProactiveDeps } from "./proactive";
+import { activePhone, sendProactive, type ProactiveDeps } from "./proactive";
+import { modelClassifier, noClassifier } from "@/lib/proactive/classify";
+import { DIGEST_LIMITS, buildDigest, type Digest } from "@/lib/proactive/digest";
+import { gatherSources } from "@/lib/proactive/sources";
+import { msHasScope } from "@/lib/ms/oauth";
 
 /** Sunday–Thursday (onb.morning_time_ack: "בימי א׳–ה׳") */
 export const MORNING_DAYS = [0, 1, 2, 3, 4];
@@ -28,14 +40,25 @@ const MAX_MEETINGS = 8;
 const MAX_EMAILS = 5;
 
 export interface MorningDeps extends ProactiveDeps {
-  /** Graph for the user's active Microsoft connection (null when not connected) */
-  graphFor(user: UserRow): Promise<{ graph: GraphClient; accountEmail: string | null } | null>;
+  /** Graph for the user's active Microsoft connection (null when not connected); `scopes`: the grant ("לסמן כחשוד" needs Mail.ReadWrite) */
+  graphFor(user: UserRow): Promise<{ graph: GraphClient; accountEmail: string | null; scopes?: string[] } | null>;
   /**
    * Google for the user's active Google connection (null / absent when not connected): the calendar always;
    * `gmail` only when the connection granted gmail.readonly (users past the unverified-app cap have none, so their
    * summary has no "emails awaiting a reply" from Gmail).
    */
   googleFor?(user: UserRow): Promise<{ google: Pick<GoogleClient, "listEvents">; gmail?: Pick<GmailReader, "awaitingReplyInputs"> | null; accountEmail?: string | null } | null>;
+  /**
+   * The cheap model for the proactive checks' open cases (lib/proactive/classify.ts), already behind the spend guard
+   * when one is configured; absent → rules only.
+   */
+  ai?: AiProvider;
+}
+
+/** Proactive alerts for this user: pro (server-side entitlement) and not turned off ("בלי התראות" / the toggle in /account). */
+export async function proactiveAlertsOn(db: Db, user: UserRow, now: Date): Promise<boolean> {
+  if (user.profile.alerts_disabled === true || user.profile.proactive_disabled === true || user.deleted_at) return false;
+  return entitlements(effectivePlan(await db.getSubscription(user.id), now)).proactive;
 }
 
 const tzOf = (user: UserRow) => user.timezone || DEFAULT_TZ;
@@ -142,6 +165,8 @@ export interface MorningSummary {
   meetingLinks?: (string | null)[];
   emails: string[];
   reminders: string[];
+  /** pro: "דברים שכדאי לא לפספס" (absent on basic / trial / alerts off) */
+  dontMiss?: Digest;
   closer: string;
   /** Graph or Google Calendar was reachable (meetings / emails are real, not just missing) */
   connected: boolean;
@@ -162,7 +187,7 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   const dayEnd = zonedToUtc({ ...addDays(day, 1), hour: 0, minute: 0 }, tz);
 
   const dayEvents: DayEvent[] = [];
-  const awaiting: MailLike[] = [];
+  const awaiting: (MailLike & { id?: string })[] = [];
   let connected = false;
   const g = await deps.graphFor(user).catch(() => null);
   if (g) {
@@ -202,11 +227,40 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       }
     }
   }
+  // pro: the section "דברים שכדאי לא לפספס" — its own reads (headers, 14 days of mail, sent recipients), so the summary
+  // of basic and the trial stays exactly as it was
+  let dontMiss: Digest | undefined;
+  if (await proactiveAlertsOn(deps.db, user, now)) {
+    try {
+      const sources = await gatherSources(
+        g ? { graph: g.graph, accountEmail: g.accountEmail } : null,
+        google ? { google: google.google, gmail: google.gmail ?? null, accountEmail: google.accountEmail ?? null } : null,
+        { now, mailSince: new Date(now.getTime() - DIGEST_LIMITS.lookbackDays * 86_400_000), sentSince: new Date(now.getTime() - 60 * 86_400_000), eventsFrom: dayStart, eventsTo: dayEnd, tz },
+        user.id,
+      );
+      const canMarkMs = Boolean(g) && msHasScope(g?.scopes ?? [], "Mail.ReadWrite");
+      dontMiss = await buildDigest({
+        db: deps.db,
+        userId: user.id,
+        now,
+        tz,
+        day,
+        sources: { ...sources, canMark: (p) => p === "microsoft" && canMarkMs },
+        classifier: deps.ai ? modelClassifier(deps.ai, { maxCalls: 3 }) : noClassifier,
+      });
+      if (!dontMiss.lines.length) dontMiss = undefined;
+    } catch (e) {
+      console.warn(`[morning] proactive section failed for ${user.id}:`, (e as Error).message);
+    }
+  }
+
   const sorted = [...dayEvents].sort(byStart);
   const meetings = capped(sorted.map(meetingLine), MAX_MEETINGS);
   const meetingLinks = sorted.slice(0, MAX_MEETINGS).map((e) => e.joinUrl);
   // both mailboxes, newest first
+  const inSection = new Set(dontMiss?.mailIds ?? []);
   const emails = awaiting
+    .filter((m) => !m.id || !inSection.has(m.id))
     .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
     .slice(0, MAX_EMAILS)
     .map(emailLine);
@@ -218,7 +272,7 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   });
 
   const base = { meetings, emails, reminders, connected };
-  return { dayLabel: dayLabelHe(day), ...base, meetingLinks, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
+  return { dayLabel: dayLabelHe(day), ...base, meetingLinks, ...(dontMiss ? { dontMiss } : {}), closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length && !dontMiss };
 }
 
 /**
@@ -231,7 +285,7 @@ export const MORNING_TEXT_BUDGET = 3_500;
 export function renderMorningText(s: MorningSummary): string {
   if (s.empty) return copyM5["act.morning.empty"](s.dayLabel);
   const meetings = [...s.meetings];
-  const render = () => copyM5["act.morning.summary"]({ ...s, meetings });
+  const render = () => copyM5["act.morning.summary"]({ ...s, meetings, dontMiss: s.dontMiss?.lines });
   for (const [i, url] of (s.meetingLinks ?? []).entries()) {
     if (!url || i >= meetings.length) continue;
     const plain = meetings[i]!;
@@ -242,6 +296,19 @@ export function renderMorningText(s: MorningSummary): string {
     }
   }
   return render();
+}
+
+/** The list of actions under the summary; a failure is logged, the summary itself already went out. */
+async function sendDigestActions(deps: MorningDeps, user: UserRow, digest: Digest): Promise<void> {
+  const phone = await activePhone(deps.db, user.id);
+  if (!phone) return;
+  try {
+    const body = pcopy["alert.actions.body"]();
+    const r = await deps.wa.sendList(phone, body, pcopy["alert.actions.button"](), [{ rows: digest.rows }]);
+    await deps.db.insertMessage({ user_id: user.id, direction: "out", type: "button", text: body, wa_message_id: r.messageId || null });
+  } catch (e) {
+    console.warn(`[morning] actions list failed for ${user.id}:`, (e as Error).message);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -276,8 +343,16 @@ export async function runMorningSummaryJob(deps: MorningDeps, job: Pick<JobRow, 
 
     const summary = await buildMorningSummary(deps, user, day);
     if (!summary.connected && summary.empty) return { status: "skipped", reason: "nothing to report (no connection)" };
-    const sent = await sendProactive(deps, user, { text: renderMorningText(summary), template: morningSummaryTemplate(summary) });
+    const template = morningSummaryTemplate(
+      summary.dontMiss
+        ? { ...summary, meetings: [...summary.meetings, ...summary.dontMiss.calendarLines], emails: [...summary.dontMiss.mailLines, ...summary.emails], replyAlertId: summary.dontMiss.replyId }
+        : summary,
+    );
+    const sent = await sendProactive(deps, user, { text: renderMorningText(summary), template });
     if (!sent.sent) return { status: "skipped", reason: sent.reason };
+    // pro, inside the window: the section's actions as one list right under the summary (outside it the template's
+    // quick reply carries the first mail, and a reply to the summary opens the window for the rest)
+    if (sent.mode === "text" && summary.dontMiss?.rows.length) await sendDigestActions(deps, user, summary.dontMiss);
     await deps.db.mergeUserProfile(user.id, { morning_summary_last_date: localDate, morning_summary_last_sent_at: now.toISOString() });
     await deps.db.addAudit({ user_id: user.id, action: "morning_summary.send", target: localDate, result: sent.mode });
     return { status: "sent", mode: sent.mode, localDate };

@@ -90,7 +90,8 @@ graph_subscriptions id, connection_id, subscription_id, resource, expires_at, cl
 messages          id, user_id, wa_message_id (unique), direction (in|out), type (text|audio|image|doc|button|template), text, media_url, transcript, model_used, tokens_in, tokens_out, cost_usd, agent_key, hidden_from_model (ניהול סוכנים — לא נשלח למודל), created_at
 conversation_state user_id (pk), summary, last_summarized_msg_id, facts jsonb, updated_at
 pending_actions   id, user_id, kind (send_mail|create_event|update_event|delete_event|share_file|forward_mail), payload jsonb, status (pending|approved|edited|cancelled|executed|expired), expires_at, approved_msg_id, executed_at, agent_key, agent_name (תקרה יומית לסוכן — טריגר enforce_agent_daily_cap)
-jobs              id, user_id, kind (morning_summary|reminder|renew_subscription|charge|retry), run_at, payload jsonb, status, attempts, last_error
+jobs              id, user_id, kind (morning_summary|reminder|renew_subscription|charge|retry|proactive_scan), run_at, payload jsonb, status, attempts, last_error
+proactive_alerts (0013) id, user_id, item_key, kind, channel (urgent|summary), status (sent|deferred|folded|listed), local_day, payload (מטא-דאטה בלבד), created_at — התקרה של 2 ביום אטומית ב-proactive_alert_claim(); נמחק אחרי 30 יום
 reminders         id, user_id, text, due_at, job_id, status
 usage             user_id, period_start, counted_messages, free_remaining, plan_limit, updated_at
 subscriptions     id, user_id, plan (trial|basic|pro), status (trial|active|past_due|cancelled), hyp_token_enc, hyp_tokef, hyp_hkid, next_charge_at, cancelled_at
@@ -123,7 +124,8 @@ RLS: `user_id = auth.uid()` על הכול; הבוט פועל עם service-role �
 | שמירת מסמכים חדשים ב-Drive (OneDrive: עוד לא) | – | ✓ |
 | סוכנים מובנים (מזכירה / מתמחה / מנהלת חשבונות) | – | ✓ (כולל התאמה והשבתה) |
 | סוכנים משלך | 1 | עד 3 |
-| סיכומי פגישות · התראות יזומות ואזהרות פישינג · מערכות העסק (monday ועוד) | – | בקרוב |
+| התראות יזומות ("דברים שכדאי לא לפספס" בסיכום הבוקר + עד 2 התראות דחופות ביום, 08:00–20:00, לא בשבת ובחג) ואזהרות פישינג | – | ✓ (23.10.2026) |
+| סיכומי פגישות · מערכות העסק (monday ועוד) | – | בקרוב |
 
 - **תקופת ניסיון (10 הודעות):** כמו בסיסי בחיבורים ובשירותים (חשבון אחד, בלי שירותי פרו), כדי שלשדרוג יהיה ערך; הסוכנים המובנים כמו שהם (ההחלטה הקודמת, docs/design/agents.md §0.3).
 - **מי שחיבר שני חשבונות לפני החלוקה (או ירד מפרו לבסיסי):** לא מנתקים ולא מוחקים. החשבון שחובר אחרון פעיל, השני "מושהה" (הכלים, סיכום הבוקר וההקשר של המודל לא משתמשים בו), והאזור האישי מציג הודעה: לנתק אחד מהם או לשדרג.

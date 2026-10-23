@@ -42,12 +42,16 @@ export function reminderTemplate(reminderId: string, text: string, requestedAt: 
   };
 }
 
-/** `morning_summary`: {{1}} day, {{2}} meetings, {{3}} emails, {{4}} reminders (body ≤ 1,024 chars in total). */
-export function morningSummaryTemplate(p: { dayLabel: string; meetings: string[]; emails: string[]; reminders: string[] }): TemplateSend {
+/**
+ * `morning_summary`: {{1}} day, {{2}} meetings, {{3}} emails, {{4}} reminders (body ≤ 1,024 chars in total).
+ * `replyAlertId` (pro): the [לנסח תשובה] quick reply carries `al:reply:<id>` — the first mail of "דברים שכדאי לא
+ * לפספס" (lib/proactive/digest.ts); without it the button's payload is its text, as before.
+ */
+export function morningSummaryTemplate(p: { dayLabel: string; meetings: string[]; emails: string[]; reminders: string[]; replyAlertId?: string | null }): TemplateSend {
   return {
     name: "morning_summary",
     params: [templateParam(p.dayLabel, 40), templateParam(p.meetings.join("\n"), 300), templateParam(p.emails.join("\n"), 300), templateParam(p.reminders.join("\n"), 200)],
-    buttons: [],
+    buttons: p.replyAlertId ? [{ index: 0, subType: "quick_reply", text: `al:reply:${p.replyAlertId}` }] : [],
   };
 }
 

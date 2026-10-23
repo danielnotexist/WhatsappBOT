@@ -29,7 +29,7 @@ export const GMAIL_LIMITS = {
   concurrency: 5,
 } as const;
 
-const METADATA_HEADERS = ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence"];
+const METADATA_HEADERS = ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence", "Reply-To", "Importance", "X-Priority"];
 /** Gmail's own tabs and chat history — never "awaiting a reply" */
 export const GMAIL_NOT_PERSONAL = "-category:promotions -category:social -category:updates -category:forums -in:chats";
 
@@ -62,6 +62,10 @@ export interface GmailMessage {
   inInbox: boolean;
   /** List-Unsubscribe / Auto-Submitted / Precedence: bulk — a mailing, not a person */
   automated: boolean;
+  /** Reply-To (empty when the header is absent) — the phishing checks compare it with From (lib/proactive/phishing.ts) */
+  replyTo: GmailAddress[];
+  /** "high" when Importance: high or X-Priority 1–2; "low" / "normal" likewise; null when neither header is set */
+  importance: "high" | "normal" | "low" | null;
   hasAttachments: boolean;
   /** format=full only */
   attachments?: GmailAttachmentInfo[];
@@ -264,21 +268,37 @@ export class GmailReader {
    * their messages from others (inbox side) and the account's own replies (SENT) — one threads.list + one
    * threads.get per thread, so a reply sent from any device counts.
    */
-  async awaitingReplyInputs(opts: { newerThanDays?: number; maxThreads?: number } = {}): Promise<{ inbox: (MailLike & { id: string; message: GmailMessage })[]; sent: SentRef[] }> {
+  async awaitingReplyInputs(opts: { newerThanDays?: number; maxThreads?: number } = {}): Promise<{ inbox: (MailLike & { id: string; message: GmailMessage })[]; sent: SentRef[]; contacts: GmailAddress[] }> {
     const days = clamp(opts.newerThanDays ?? 7, 1, 30);
     const { threads } = await this.listThreads({ q: `in:inbox newer_than:${days}d ${GMAIL_NOT_PERSONAL}`, maxResults: clamp(opts.maxThreads ?? 15, 1, 50) });
     const full = await mapLimit(threads, GMAIL_LIMITS.concurrency, (t) => skipGone(this.getThread(t.id)));
     const inbox: (MailLike & { id: string; message: GmailMessage })[] = [];
     const sent: SentRef[] = [];
+    // who the account wrote to in these threads — the "known contacts" of the proactive checks (lib/proactive)
+    const contacts = new Map<string, GmailAddress>();
     for (const t of full) {
       if (!t) continue;
       for (const m of t.messages) {
-        if (m.sent) sent.push({ conversationId: m.threadId, sentDateTime: m.date });
-        else if (!m.automated && !m.labelIds.includes("DRAFT")) inbox.push(toMailLike(m));
+        if (m.sent) {
+          sent.push({ conversationId: m.threadId, sentDateTime: m.date });
+          for (const a of [...m.to, ...m.cc]) if (!contacts.has(a.address)) contacts.set(a.address, a);
+        } else if (!m.automated && !m.labelIds.includes("DRAFT")) inbox.push(toMailLike(m));
       }
     }
-    return { inbox, sent };
+    return { inbox, sent, contacts: [...contacts.values()] };
   }
+}
+
+/**
+ * Who the account wrote to lately (To and Cc of its sent messages, lower-case, no duplicates): the "known contacts" the
+ * phishing checks compare a sender with. One messages.list + one metadata get per sent message (≤ `max`).
+ */
+export async function gmailSentRecipients(reader: GmailReader, opts: { newerThanDays?: number; max?: number } = {}): Promise<GmailAddress[]> {
+  const { ids } = await reader.listMessageIds({ q: `in:sent newer_than:${clamp(opts.newerThanDays ?? 60, 1, 365)}d`, maxResults: clamp(opts.max ?? 15, 1, 50) });
+  const msgs = await mapLimit(ids, GMAIL_LIMITS.concurrency, (m) => skipGone(reader.getMessageMetadata(m.id)));
+  const seen = new Map<string, GmailAddress>();
+  for (const m of msgs) for (const a of [...(m?.to ?? []), ...(m?.cc ?? [])]) if (!seen.has(a.address)) seen.set(a.address, a);
+  return [...seen.values()];
 }
 
 export function toMailLike(m: GmailMessage): MailLike & { id: string; message: GmailMessage } {
@@ -293,6 +313,9 @@ function mapMessage(r: RawMessage): GmailMessage {
   const date = Number.isFinite(internal) && internal > 0 ? new Date(internal).toISOString() : dateHeader && Number.isFinite(Date.parse(dateHeader)) ? new Date(dateHeader).toISOString() : "";
   const precedence = (header(h, "Precedence") ?? "").toLowerCase();
   const autoSubmitted = (header(h, "Auto-Submitted") ?? "no").toLowerCase();
+  const importanceHeader = (header(h, "Importance") ?? "").trim().toLowerCase();
+  const xPriority = Number((header(h, "X-Priority") ?? "").trim().charAt(0));
+  const importance = importanceHeader === "high" || xPriority === 1 || xPriority === 2 ? "high" : importanceHeader === "low" || xPriority === 4 || xPriority === 5 ? "low" : importanceHeader || xPriority ? "normal" : null;
   const parts: RawPart[] = [];
   walk(r.payload, (p) => parts.push(p));
   const attachments = parts.some((p) => p !== r.payload && isAttachment(p));
@@ -311,6 +334,8 @@ function mapMessage(r: RawMessage): GmailMessage {
     inInbox: labels.includes("INBOX"),
     automated: Boolean(header(h, "List-Unsubscribe")) || (autoSubmitted !== "no" && autoSubmitted !== "") || ["bulk", "list", "junk"].includes(precedence),
     hasAttachments: attachments || (r.payload?.mimeType ?? "").startsWith("multipart/mixed"),
+    replyTo: parseAddressList(header(h, "Reply-To")),
+    importance,
   };
 }
 

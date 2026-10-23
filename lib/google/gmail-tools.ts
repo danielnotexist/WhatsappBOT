@@ -7,7 +7,9 @@ import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { zonedParts } from "@/lib/time/zoned";
 import type { GoogleClient } from "./client";
 import { googleErrorOutput } from "./errors";
-import { GmailReader, type GmailAddress, type GmailMessage } from "./gmail";
+import { GmailReader, gmailSentRecipients, type GmailAddress, type GmailMessage } from "./gmail";
+import { fromGmailMessage } from "@/lib/proactive/mail";
+import { lazyKnown, phishingFields } from "@/lib/proactive/read-warning";
 import { gmailReadAccess, googleCapConfig, unverifiedScreenExpected } from "./user-cap";
 
 /**
@@ -21,6 +23,8 @@ export interface GmailToolDeps {
   timeZone: string;
   accountEmail: string | null;
   now?: () => Date;
+  /** pro (entitlements.proactive): the phishing check on every mail it lists or reads (lib/proactive/read-warning.ts) */
+  phishing?: boolean;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -45,6 +49,8 @@ export function gmailReadTools(deps: GmailToolDeps): Tool[] {
       return googleErrorOutput(e);
     }
   };
+  const known = lazyKnown(async () => gmailSentRecipients(new GmailReader(await deps.google())));
+  const warn = async (m: GmailMessage) => (deps.phishing ? phishingFields(fromGmailMessage(m), await known(), self ? [self] : []) : {});
   const compact = (m: GmailMessage) => ({
     id: m.id,
     thread_id: m.threadId,
@@ -67,7 +73,12 @@ export function gmailReadTools(deps: GmailToolDeps): Tool[] {
         guard(async (r) => {
           const q = [String(input.query ?? "").trim() || "in:inbox", input.unread_only ? "is:unread" : ""].filter(Boolean).join(" ");
           const list = await r.searchMessages({ q, maxResults: Math.min(Math.max(Number(input.limit) || 10, 1), 25) });
-          return { count: list.length, messages: list.map(compact), note: UNTRUSTED_MAIL_NOTE };
+          const messages = [];
+          for (const m of list) {
+            const w = await warn(m);
+            messages.push({ ...compact(m), ...("phishing_warning" in w ? w : {}) });
+          }
+          return { count: list.length, messages, note: UNTRUSTED_MAIL_NOTE };
         }),
     },
     {
@@ -87,6 +98,7 @@ export function gmailReadTools(deps: GmailToolDeps): Tool[] {
             body: wrapUntrusted(m.bodyText || m.snippet, { source: "gmail", id: m.id }),
             ...(m.bodyText ? {} : { body_is_preview: true }),
             truncated: Boolean(m.bodyTruncated),
+            ...(await warn(m)),
             note: UNTRUSTED_MAIL_NOTE,
           };
         }),

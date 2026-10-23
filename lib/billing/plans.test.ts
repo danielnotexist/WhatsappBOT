@@ -64,7 +64,7 @@ describe("entitlements: the split of 23.10.2026 (Daniel)", () => {
   });
 
   it("the pro services missing on a plan (what pro_feature answers)", () => {
-    expect(missingProFeatures("basic")).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read"]);
+    expect(missingProFeatures("basic")).toEqual(["second_account", "tasks", "sharepoint", "file_create", "drive_full_read", "proactive"]);
     expect(missingProFeatures("trial")).toEqual(missingProFeatures("basic"));
     expect(missingProFeatures("pro")).toEqual([]);
     for (const f of Object.values(PRO_FEATURES)) expect(f.label).not.toMatch(/[–—]/);
@@ -82,7 +82,7 @@ describe("planFeatures: the plans in words, generated from the entitlements", ()
     expect(basic.lines.some((l) => l.soon)).toBe(false);
   });
 
-  it("pro: 'כל מה שבבסיסי, ובנוסף:' and only what pro adds; meeting summaries, alerts and business systems are 'soon'", () => {
+  it("pro: 'כל מה שבבסיסי, ובנוסף:' and only what pro adds; alerts and phishing warnings available, meeting summaries and business systems 'soon'", () => {
     const pro = planFeatures("pro");
     expect(pro.lead).toBe("כל מה שבבסיסי, ובנוסף:");
     expect(pro.lines.map((l) => [l.id, Boolean(l.soon)])).toEqual([
@@ -93,7 +93,7 @@ describe("planFeatures: the plans in words, generated from the entitlements", ()
       ["file_create", false],
       ["agents", false],
       ["meetings", true],
-      ["proactive", true],
+      ["proactive", false],
       ["business", true],
     ]);
     expect(pro.lines.find((l) => l.id === "agents")!.text).toBe(`שלושת הסוכנים המובנים, ועד ${PLANS.pro.customAgents} סוכנים משלך`);

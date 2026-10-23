@@ -26,6 +26,8 @@ export interface BotContext {
   hyp?: () => HypGateway;
   /** the daily spend cap of paid model / STT calls (lib/ai/budget.ts); absent → calls are not guarded */
   spend?: SpendGuard | null;
+  /** "לסמן כחשוד" on a phishing warning: the user's Microsoft 365 mailbox when it may be modified (lib/proactive/actions.ts) */
+  mailMarker?: (user: UserRow) => Promise<{ markSuspicious(messageId: string): Promise<void> } | null>;
 }
 
 export const LINK = {

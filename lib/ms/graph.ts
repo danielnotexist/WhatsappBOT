@@ -38,6 +38,15 @@ export interface GraphMessage {
   bodyText?: string;
   webLink: string | null;
   conversationId: string | null;
+  /** with `listInbox({ withHeaders })` / `getMessage`: the Reply-To addresses (empty when none) */
+  replyTo?: { name: string; address: string }[];
+  /** "low" | "normal" | "high" (with withHeaders / getMessage) */
+  importance?: string;
+  /**
+   * with `listInbox({ withHeaders })` only: the bulk-mail headers the proactive checks read (List-Unsubscribe,
+   * Auto-Submitted, Precedence), lower-case names; absent headers are left out
+   */
+  headers?: Record<string, string>;
 }
 
 export interface GraphEvent {
@@ -165,6 +174,20 @@ export function htmlToText(html: string): string {
 }
 
 const MSG_SELECT = "id,subject,from,toRecipients,receivedDateTime,isRead,hasAttachments,bodyPreview,webLink,conversationId";
+/** the extra fields of listInbox({ withHeaders }) — internetMessageHeaders is returned only when selected */
+const MSG_HEADERS_SELECT = "replyTo,importance,internetMessageHeaders";
+/** the Outlook category "לסמן כחשוד" adds (shown as a colourless category until the user gives it a colour) */
+export const SUSPICIOUS_CATEGORY = "חשוד - פישינג";
+const BULK_HEADERS = new Set(["list-unsubscribe", "list-id", "auto-submitted", "precedence", "x-auto-response-suppress"]);
+/** The bulk-mail headers of a message, lower-case names (the first value of each). */
+function bulkHeaders(list: { name?: string; value?: string }[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const h of list) {
+    const name = (h.name ?? "").toLowerCase();
+    if (BULK_HEADERS.has(name) && !(name in out)) out[name] = String(h.value ?? "").slice(0, 300);
+  }
+  return out;
+}
 const EVENT_SELECT = "id,subject,start,end,isAllDay,location,attendees,organizer,isOrganizer,webLink,bodyPreview,isOnlineMeeting,onlineMeetingProvider,onlineMeeting";
 
 export class GraphClient {
@@ -242,14 +265,18 @@ export class GraphClient {
       ...(m.body ? { bodyText: m.body.contentType === "html" ? htmlToText(m.body.content ?? "") : (m.body.content ?? "") } : {}),
       webLink: m.webLink ?? null,
       conversationId: m.conversationId ?? null,
+      ...(m.replyTo ? { replyTo: m.replyTo.map((r) => ({ name: r.emailAddress?.name ?? "", address: r.emailAddress?.address ?? "" })) } : {}),
+      ...(typeof m.importance === "string" ? { importance: m.importance } : {}),
+      ...(m.internetMessageHeaders ? { headers: bulkHeaders(m.internetMessageHeaders) } : {}),
     };
   }
 
-  async listInbox(opts: { top?: number; unreadOnly?: boolean; since?: Date } = {}): Promise<GraphMessage[]> {
+  /** `withHeaders`: also Reply-To, importance and the bulk-mail headers (the proactive checks, lib/proactive). */
+  async listInbox(opts: { top?: number; unreadOnly?: boolean; since?: Date; withHeaders?: boolean } = {}): Promise<GraphMessage[]> {
     const filters: string[] = [];
     if (opts.unreadOnly) filters.push("isRead eq false");
     if (opts.since) filters.push(`receivedDateTime ge ${opts.since.toISOString()}`);
-    const q = new URLSearchParams({ $top: String(opts.top ?? 10), $select: MSG_SELECT, $orderby: "receivedDateTime desc" });
+    const q = new URLSearchParams({ $top: String(opts.top ?? 10), $select: opts.withHeaders ? `${MSG_SELECT},${MSG_HEADERS_SELECT}` : MSG_SELECT, $orderby: "receivedDateTime desc" });
     if (filters.length) q.set("$filter", filters.join(" and "));
     const r = await this.request<{ value: RawMessage[] }>("GET", `/me/mailFolders/inbox/messages?${q}`);
     return r.value.map((m) => this.mapMessage(m));
@@ -263,8 +290,36 @@ export class GraphClient {
   }
 
   async getMessage(id: string): Promise<GraphMessage> {
-    const m = await this.request<RawMessage>("GET", `/me/messages/${encodeURIComponent(id)}?$select=${MSG_SELECT},body`);
+    const m = await this.request<RawMessage>("GET", `/me/messages/${encodeURIComponent(id)}?$select=${MSG_SELECT},body,replyTo,importance`);
     return this.mapMessage(m);
+  }
+
+  /**
+   * Who the user wrote to lately (Sent Items: To and Cc, lower-case, newest first, no duplicates) — the "known contacts"
+   * the phishing checks compare a sender with (lib/proactive/phishing.ts).
+   */
+  async sentRecipients(opts: { since?: Date; top?: number } = {}): Promise<{ name: string; address: string }[]> {
+    const q = new URLSearchParams({ $top: String(opts.top ?? 50), $select: "toRecipients,ccRecipients,sentDateTime", $orderby: "sentDateTime desc" });
+    if (opts.since) q.set("$filter", `sentDateTime ge ${opts.since.toISOString()}`);
+    const r = await this.request<{ value?: { toRecipients?: RawAddress[]; ccRecipients?: RawAddress[] }[] }>("GET", `/me/mailFolders/sentitems/messages?${q}`);
+    const seen = new Map<string, { name: string; address: string }>();
+    for (const m of r?.value ?? []) {
+      for (const a of [...(m.toRecipients ?? []), ...(m.ccRecipients ?? [])]) {
+        const address = (a.emailAddress?.address ?? "").trim().toLowerCase();
+        if (address && !seen.has(address)) seen.set(address, { name: a.emailAddress?.name ?? "", address });
+      }
+    }
+    return [...seen.values()];
+  }
+
+  /**
+   * Adds the category SUSPICIOUS_CATEGORY to a message (Mail.ReadWrite) — the user's "לסמן כחשוד" on a phishing warning.
+   * Nothing else changes: the message stays where it is, unread or read, and the category can be removed in Outlook.
+   */
+  async markSuspicious(id: string): Promise<void> {
+    const m = await this.request<{ categories?: string[] }>("GET", `/me/messages/${encodeURIComponent(id)}?$select=categories`);
+    const categories = [...new Set([...(m?.categories ?? []), SUSPICIOUS_CATEGORY])];
+    await this.request("PATCH", `/me/messages/${encodeURIComponent(id)}`, { categories });
   }
 
   async sendMail(input: { to: string[]; cc?: string[]; subject: string; body: string; replyToMessageId?: string; attachments?: { name: string; contentType: string; bytesBase64: string }[] }): Promise<void> {
@@ -527,6 +582,9 @@ interface RawMessage {
   body?: { contentType?: string; content?: string };
   webLink?: string;
   conversationId?: string;
+  replyTo?: RawAddress[];
+  importance?: string;
+  internetMessageHeaders?: { name?: string; value?: string }[];
 }
 interface RawEvent {
   id: string;

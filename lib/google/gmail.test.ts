@@ -31,7 +31,7 @@ describe("Gmail read client (gmail.readonly)", () => {
     expect(list!.searchParams.get("maxResults")).toBe("5");
     expect(get!.pathname).toBe("/gmail/v1/users/me/messages/gm1");
     expect(get!.searchParams.get("format")).toBe("metadata");
-    expect(get!.searchParams.getAll("metadataHeaders")).toEqual(["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence"]);
+    expect(get!.searchParams.getAll("metadataHeaders")).toEqual(["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence", "Reply-To", "Importance", "X-Priority"]);
     expect(hits[0]).toMatchObject({
       threadId: "gt1",
       subject: "הצעת פשרה בתיק 4471",

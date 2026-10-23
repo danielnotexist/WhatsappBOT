@@ -9,7 +9,7 @@ import { SupportChat } from "@/components/brand/support-chat";
 import { Wordmark } from "@/components/brand/wordmark";
 import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
-import { mayConnect, providerGate } from "@/lib/billing/plans";
+import { entitlements, mayConnect, providerGate } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
 import { googleReadGates } from "@/lib/connections/gates";
 import { connectionServices } from "@/lib/connections/services";
@@ -208,6 +208,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
           <AreaPanel area="settings">
             <SettingsArea
               banner={bannerFor("settings")}
+              alerts={{ included: entitlements(plan).proactive, enabled: user.profile.alerts_disabled !== true, payHref }}
               details={[
                 ...(user.name ? [{ label: "שם", value: user.name }] : []),
                 ...(user.business_name ? [{ label: "העסק", value: user.business_name }] : []),

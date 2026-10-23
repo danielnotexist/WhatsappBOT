@@ -61,7 +61,7 @@ describe("system prompt — the product and the account (\"איזה מנוי א�
     expect(BASE_SYSTEM_PROMPT).toContain(`- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות. כולל: ${oneAccount}. שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות) כמו שהם, בלי סוכנים משלך.`);
     expect(BASE_SYSTEM_PROMPT).toContain(`- מסלול בסיסי: ${PLANS.basic.priceIls} ₪ לחודש כולל מע״מ, עד ${PLANS.basic.messages} הודעות בחודש. כולל: ${oneAccount}. בלי הסוכנים המובנים, סוכן אחד משלך.`);
     expect(BASE_SYSTEM_PROMPT).toContain(
-      `- מסלול פרו: ${PLANS.pro.priceIls} ₪ לחודש כולל מע״מ, עד 3,000 הודעות בחודש. כולל: Google ו-Microsoft יחד; מייל, יומן (כולל קישור Meet / Teams), קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות; Google Tasks ו-Microsoft To Do; SharePoint; חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides); שמירת מסמכים חדשים ב-Drive. שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות), עד ${PLANS.pro.customAgents} סוכנים משלך. בקרוב, עוד לא פעיל ובלי מועד: סיכומי פגישות, התראות יזומות ואזהרות פישינג, חיבור למערכות העסק, כמו monday.com.`,
+      `- מסלול פרו: ${PLANS.pro.priceIls} ₪ לחודש כולל מע״מ, עד 3,000 הודעות בחודש. כולל: Google ו-Microsoft יחד; מייל, יומן (כולל קישור Meet / Teams), קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות; Google Tasks ו-Microsoft To Do; SharePoint; חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides); שמירת מסמכים חדשים ב-Drive; התראות יזומות (״דברים שכדאי לא לפספס״ בסיכום הבוקר, עד 2 התראות דחופות ביום) ואזהרות פישינג. שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות), עד ${PLANS.pro.customAgents} סוכנים משלך. בקרוב, עוד לא פעיל ובלי מועד: סיכומי פגישות, חיבור למערכות העסק, כמו monday.com.`,
     );
     expect(BASE_SYSTEM_PROMPT).toContain("- שירות שלא כלול במסלול של המשתמש");
     expect(BASE_SYSTEM_PROMPT).toContain("הכלי pro_feature");
@@ -81,7 +81,7 @@ describe("system prompt — the product and the account (\"איזה מנוי א�
     expect(basic).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 740 מתוך 750 הודעות החודש (ההודעה הנוכחית כבר נספרה). החיוב הבא: יום ג׳ 10.11.");
     expect(basic).toContain("- סוכנים במסלול הזה: בלי המובנים, סוכן אחד משלך.");
     expect(basic).toContain("- כלול במסלול הזה: חשבון אחד: Google או Microsoft (לא שניהם);");
-    expect(basic).toContain("- לא כלול במסלול הזה (רק בפרו): חיבור של Google ושל Microsoft יחד; משימות ב-Google Tasks וב-Microsoft To Do; חיפוש וקריאה ב-SharePoint של הארגון; שמירת מסמכים חדשים ב-Google Drive; חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides). בקשה לאחד מהם: הכלי pro_feature.");
+    expect(basic).toContain("- לא כלול במסלול הזה (רק בפרו): חיבור של Google ושל Microsoft יחד; משימות ב-Google Tasks וב-Microsoft To Do; חיפוש וקריאה ב-SharePoint של הארגון; שמירת מסמכים חדשים ב-Google Drive; חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides); התראות יזומות מהמייל ומהיומן ואזהרות פישינג. בקשה לאחד מהם: הכלי pro_feature.");
     expect(basic).toContain("- שדרוג לפרו: הכלי start_upgrade.");
 
     const pro = buildSystemPrompt({ ...base, account: accountContextOf(sub({ plan: "pro", scheduled_plan: "basic" }), 2990, NOW) });

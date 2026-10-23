@@ -13,6 +13,7 @@ import {
   cancelSubscriptionFor,
   deleteAccountFor,
   disconnectConnectionFor,
+  setProactiveAlertsFor,
   unlinkPhoneFor,
   type AccountActionResult,
 } from "@/lib/account/service";
@@ -54,6 +55,12 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
   const store = await cookies();
   store.delete(SESSION_COOKIE);
   redirect("/?deleted=1" as Route);
+}
+
+/** The proactive alerts' switch (pro; the same profile key as "בלי התראות" / "להחזיר התראות" in WhatsApp). */
+export async function setAlertsAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  back(await setProactiveAlertsFor(getDb(), userId, String(formData.get("enabled") ?? "") === "1", new Date()), "settings");
 }
 
 // ---- agents (docs/design/agents.md §10): the user id comes only from the session; every key is checked against it

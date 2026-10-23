@@ -3,7 +3,25 @@
  * Shapes follow the v1.0 docs (message, event, driveItem, subscription, todoTaskList/todoTask, Microsoft Search
  * searchResponse). All data is fictional.
  */
-export const FIXTURE_MESSAGES = [
+export interface FixtureGraphMessage {
+  id: string;
+  subject: string;
+  from: { emailAddress: { name: string; address: string } };
+  toRecipients: { emailAddress: { name: string; address: string } }[];
+  receivedDateTime: string;
+  isRead: boolean;
+  hasAttachments: boolean;
+  bodyPreview: string;
+  body: { contentType: string; content: string };
+  webLink: string | null;
+  conversationId: string;
+  replyTo?: { emailAddress: { name: string; address: string } }[];
+  importance?: string;
+  internetMessageHeaders?: { name: string; value: string }[];
+  categories?: string[];
+}
+
+export const FIXTURE_MESSAGES: FixtureGraphMessage[] = [
   {
     id: "AAMkAGm1",
     subject: "הצעת פשרה, תיק 4471",
@@ -133,8 +151,36 @@ export function fixtureTodoLists(): FixtureTodoList[] {
 export const TINY_PDF_BASE64 =
   "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQgL0YxIDE4IFRmIDIwIDQwIFRkIChIZWxsbyBQREYgNDIpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI2MCAwMDAwMCBuIAowMDAwMDAwMzUzIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDIwCiUlRU9GCg==";
 
+/** A message for a test's mailbox (`state.messages`): the fixture's defaults plus what the test sets. */
+export function fixtureGraphMessage(m: Partial<Omit<FixtureGraphMessage, "from">> & { id: string; from: { name: string; address: string }; subject: string; receivedDateTime: string }): FixtureGraphMessage {
+  const preview = m.bodyPreview ?? "";
+  return {
+    toRecipients: [{ emailAddress: { name: "דנה לוי", address: "dana@levi-law.co.il" } }],
+    isRead: false,
+    hasAttachments: false,
+    body: { contentType: "text", content: preview },
+    webLink: null,
+    conversationId: `conv-${m.id}`,
+    ...m,
+    bodyPreview: preview,
+    from: { emailAddress: m.from },
+  };
+}
+
+/** A sent message (Sent Items) for `state.sentItems`. */
+export interface FixtureSentItem {
+  conversationId: string;
+  sentDateTime: string;
+  toRecipients?: { emailAddress: { name: string; address: string } }[];
+  ccRecipients?: { emailAddress: { name: string; address: string } }[];
+}
+
 export interface FixtureState {
   calls: { method: string; url: string; body: unknown }[];
+  /** the mailbox (inbox listing, search, get): the fixture's two messages unless a test replaces them */
+  messages: FixtureGraphMessage[];
+  /** GET /me/mailFolders/sentitems/messages */
+  sentItems: FixtureSentItem[];
   sent: unknown[];
   events: FixtureGraphEvent[];
   subscriptions: { id: string; resource: string; expirationDateTime: string; clientState?: string }[];
@@ -153,7 +199,7 @@ export interface FixtureState {
 }
 
 export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureState } {
-  const state: FixtureState = { calls: [], sent: [], events: FIXTURE_EVENTS.map((e) => ({ ...e })), subscriptions: [], unauthorizedOnce: false, todo: fixtureTodoLists(), denied: new Set(), onlineMeetingProviders: ["teamsForBusiness", "skypeForBusiness"] };
+  const state: FixtureState = { calls: [], messages: FIXTURE_MESSAGES.map((m) => ({ ...m })), sentItems: [], sent: [], events: FIXTURE_EVENTS.map((e) => ({ ...e })), subscriptions: [], unauthorizedOnce: false, todo: fixtureTodoLists(), denied: new Set(), onlineMeetingProviders: ["teamsForBusiness", "skypeForBusiness"] };
   const accessDenied = () => json({ error: { code: "ErrorAccessDenied", message: "Access is denied. Check credentials and try again." } }, 403);
   let n = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -161,9 +207,11 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
   /** what a Teams request gets: the meeting when the calendar allows the provider, else the event without one */
   const onlineFor = (id: string, body: { isOnlineMeeting?: boolean; onlineMeetingProvider?: string }) =>
     !body.isOnlineMeeting ? {} : state.onlineMeetingProviders.includes(body.onlineMeetingProvider ?? "") ? teamsMeeting(id) : { isOnlineMeeting: false, onlineMeetingProvider: "unknown", onlineMeeting: null };
-  const listShape = (m: (typeof FIXTURE_MESSAGES)[number]) => {
+  /** a listing returns the selected fields only: no body, and internetMessageHeaders only when asked for */
+  const listShape = (m: FixtureGraphMessage, select: string | null) => {
     const copy: Record<string, unknown> = { ...m };
     delete copy.body;
+    if (!select?.includes("internetMessageHeaders")) delete copy.internetMessageHeaders;
     return copy;
   };
 
@@ -181,17 +229,21 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
 
     if (p === "/me") return json({ id: "u1", displayName: "דנה לוי", mail: "dana@levi-law.co.il", userPrincipalName: "dana@levi-law.co.il" });
     if (p === "/me/mailboxSettings") return json({ timeZone: "Israel Standard Time" });
+    const select = url.searchParams.get("$select");
     if (p === "/me/mailFolders/inbox/messages") {
-      const unread = url.searchParams.get("$filter")?.includes("isRead eq false");
-      return json({ value: FIXTURE_MESSAGES.filter((m) => !unread || !m.isRead).map(listShape) });
+      const filter = url.searchParams.get("$filter") ?? "";
+      const unread = filter.includes("isRead eq false");
+      const since = filter.match(/receivedDateTime ge (\S+)/)?.[1];
+      return json({ value: state.messages.filter((m) => (!unread || !m.isRead) && (!since || Date.parse(m.receivedDateTime) >= Date.parse(since))).map((m) => listShape(m, select)) });
     }
+    if (p === "/me/mailFolders/sentitems/messages") return json({ value: state.sentItems });
     if (p === "/me/messages") {
       const q = (url.searchParams.get("$search") ?? "").replace(/"/g, "").toLowerCase();
-      return json({ value: FIXTURE_MESSAGES.filter((m) => JSON.stringify(m).toLowerCase().includes(q)).map(listShape) });
+      return json({ value: state.messages.filter((m) => JSON.stringify(m).toLowerCase().includes(q)).map((m) => listShape(m, select)) });
     }
     const msg = p.match(/^\/me\/messages\/([^/]+)(\/reply|\/forward|\/attachments)?$/);
     if (msg) {
-      const m = FIXTURE_MESSAGES.find((x) => x.id === decodeURIComponent(msg[1]!));
+      const m = state.messages.find((x) => x.id === decodeURIComponent(msg[1]!));
       if (!m) return json({ error: { code: "ErrorItemNotFound", message: "not found" } }, 404);
       if (msg[2] === "/reply") {
         state.sent.push({ reply: m.id, ...body });
@@ -202,6 +254,10 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
         return new Response(null, { status: 202 });
       }
       if (msg[2] === "/attachments") return json({ value: FIXTURE_ATTACHMENTS[m.id] ?? [] });
+      if (method === "PATCH") {
+        if (Array.isArray(body?.categories)) m.categories = body.categories.map(String);
+        return json(m);
+      }
       return json(m);
     }
     if (p === "/me/sendMail") {

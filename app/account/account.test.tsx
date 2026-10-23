@@ -5,6 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveAgents } from "@/lib/agents/policy";
 import type { AgentRow, ConnectionRow, SubscriptionRow, UsageRow } from "@/lib/db/types";
+import { AlertsSetting } from "./_components/alerts-setting";
 import { DeleteAccountForm } from "./_components/delete-account-form";
 import { InstructionsField } from "./_components/instructions-field";
 import { agentsView, connectionFor, firstName, formatCount, formatDay, formatPhone, greetingFor, paidPlanOf, statusLine, usageView } from "./view";
@@ -217,5 +218,30 @@ describe("logical (RTL-safe) classes in the personal area, auth and legal pages"
     const literals = [...readFileSync(file, "utf8").matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map((m) => m[1] ?? m[2] ?? "");
     const offenders = literals.flatMap((l) => l.split(/[\s{}$]+/)).filter((t) => PHYSICAL_CLASS.test(t));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("settings: the proactive alerts' switch", () => {
+  const action = async () => undefined;
+  it("pro, on: the state in words and one button that turns them off", () => {
+    const { container } = render(<AlertsSetting included enabled payHref="/pay/x" action={action} />);
+    expect(screen.getByRole("heading", { name: "התראות יזומות" })).toBeTruthy();
+    expect(screen.getByText("פעילות")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "לכבות התראות" })).toBeTruthy();
+    expect((container.querySelector('input[name="enabled"]') as HTMLInputElement).value).toBe("0");
+  });
+
+  it("pro, off: the button turns them on", () => {
+    const { container } = render(<AlertsSetting included enabled={false} payHref="/pay/x" action={action} />);
+    expect(screen.getByText("כבויות")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "להפעיל התראות" })).toBeTruthy();
+    expect((container.querySelector('input[name="enabled"]') as HTMLInputElement).value).toBe("1");
+  });
+
+  it("basic / trial: part of pro, with the way there (no switch)", () => {
+    render(<AlertsSetting included={false} enabled payHref="/pay/x" action={action} />);
+    expect(screen.getByText("כלול במסלול פרו.")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("link", { name: "מעבר לפרו" }).getAttribute("href")).toBe("/pay/x");
   });
 });

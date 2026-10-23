@@ -9,6 +9,7 @@ import { getWaSender, type WaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
 import { activeMicrosoftConnection, graphForConnection, graphForUser } from "@/lib/ms";
 import { graphExecutors, graphTools, teamsAvailability } from "@/lib/ms/tools";
+import { msHasScope } from "@/lib/ms/oauth";
 import { activeGoogleConnection, googleForConnection, googleForUser } from "@/lib/google";
 import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispatch";
 import { googleExecutors, googleTools } from "@/lib/google/tools";
@@ -71,6 +72,13 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
             })
           : []),
       ];
+    },
+    async mailMarker(user) {
+      // "לסמן כחשוד" (lib/proactive/actions.ts): Microsoft 365 only, and only with Mail.ReadWrite in the grant
+      const ms = activeMicrosoftConnection(await db.listConnections(user.id));
+      if (!ms || !msHasScope(ms.scopes, "Mail.ReadWrite")) return null;
+      const graph = await graphForConnection(db, ms);
+      return { markSuspicious: (messageId: string) => graph.markSuspicious(messageId) };
     },
     onlineMeetingCheck(connections) {
       const ms = activeMicrosoftConnection(connections);

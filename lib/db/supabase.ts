@@ -38,11 +38,18 @@ import type {
   ReminderStatus,
   NewSupportTicket,
   SupportTicketRow,
+  NewProactiveItem,
+  ProactiveAlertRow,
+  ProactiveClaimResult,
+  ProactiveStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
   WaIdentityRow,
 } from "./types";
+
+/** An id from a button press is checked before it reaches a uuid column (Postgres would answer 22P02). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Supabase implementation of `Db` using the service-role key (bypasses RLS — server only, never in the browser).
@@ -722,6 +729,63 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.client.from("support_tickets").insert(row).select(SupabaseDb.TICKET_COLS).single();
     if (error) this.fail("createSupportTicket", error);
     return data as unknown as SupportTicketRow;
+  }
+
+  // ---- proactive_alerts (0013) ----
+
+  private static readonly PROACTIVE_COLS = "id, user_id, item_key, kind, channel, status, local_day, payload, created_at";
+
+  async claimProactiveAlert(item: NewProactiveItem, opts: { cap: number; deliver: boolean }): Promise<{ result: ProactiveClaimResult; alert: ProactiveAlertRow | null }> {
+    const { data, error } = await this.client.rpc("proactive_alert_claim", {
+      p_user: item.user_id,
+      p_item_key: item.item_key,
+      p_kind: item.kind,
+      p_day: item.local_day,
+      p_payload: item.payload,
+      p_cap: opts.cap,
+      p_deliver: opts.deliver,
+    });
+    if (error) this.fail("claimProactiveAlert", error);
+    const r = (data ?? {}) as { result?: string; id?: string };
+    const result: ProactiveClaimResult = r.result === "claimed" || r.result === "cap" || r.result === "deferred" ? r.result : "duplicate";
+    if (result === "duplicate" || !r.id) return { result, alert: null };
+    return { result, alert: await this.getProactiveAlert(item.user_id, r.id) };
+  }
+
+  async addProactiveSummaryItem(item: NewProactiveItem): Promise<ProactiveAlertRow> {
+    const { data, error } = await this.client
+      .from("proactive_alerts")
+      .upsert({ ...item, channel: "summary", status: "listed" }, { onConflict: "user_id,channel,item_key,local_day" })
+      .select(SupabaseDb.PROACTIVE_COLS)
+      .single();
+    if (error) this.fail("addProactiveSummaryItem", error);
+    return data as unknown as ProactiveAlertRow;
+  }
+
+  async getProactiveAlert(userId: string, id: string): Promise<ProactiveAlertRow | null> {
+    if (!UUID_RE.test(id)) return null;
+    const { data, error } = await this.client.from("proactive_alerts").select(SupabaseDb.PROACTIVE_COLS).eq("id", id).eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getProactiveAlert", error);
+    return (data as unknown as ProactiveAlertRow | null) ?? null;
+  }
+
+  async foldDeferredProactiveAlerts(userId: string, since: Date): Promise<ProactiveAlertRow[]> {
+    const { data, error } = await this.client
+      .from("proactive_alerts")
+      .update({ status: "folded" })
+      .eq("user_id", userId)
+      .eq("channel", "urgent")
+      .eq("status", "deferred")
+      .gte("created_at", since.toISOString())
+      .select(SupabaseDb.PROACTIVE_COLS);
+    if (error) this.fail("foldDeferredProactiveAlerts", error);
+    return ((data ?? []) as unknown as ProactiveAlertRow[]).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  async setProactiveAlertStatus(userId: string, id: string, status: ProactiveStatus): Promise<void> {
+    if (status === "listed" || !UUID_RE.test(id)) return;
+    const { error } = await this.client.from("proactive_alerts").update({ status }).eq("id", id).eq("user_id", userId).eq("channel", "urgent");
+    if (error) this.fail("setProactiveAlertStatus", error);
   }
 
   // ---- agents (0006). Every query is scoped by user_id, also when the id is known. ----

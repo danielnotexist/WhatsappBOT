@@ -75,7 +75,10 @@ export interface Entitlements {
   driveFullRead: boolean;
   /** coming: meeting summaries */
   meetingSummaries: boolean;
-  /** coming: proactive alerts and phishing warnings */
+  /**
+   * proactive alerts from mail and calendar ("דברים שכדאי לא לפספס" in the morning summary, up to 2 urgent alerts a
+   * day) and phishing / BEC warnings — lib/proactive
+   */
   proactive: boolean;
   /** coming: business systems (monday.com and others) */
   businessSystems: boolean;
@@ -103,13 +106,14 @@ export function entitlements(plan: EffectivePlan): Entitlements {
  * A pro service the model may be asked for on a plan without it: the `pro_feature` tool answers with the plan line
  * (lib/ai/plan-tools.ts). `label` completes "במסלול פרו יש גם …".
  */
-export type ProFeature = "second_account" | "tasks" | "sharepoint" | "file_create" | "drive_full_read";
+export type ProFeature = "second_account" | "tasks" | "sharepoint" | "file_create" | "drive_full_read" | "proactive";
 export const PRO_FEATURES: Record<ProFeature, { label: string; included: (e: Entitlements) => boolean }> = {
   second_account: { label: "חיבור של Google ושל Microsoft יחד", included: (e) => e.maxProviders > 1 },
   tasks: { label: "משימות ב-Google Tasks וב-Microsoft To Do", included: (e) => e.tasks },
   sharepoint: { label: "חיפוש וקריאה ב-SharePoint של הארגון", included: (e) => e.sharepoint },
   file_create: { label: "שמירת מסמכים חדשים ב-Google Drive", included: (e) => e.fileCreate },
   drive_full_read: { label: "חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides)", included: (e) => e.driveFullRead },
+  proactive: { label: "התראות יזומות מהמייל ומהיומן ואזהרות פישינג", included: (e) => e.proactive },
 };
 
 /** The pro services a plan does not include (empty on pro). */
@@ -157,7 +161,7 @@ function proLines(): PlanFeatureLine[] {
     adds("fileCreate") && { id: "file_create", text: "שמירת מסמכים חדשים ב-Drive" },
     adds("builtinAgents") && { id: "agents", text: `שלושת הסוכנים המובנים, ו${agentsHe(p.customAgents)} משלך` },
     adds("meetingSummaries") && { id: "meetings", text: "סיכומי פגישות", soon: true },
-    adds("proactive") && { id: "proactive", text: "התראות יזומות ואזהרות פישינג", soon: true },
+    adds("proactive") && { id: "proactive", text: "התראות יזומות ואזהרות פישינג" },
     adds("businessSystems") && { id: "business", text: "חיבור למערכות העסק, כמו monday.com", soon: true },
   ];
   return lines.filter((l): l is PlanFeatureLine => Boolean(l));

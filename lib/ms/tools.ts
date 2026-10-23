@@ -8,6 +8,8 @@ import { TEAMS_PROVIDER, isPersonalMicrosoftAccount } from "@/lib/online-meeting
 import { driveItemText } from "./files-text";
 import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from "./graph";
 import { msWorkspaceTools } from "./workspace-tools";
+import { fromGraphMessage } from "@/lib/proactive/mail";
+import { lazyKnown, phishingFields } from "@/lib/proactive/read-warning";
 
 /**
  * Tools exposed to the strong model once a Microsoft 365 connection is active (PLAN §11 milestone 4), plus Microsoft
@@ -22,8 +24,11 @@ export interface GraphToolDeps {
   connectLink?: () => string;
   /** the Microsoft connection (tenant, address): tells a personal account apart when Teams is unavailable */
   connection?: Pick<ConnectionRow, "tenant_id" | "account_email"> | null;
-  /** what the user's plan includes (lib/billing/plans.ts): To Do and SharePoint only with `tasks` / `sharepoint`; default: everything */
-  entitlements?: Pick<Entitlements, "tasks" | "sharepoint">;
+  /**
+   * what the user's plan includes (lib/billing/plans.ts): To Do and SharePoint only with `tasks` / `sharepoint`, the
+   * phishing warning on mail it reads only with `proactive`; default: everything
+   */
+  entitlements?: Pick<Entitlements, "tasks" | "sharepoint"> & Partial<Pick<Entitlements, "proactive">>;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -58,6 +63,12 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
     }
   };
 
+  // pro: the phishing check on every mail it lists or reads (lib/proactive/read-warning.ts); known contacts = Sent Items
+  const phishingOn = deps.entitlements?.proactive ?? true;
+  const self = deps.connection?.account_email ? [deps.connection.account_email.toLowerCase()] : [];
+  const known = lazyKnown(async () => (await deps.graph()).sentRecipients({ top: 50 }));
+  const warn = async (m: GraphMessage) => (phishingOn ? phishingFields(fromGraphMessage(m), await known(), self) : {});
+
   /** Who a change or a cancellation of an event reaches (its attendees), for an agent limited to a list of addresses. */
   const attendeesOf = async (id: string): Promise<string[] | { error: string }> => (await guard(async (g) => addressesOf(await g.getEvent(id, deps.timeZone)))) as string[] | { error: string };
 
@@ -72,7 +83,12 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           const q = String(input.query ?? "").trim();
           const top = Math.min(Math.max(Number(input.limit) || 10, 1), 25);
           const list = q ? await g.searchMessages(q, top) : await g.listInbox({ top, unreadOnly: Boolean(input.unread_only) });
-          return { count: list.length, messages: list.map(compactMessage) };
+          const messages = [];
+          for (const m of list) {
+            const w = await warn(m);
+            messages.push({ ...compactMessage(m), ...("phishing_warning" in w ? w : {}) });
+          }
+          return { count: list.length, messages };
         }),
     },
     {
@@ -83,7 +99,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
       run: (input) =>
         guard(async (g) => {
           const m = await g.getMessage(String(input.id ?? ""));
-          return { ...compactMessage(m), to: m.toRecipients.map((r) => r.address), body: (m.bodyText ?? m.bodyPreview).slice(0, 6000) };
+          return { ...compactMessage(m), to: m.toRecipients.map((r) => r.address), body: (m.bodyText ?? m.bodyPreview).slice(0, 6000), ...(await warn(m)) };
         }),
     },
     {
