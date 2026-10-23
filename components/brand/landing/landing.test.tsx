@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRAND } from "@/lib/brand";
-import { PLANS, TRIAL_MESSAGES, VAT_RATE } from "@/lib/billing/plans";
-import { INTEGRATIONS, availableIntegrations, featuredGroups } from "@/lib/integrations/catalogue";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
+import { INTEGRATIONS, featuredGroups, integrationsForPlan } from "@/lib/integrations/catalogue";
 import { Connectors } from "./connectors";
 import { FAQ, HERO_SCRIPT, PRICING, PROFESSIONS, SCENES, TRUST } from "./content";
 import { DaySection } from "./day-scenes";
@@ -135,17 +135,42 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     expect(cta.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("pricing: each plan ends with 'כולל חיבור ל:' and the same available systems, and the sheet says the plans connect alike", () => {
+  it("pricing: basic ends with 'חשבון אחד: Google או Microsoft' and the one-account systems, pro with 'כולל חיבור ל:' and the full set ('בקרוב' on the business systems)", () => {
     render(<Pricing />);
-    const names = availableIntegrations().map((i) => i.name);
+    const label = { basic: "חשבון אחד: Google או Microsoft", pro: "כולל חיבור ל:" } as const;
     for (const plan of ["basic", "pro"] as const) {
       const card = screen.getByRole("article", { name: PLANS[plan].nameHe });
       expect(card).toHaveAttribute("data-tip-bounds");
-      const row = within(card).getByRole("toolbar", { name: "כולל חיבור ל:" });
+      const row = within(card).getByRole("toolbar", { name: label[plan] });
+      const names = integrationsForPlan(plan).flatMap((g) => g.items.map((i) => (i.status === "soon" ? `${i.name}, בקרוב` : i.name)));
       expect(within(row).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(names);
     }
-    expect(screen.getByText(/החיבורים זהים בשני המסלולים/)).toBeInTheDocument();
+    const basicRow = within(screen.getByRole("article", { name: PLANS.basic.nameHe })).getByRole("toolbar");
+    for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "Google Slides", "monday.com, בקרוב"]) expect(within(basicRow).queryByRole("button", { name }), name).toBeNull();
+    const proRow = within(screen.getByRole("article", { name: PLANS.pro.nameHe })).getByRole("toolbar");
+    for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "monday.com, בקרוב"]) expect(within(proRow).getByRole("button", { name }), name).toBeInTheDocument();
+    expect(screen.getByText(/בבסיסי ובהודעות החינמיות מחברים חשבון אחד, Google או Microsoft\. בפרו שניהם עובדים יחד/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "לכל החיבורים" })).toHaveAttribute("href", "#connectors");
+  });
+
+  it("pricing: the real difference between the plans, from lib/billing/plans.ts (planFeatures)", () => {
+    render(<Pricing />);
+    const basic = screen.getByRole("article", { name: PLANS.basic.nameHe });
+    const pro = screen.getByRole("article", { name: PLANS.pro.nameHe });
+    // basic: its own lines; the account line stands over the icons instead of in the list
+    const basicItems = within(basic).getAllByRole("listitem").filter((li) => !li.closest("[role=toolbar]"));
+    expect(basicItems.map((li) => li.textContent)).toEqual(planFeatures("basic").lines.filter((l) => l.id !== "account").map((l) => l.text));
+    expect(basic).not.toHaveTextContent("בקרוב");
+    // pro: "כל מה שבבסיסי, ובנוסף:" and its lines, "בקרוב" on what is coming
+    expect(within(pro).getByText("כל מה שבבסיסי, ובנוסף:")).toBeInTheDocument();
+    for (const line of planFeatures("pro").lines) {
+      const li = within(pro).getByText(line.text).closest("li")!;
+      if (line.soon) expect(li, line.id).toHaveTextContent("בקרוב");
+      else expect(li, line.id).not.toHaveTextContent("בקרוב");
+    }
+    for (const t of ["חיבור של Google ו-Microsoft יחד", "משימות ב-Google Tasks וב-Microsoft To Do", "סיכומי פגישות", "התראות יזומות ואזהרות פישינג"]) expect(pro).toHaveTextContent(t);
+    expect(pro).toHaveTextContent(`שלושת הסוכנים המובנים, ועד ${PLANS.pro.customAgents} סוכנים משלך`);
+    expect(basic).toHaveTextContent("סוכן אחד משלך");
   });
 
   it("the full list: three groups, every system with its benefit, 'בקרוב' where it is not connected yet, and more to come", () => {

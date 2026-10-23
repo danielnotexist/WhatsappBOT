@@ -1,4 +1,4 @@
-import { PLANS, TRIAL_MESSAGES, VAT_RATE } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, entitlements, planFeatures } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
 import { SUPPORT_COPY, SUPPORT_SUGGESTIONS } from "./types";
 
@@ -6,7 +6,8 @@ import { SUPPORT_COPY, SUPPORT_SUGGESTIONS } from "./types";
  * The support chat's knowledge base: what עלזה may say about the service on the website. Every fact comes from a
  * source in the repo, never from memory:
  *   - docs/PLAN.md (§0, §2.3, §4) — what the service does, approval by button, data in the EU, plans
- *   - lib/billing/plans.ts — prices, message allowances, agents per plan, VAT (the numbers below are computed from it)
+ *   - lib/billing/plans.ts — prices, message allowances, what each plan includes (entitlements, planFeatures), agents
+ *     per plan, VAT (the numbers and the plan lines below are computed from it)
  *   - components/brand/landing/content.ts — the landing's trust, pricing and FAQ copy
  *   - docs/legal/privacy-policy-he.md, terms-of-service-he.md — what is stored where, trial terms, cancellation, receipts
  *   - lib/billing/commands.ts, lib/copy/bot-billing.ts — "קבלה" / "ביטול מנוי" in the chat
@@ -33,6 +34,18 @@ const he = new Intl.NumberFormat("he-IL");
 const n = (v: number) => he.format(v);
 const vat = Math.round(VAT_RATE * 100);
 const { basic, pro } = PLANS;
+/** what pro adds to basic, from the entitlements (short: the answers stay under 520 characters), and what is coming */
+const ent = { basic: entitlements("basic"), pro: entitlements("pro") };
+const proNow = [
+  ent.pro.maxProviders > ent.basic.maxProviders && "Google ו-Microsoft יחד",
+  ent.pro.tasks && !ent.basic.tasks && "Google Tasks ו-To Do",
+  ent.pro.sharepoint && !ent.basic.sharepoint && "SharePoint",
+  ent.pro.driveFullRead && !ent.basic.driveFullRead && "חיפוש בכל ה-Drive",
+  ent.pro.fileCreate && !ent.basic.fileCreate && "שמירת מסמכים",
+  `שלושת הסוכנים המובנים ועד ${n(ent.pro.customAgents)} סוכנים משלך`,
+].filter((x): x is string => Boolean(x));
+const proSoon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
+const listHe = (items: readonly string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} ו${items.at(-1)}`);
 
 export const KNOWLEDGE: readonly KnowledgeEntry[] = [
   {
@@ -83,7 +96,7 @@ export const KNOWLEDGE: readonly KnowledgeEntry[] = [
     question: "עם אילו חשבונות זה עובד?",
     keywords: ["microsoft", "מיקרוסופט", "365", "outlook", "google", "גוגל", "gmail", "onedrive", "drive", "יומן", "חשבונות", "גימייל", "מנהל ה-it", "אישור מנהל", "ארגון"],
     answer:
-      "עם Microsoft 365 (Outlook, היומן ו-OneDrive) ועם Google (היומן, Drive ושליחה מ-Gmail). אפשר לחבר אחד מהם או את שניהם. " +
+      "עם Microsoft 365 (Outlook, היומן ו-OneDrive) ועם Google (היומן, Drive ושליחה מ-Gmail). במסלול הבסיסי ובתקופת הניסיון מחברים אחד מהם, ובפרו את שניהם יחד. " +
       "יש ארגונים שבהם Microsoft 365 דורש אישור חד-פעמי של מנהל ה-IT, ואז מקבלים טקסט מוכן להעביר אליו.",
   },
   {
@@ -91,16 +104,16 @@ export const KNOWLEDGE: readonly KnowledgeEntry[] = [
     question: "מה ההבדל בין בסיסי לפרו?",
     keywords: ["הבדל", "ההבדל", "בסיסי", "פרו", "pro", "השוואה", "להשוות", "שדרוג", "לשדרג", "מה כולל", "כלול"],
     answer:
-      `בשני המסלולים: חיבור למייל, ליומן ולקבצים, ניסוח ושליחה באישור, סיכום בוקר, תזכורות והודעות קוליות. בסיסי (${basic.priceIls} ₪): עד ${n(basic.messages)} הודעות בחודש, ` +
-      `סוכן ${basic.customAgents === 1 ? "אחד" : n(basic.customAgents)} משלך והיסטוריה ל-90 יום. פרו (${pro.priceIls} ₪): עד ${n(pro.messages)} הודעות בשימוש הוגן, ` +
-      `שלושת הסוכנים המובנים ועד ${n(pro.customAgents)} סוכנים משלך, משימות ואוטומציות, היסטוריה לשנה ועדיפות למודל המתקדם. לשדרוג אפשר לכתוב לי ״שדרוג״ בוואטסאפ.`,
+      `בסיסי (${basic.priceIls} ₪): חשבון אחד, Google או Microsoft, עם מייל, יומן, קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות, עד ${n(basic.messages)} הודעות בחודש ` +
+      `וסוכן ${basic.customAgents === 1 ? "אחד" : n(basic.customAgents)} משלך. פרו (${pro.priceIls} ₪): עד ${n(pro.messages)} הודעות בשימוש הוגן, ובנוסף ${listHe(proNow)}. ` +
+      `בקרוב בפרו: ${listHe(proSoon)}. לשדרוג אפשר לכתוב לי ״שדרוג״ בוואטסאפ.`,
   },
   {
     id: "trial",
     question: "איך עובדת תקופת הניסיון?",
     keywords: ["ניסיון", "בחינם", "חינם", "לנסות", "להתנסות", "כרטיס אשראי", "אשראי", "הודעות ראשונות", "אחרי הניסיון", "נגמר", "נגמרו"],
     answer:
-      `${TRIAL_MESSAGES} ההודעות הראשונות בחינם, עם חיבור מלא למייל וליומן ובלי כרטיס אשראי. נספרות רק הודעות ששולחים אליי ומקבלות תשובה; ` +
+      `${TRIAL_MESSAGES} ההודעות הראשונות בחינם, בלי כרטיס אשראי, עם חשבון אחד כמו בבסיסי: המייל, היומן והקבצים. נספרות רק הודעות ששולחים אליי ומקבלות תשובה; ` +
       "לחיצות אישור, תזכורות וסיכום הבוקר לא נספרים. אחרי הניסיון אני שולחת קישור תשלום אישי, בוחרים מסלול, משלמים בכרטיס אשראי וממשיכים באותה שיחה.",
   },
   {
@@ -125,7 +138,8 @@ export const KNOWLEDGE: readonly KnowledgeEntry[] = [
     question: "אילו קבצים את קוראת?",
     keywords: ["קובץ", "קבצים", "word", "excel", "powerpoint", "וורד", "אקסל", "מסמך", "מסמכים", "חוזה"],
     answer:
-      "אני מחפשת קבצים ב-OneDrive או ב-Google Drive וקוראת קובצי Word, Excel ו-PowerPoint: מסכמת, עונה על שאלות מתוכם ומצרפת אותם לטיוטת מייל.",
+      "אני מחפשת קבצים ב-OneDrive וקוראת קובצי Word, Excel ו-PowerPoint: מסכמת, עונה על שאלות מתוכם ומצרפת אותם לטיוטת מייל. " +
+      "ב-Google Drive בבסיסי אני קוראת קבצים שנפתחו דרכי; חיפוש בכל ה-Drive, SharePoint ושמירת מסמכים חדשים כלולים בפרו.",
   },
   {
     id: "voice",

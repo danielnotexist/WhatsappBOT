@@ -43,6 +43,9 @@ describe("Google connect routes (memory mode)", () => {
   });
 
   const startFromChat = async (userId: string, extra = "") => startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(userId, "google"))}${extra}`));
+  /** the pro-only Google consents (drive.readonly, Tasks) need pro since the split of 23.10.2026 (lib/billing/plans.ts) */
+  const asPro = (userId: string) => db.upsertSubscription(userId, { plan: "pro", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
+  const asBasic = (userId: string) => db.upsertSubscription(userId, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
 
   it("chat link → Google consent (PKCE, offline, consent, incremental); callback stores encrypted tokens + scopes, tells the user, lands on /account", async () => {
     const user = await db.createUser("dana@example.com");
@@ -94,6 +97,7 @@ describe("Google connect routes (memory mode)", () => {
   it("Drive read (restricted): refused while off, asked for on its own when on, kept by the callback; at the cap one Hebrew line", async () => {
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
+    await asPro(user.id);
     const off = await startFromChat(user.id, "&feature=drive_read");
     expect(off.status).toBe(403);
     expect(await off.text()).toBe("קריאה של כל הקבצים ב-Drive אינה זמינה כרגע. היומן, Gmail וקבצים שנוצרו דרך עלזה ממשיכים לעבוד.");
@@ -115,6 +119,7 @@ describe("Google connect routes (memory mode)", () => {
     // a brand-new account at the cap
     for (let i = 0; i < 95; i++) await db.recordGoogleScopeGrant({ account_hash: googleAccountHash(`user${i}@gmail.com`), scope: GOOGLE_SCOPES.gmailReadonly, user_id: null });
     const newcomer = await db.createUser("new@example.com");
+    await asPro(newcomer.id);
     const full = await startFromChat(newcomer.id, "&feature=drive_read");
     expect(full.status).toBe(403);
     expect(await full.text()).toBe("קריאה של כל הקבצים ב-Drive פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Gmail וקבצים שנוצרו דרך עלזה ממשיכים לעבוד.");
@@ -134,6 +139,7 @@ describe("Google connect routes (memory mode)", () => {
   it("Google Tasks for a connection made before it joined the base set: an incremental consent for `tasks` only", async () => {
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
+    await asPro(user.id);
     db.seedConnection(user.id, "google", "dana.levi@gmail.com").scopes = ["openid", "email", GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend];
     const consent = location(await startFromChat(user.id, "&feature=tasks"));
     expect(consent.searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.tasks}`);
@@ -216,7 +222,11 @@ describe("Google connect routes (memory mode)", () => {
     vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
+    // the trial (and basic) never asks for drive.readonly: the full Drive read is pro
     jar.session = createSessionToken(user.id);
+    const trial = location(await startGet(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`)));
+    expect(trial.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly]);
+    await asPro(user.id);
     const consent = location(await startGet(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`)));
     expect(consent.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.driveReadonly]);
     const pending = ((await db.getUser(user.id))!.profile.oauth_pending as { google: { scopes: string[]; gmail_read: string; drive_read: string } }).google;
@@ -438,5 +448,50 @@ describe("Google connect routes (memory mode)", () => {
     expect(body).toContain("משתני סביבה חסרים");
     expect(body).toContain("GOOGLE_CLIENT_ID");
     expect(body).toContain("GOOGLE_CLIENT_SECRET");
+  });
+  describe("the plan's gate (lib/billing/plans.ts entitlements, lib/connections/plan-gate.ts)", () => {
+    it("trial / basic: Google next to an active Microsoft 365 → the pay page with why=second_account, nothing stored; reconnecting Google itself stays open", async () => {
+      const user = await db.createUser("dana@example.com");
+      db.seedConnection(user.id, "microsoft", "dana@contoso.co.il");
+      for (const plan of ["trial", "basic"] as const) {
+        if (plan === "basic") await asBasic(user.id);
+        const refused = await startFromChat(user.id);
+        expect(refused.status).toBe(303);
+        const to = location(refused);
+        expect(to.origin).toBe(APP);
+        expect(to.pathname).toMatch(/^\/pay\/[^/]+$/);
+        expect(to.searchParams.get("why")).toBe("second_account");
+      }
+      expect(((await db.getUser(user.id))!.profile.oauth_pending as Record<string, unknown> | undefined)?.google).toBeUndefined();
+
+      // the account in force may reconnect (one Google connection, nothing else active)
+      const solo = await db.createUser("solo@example.com");
+      db.seedConnection(solo.id, "google", "solo@gmail.com");
+      await asBasic(solo.id);
+      expect(location(await startFromChat(solo.id)).origin).toBe("https://accounts.google.com");
+    });
+
+    it("pro: both accounts together", async () => {
+      const user = await db.createUser("dana@example.com");
+      db.seedConnection(user.id, "microsoft", "dana@contoso.co.il");
+      await asPro(user.id);
+      expect(location(await startFromChat(user.id)).origin).toBe("https://accounts.google.com");
+    });
+
+    it("basic: the pro consents (drive_read, tasks) → the pay page with why=pro_feature; a plain connect asks for no drive.readonly", async () => {
+      vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "true");
+      const user = await db.createUser("dana@example.com");
+      db.seedConnection(user.id, "google", "dana.levi@gmail.com");
+      await asBasic(user.id);
+      for (const feature of ["drive_read", "tasks"]) {
+        const to = location(await startFromChat(user.id, `&feature=${feature}`));
+        expect(to.pathname, feature).toMatch(/^\/pay\//);
+        expect(to.searchParams.get("why"), feature).toBe("pro_feature");
+      }
+      expect(location(await startFromChat(user.id)).searchParams.get("scope")).not.toContain("drive.readonly");
+      // Gmail read is basic too (mail is in every plan): still the incremental consent
+      vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
+      expect(location(await startFromChat(user.id, "&feature=gmail_read")).searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.gmailReadonly}`);
+    });
   });
 });

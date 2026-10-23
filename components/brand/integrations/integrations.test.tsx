@@ -8,7 +8,6 @@ import {
   INTEGRATIONS,
   availableIntegrations,
   integrationGroups,
-  integrationsForPlan,
 } from "@/lib/integrations/catalogue";
 import { IntegrationChipRow } from "./chip-row";
 import { INTEGRATION_ICONS, OutlookIcon } from "./icons";
@@ -111,7 +110,8 @@ describe("tiles", () => {
 });
 
 describe("the chip row (toolbar + tooltips)", () => {
-  function renderRow(groups = integrationsForPlan("basic")) {
+  // the row widget on every available system (what a plan shows is lib/integrations/catalogue.test.ts)
+  function renderRow(groups = integrationGroups(availableIntegrations())) {
     render(
       <>
         <p id="row-label">כולל חיבור ל:</p>

@@ -149,6 +149,12 @@ describe("demo + Supabase (staging data, mocked client)", () => {
   it("Microsoft and Google connects write fixture connection rows through SupabaseDb", async () => {
     const userId = await signUp("dana@levi-law.co.il");
     expect(location(await msStart(new Request(`${APP}/api/auth/microsoft/start?returnTo=onboarding`))).searchParams.get("connected")).toBe("microsoft");
+    // the trial works with one account (lib/billing/plans.ts): the second one is pro, refused before any fixture write
+    const refused = location(await googleStart(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`)));
+    expect(refused.pathname).toMatch(/^\/pay\//);
+    expect(refused.searchParams.get("why")).toBe("second_account");
+    expect(fake.rows("connections")).toHaveLength(1);
+    await db.upsertSubscription(userId, { plan: "pro", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
     expect(location(await googleStart(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`))).searchParams.get("connected")).toBe("google");
     expect(fake.rows("connections")).toHaveLength(2);
     await expectConnected(db, userId, "microsoft", "dana@levi-law.co.il");

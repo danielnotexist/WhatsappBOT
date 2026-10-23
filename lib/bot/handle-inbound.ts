@@ -1,6 +1,7 @@
 import "server-only";
 import { getAiProvider } from "@/lib/ai";
 import { spendGuardFromEnv } from "@/lib/ai/budget";
+import { entitlements } from "@/lib/billing/plans";
 import { getDb, type Db } from "@/lib/db";
 import { getHyp } from "@/lib/hyp";
 import { getSttProvider } from "@/lib/stt";
@@ -51,11 +52,13 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
     stt: getSttProvider,
     hyp: getHyp,
     spend: spendGuardFromEnv(db),
-    async extraTools(user, connections) {
+    async extraTools(user, connections, plan) {
       const ms = activeMicrosoftConnection(connections);
       const g = activeGoogleConnection(connections);
+      // the plan's services (lib/billing/plans.ts); unknown → pro, and the orchestrator gates by name again
+      const ent = entitlements(plan ?? "pro");
       return [
-        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone, connection: ms, scopes: ms.scopes, connectLink: () => connectLinkFor(ctx, user.id, "microsoft") }) : []),
+        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone, connection: ms, scopes: ms.scopes, connectLink: () => connectLinkFor(ctx, user.id, "microsoft"), entitlements: ent }) : []),
         ...(g
           ? googleTools({
               google: async () => googleForConnection(db, g),
@@ -64,6 +67,7 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
               accountEmail: g.account_email,
               gmailConsentLink: () => gmailReadConsentLink(ctx, user.id),
               consentLink: (feature) => googleConsentLink(ctx, user.id, feature),
+              entitlements: ent,
             })
           : []),
       ];

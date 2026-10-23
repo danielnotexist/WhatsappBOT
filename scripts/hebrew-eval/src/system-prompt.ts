@@ -226,7 +226,7 @@ export const TOOL_DEFS: ToolDef[] = [
       additionalProperties: false,
     },
   },
-  // the product's own definitions: start_upgrade, start_agent_creation, create_reminder (the phrase as said)
+  // the product's own definitions: start_upgrade, start_agent_creation, create_reminder (the phrase as said), pro_feature (the plan line)
   ...(PRODUCT_TOOLS as ToolDef[]),
 ];
 

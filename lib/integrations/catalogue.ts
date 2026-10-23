@@ -1,7 +1,7 @@
 import type { PaidPlan } from "@/lib/billing/plans";
 
 /**
- * The systems she works with (the product name is BRAND.name, lib/brand.ts), as shown on the landing page (the "עובדת עם" strip under the hero, "כולל חיבור ל:" in
+ * The systems she works with (the product name is BRAND.name, lib/brand.ts), as shown on the landing page (the "עובדת עם" strip under the hero, the icons under
  * each plan, and the full list in #connectors). One line per system: a new one is added here, and it shows up in all
  * three places (a drawn mark goes in components/brand/integrations/icons.tsx; without one the tile shows `monogram`).
  *
@@ -32,6 +32,8 @@ export interface Integration {
   benefit: string;
   vendor: IntegrationVendor;
   status: IntegrationStatus;
+  /** the plan that includes it (lib/billing/plans.ts entitlements): "basic" = basic and pro (one account on basic), "pro" = pro only */
+  plan: PaidPlan;
   /** shown in the compact strip under the hero (available systems only) */
   featured?: boolean;
   /** a letter tile for a system without a drawn mark: the letters and the owner's brand colour */
@@ -40,30 +42,30 @@ export interface Integration {
 
 export const INTEGRATIONS: readonly Integration[] = [
   // Google - one OAuth connection (lib/google/oauth.ts)
-  { id: "gmail", name: "Gmail", vendor: "google", status: "available", featured: true, benefit: "מסכמת מה מחכה ומנסחת תשובות לאישור" },
-  { id: "google-calendar", name: "Google Calendar", vendor: "google", status: "available", featured: true, benefit: "מוצאת שעה פנויה ושולחת זימון אחרי אישור" },
-  { id: "google-drive", name: "Google Drive", vendor: "google", status: "available", featured: true, benefit: "מצרפת קבצים למייל ושומרת סיכומים כמסמך" },
-  { id: "google-docs", name: "Google Docs", vendor: "google", status: "available", featured: true, benefit: "קוראת מסמך ועונה עליו בכמה שורות" },
-  { id: "google-sheets", name: "Google Sheets", vendor: "google", status: "available", benefit: "שולפת מספר או שורה מתוך גיליון" },
-  { id: "google-slides", name: "Google Slides", vendor: "google", status: "available", benefit: "מסכמת מצגת לפני פגישה" },
-  { id: "google-meet", name: "Google Meet", vendor: "google", status: "available", benefit: "מצרפת קישור Meet לפגישה כשמבקשים" },
-  { id: "google-tasks", name: "Google Tasks", vendor: "google", status: "available", benefit: "מוסיפה משימות לרשימה ישר מהשיחה" },
+  { id: "gmail", name: "Gmail", vendor: "google", status: "available", plan: "basic", featured: true, benefit: "מסכמת מה מחכה ומנסחת תשובות לאישור" },
+  { id: "google-calendar", name: "Google Calendar", vendor: "google", status: "available", plan: "basic", featured: true, benefit: "מוצאת שעה פנויה ושולחת זימון אחרי אישור" },
+  { id: "google-drive", name: "Google Drive", vendor: "google", status: "available", plan: "basic", featured: true, benefit: "מצרפת קבצים למייל, ובפרו גם שומרת מסמכים" },
+  { id: "google-docs", name: "Google Docs", vendor: "google", status: "available", plan: "basic", featured: true, benefit: "קוראת מסמך ועונה עליו בכמה שורות" },
+  { id: "google-sheets", name: "Google Sheets", vendor: "google", status: "available", plan: "basic", benefit: "שולפת מספר או שורה מתוך גיליון" },
+  { id: "google-slides", name: "Google Slides", vendor: "google", status: "available", plan: "pro", benefit: "מסכמת מצגת לפני פגישה" },
+  { id: "google-meet", name: "Google Meet", vendor: "google", status: "available", plan: "basic", benefit: "מצרפת קישור Meet לפגישה כשמבקשים" },
+  { id: "google-tasks", name: "Google Tasks", vendor: "google", status: "available", plan: "pro", benefit: "מוסיפה משימות לרשימה ישר מהשיחה" },
 
   // Microsoft 365 - one OAuth connection (lib/ms/oauth.ts)
-  { id: "outlook", name: "Outlook", vendor: "microsoft", status: "available", featured: true, benefit: "מייל ויומן: מסכמת, קובעת ומנסחת לאישור" },
-  { id: "onedrive", name: "OneDrive", vendor: "microsoft", status: "available", featured: true, benefit: "מוצאת קובץ לפי שם או לקוח וקוראת אותו" },
-  { id: "word", name: "Word", vendor: "microsoft", status: "available", featured: true, benefit: "עונה על שאלות מתוך מסמך, כמו סעיף בחוזה" },
-  { id: "excel", name: "Excel", vendor: "microsoft", status: "available", featured: true, benefit: "קוראת גיליון ומוציאה ממנו את המספר" },
-  { id: "powerpoint", name: "PowerPoint", vendor: "microsoft", status: "available", benefit: "מסכמת מצגת בכמה שורות" },
-  { id: "sharepoint", name: "SharePoint", vendor: "microsoft", status: "available", benefit: "חיפוש בספריות המסמכים של הצוות" },
-  { id: "teams", name: "Microsoft Teams", vendor: "microsoft", status: "available", benefit: "מצרפת קישור Teams לפגישה בחשבון עבודה" },
-  { id: "todo", name: "Microsoft To Do", vendor: "microsoft", status: "available", benefit: "מוסיפה משימות ומזכירה ביום היעד" },
+  { id: "outlook", name: "Outlook", vendor: "microsoft", status: "available", plan: "basic", featured: true, benefit: "מייל ויומן: מסכמת, קובעת ומנסחת לאישור" },
+  { id: "onedrive", name: "OneDrive", vendor: "microsoft", status: "available", plan: "basic", featured: true, benefit: "מוצאת קובץ לפי שם או לקוח וקוראת אותו" },
+  { id: "word", name: "Word", vendor: "microsoft", status: "available", plan: "basic", featured: true, benefit: "עונה על שאלות מתוך מסמך, כמו סעיף בחוזה" },
+  { id: "excel", name: "Excel", vendor: "microsoft", status: "available", plan: "basic", featured: true, benefit: "קוראת גיליון ומוציאה ממנו את המספר" },
+  { id: "powerpoint", name: "PowerPoint", vendor: "microsoft", status: "available", plan: "basic", benefit: "מסכמת מצגת בכמה שורות" },
+  { id: "sharepoint", name: "SharePoint", vendor: "microsoft", status: "available", plan: "pro", benefit: "חיפוש בספריות המסמכים של הצוות" },
+  { id: "teams", name: "Microsoft Teams", vendor: "microsoft", status: "available", plan: "basic", benefit: "מצרפת קישור Teams לפגישה בחשבון עבודה" },
+  { id: "todo", name: "Microsoft To Do", vendor: "microsoft", status: "available", plan: "pro", benefit: "מוסיפה משימות ומזכירה ביום היעד" },
 
   // business systems (docs/research/connectors-israel.md)
-  { id: "monday", name: "monday.com", vendor: "business", status: "soon", benefit: "מה הסטטוס של לקוח או פרויקט בבורד" },
-  { id: "priority", name: "Priority", vendor: "business", status: "soon", benefit: "הזמנות, לקוחות ומלאי מתוך ה-ERP", monogram: { text: "P", color: "#13241C" } },
-  { id: "morning", name: "מורנינג (חשבונית ירוקה)", vendor: "business", status: "soon", benefit: "מי עוד לא שילם, וקבלה חדשה באישור", monogram: { text: "מ", color: "#0CAB80" } },
-  { id: "icount", name: "iCount", vendor: "business", status: "soon", benefit: "חשבוניות פתוחות ותזכורות תשלום ללקוחות", monogram: { text: "iC", color: "#7133D9" } },
+  { id: "monday", name: "monday.com", vendor: "business", status: "soon", plan: "pro", benefit: "מה הסטטוס של לקוח או פרויקט בבורד" },
+  { id: "priority", name: "Priority", vendor: "business", status: "soon", plan: "pro", benefit: "הזמנות, לקוחות ומלאי מתוך ה-ERP", monogram: { text: "P", color: "#13241C" } },
+  { id: "morning", name: "מורנינג (חשבונית ירוקה)", vendor: "business", status: "soon", plan: "pro", benefit: "מי עוד לא שילם, וקבלה חדשה באישור", monogram: { text: "מ", color: "#0CAB80" } },
+  { id: "icount", name: "iCount", vendor: "business", status: "soon", plan: "pro", benefit: "חשבוניות פתוחות ותזכורות תשלום ללקוחות", monogram: { text: "iC", color: "#7133D9" } },
 ];
 
 export interface IntegrationGroup {
@@ -101,11 +103,10 @@ export function featuredGroups(list: readonly Integration[] = INTEGRATIONS): Int
 }
 
 /**
- * What a plan connects to. Every plan - and the trial - includes the same connections today: the plans differ in
- * messages and agents (lib/billing/plans.ts), not in systems. Kept as a function so a future plan-only connection is
- * one rule here, not a change in the pricing component.
+ * What a plan connects to (Daniel's split of 23.10.2026, lib/billing/plans.ts entitlements). Basic - and the trial -
+ * work with one account, Google or Microsoft: the available systems marked "basic", from both vendors, since either can
+ * be the one. Pro: every system, the business systems with their "בקרוב".
  */
 export function integrationsForPlan(plan: PaidPlan, list: readonly Integration[] = INTEGRATIONS): IntegrationGroup[] {
-  void plan;
-  return integrationGroups(availableIntegrations(list));
+  return plan === "basic" ? integrationGroups(availableIntegrations(list).filter((i) => i.plan === "basic")) : integrationGroups(list);
 }

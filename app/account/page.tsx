@@ -14,7 +14,8 @@ import { Wordmark } from "@/components/brand/wordmark";
 import { DELETE_CONFIRM_WORD } from "@/lib/account/service";
 import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
-import { PLANS, TRIAL_MESSAGES } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, mayConnect, planFeatures, providerGate, type EffectivePlan } from "@/lib/billing/plans";
+import { PlanFeatureList } from "@/components/brand/plan-features";
 import { BRAND } from "@/lib/brand";
 import { googleReadGates } from "@/lib/connections/gates";
 import { connectionServices, type ServiceView } from "@/lib/connections/services";
@@ -105,9 +106,16 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const payHref = `/pay/${createPayLinkToken(user.id)}`;
   const microsoft = connectionFor(connections, "microsoft");
   const google = connectionFor(connections, "google");
+  // the plan's accounts (lib/billing/plans.ts): on basic and in the trial one account; a second one connected before the
+  // split is paused (kept, not used) until the user disconnects one of them or upgrades
+  const { inForce, paused } = providerGate(connections, plan);
+  const gateOf = (provider: "microsoft" | "google"): ProviderGate => (paused.includes(provider) ? "paused" : mayConnect(connections, plan, provider) ? "open" : "pro");
   // the services behind each connected account, from its granted scopes (+ the Google user cap for the restricted reads)
-  const msServices = microsoft.state === "active" && microsoft.row ? connectionServices(microsoft.row) : null;
-  const googleServices = google.state === "active" && google.row ? connectionServices(google.row, { gates: await googleReadGates(db, google.row.account_email) }) : null;
+  // and the plan (a service pro has and the plan does not: "במסלול פרו", a click opens the upgrade)
+  const planOpts = { plan, upgradeHref: payHref };
+  const msServices = microsoft.state === "active" && microsoft.row ? connectionServices(microsoft.row, { ...planOpts, paused: paused.includes("microsoft") }) : null;
+  const googleServices =
+    google.state === "active" && google.row ? connectionServices(google.row, { ...planOpts, paused: paused.includes("google"), gates: await googleReadGates(db, google.row.account_email) }) : null;
   const linked = linkedPhones(phones);
   const meter = usageView(subscription, usage, now, tz);
   const name = firstName(user.name);
@@ -141,10 +149,12 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
 
       <div className="grid gap-x-16 gap-y-14 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_auto_auto_1fr]">
         <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} עובדת עם המייל, היומן, המשימות והקבצים. ניתוק מוחק את הגישה אצלנו.`} className="lg:col-start-1 lg:row-start-1">
+          {paused.length && inForce[0] ? <PausedNotice inForce={inForce[0]} paused={paused[0]!} plan={plan} payHref={payHref} /> : null}
           <ul className="divide-y divide-line border-y border-line">
-            <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" services={msServices} {...microsoft} />
-            <ConnectionItem provider="google" title="Google" product="Gmail" services={googleServices} {...google} />
+            <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" services={msServices} gate={gateOf("microsoft")} plan={plan} payHref={payHref} {...microsoft} />
+            <ConnectionItem provider="google" title="Google" product="Gmail" services={googleServices} gate={gateOf("google")} plan={plan} payHref={payHref} {...google} />
           </ul>
+          {plan !== "pro" && !paused.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">{ONE_ACCOUNT_LINE[plan]}</p> : null}
         </Section>
 
         <Section id="whatsapp" title="וואטסאפ" description={`המספר שממנו מדברים עם ${BRAND.name}.`} className="lg:col-start-1 lg:row-start-2">
@@ -157,6 +167,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
 
         <SubscriptionSlip
           subscription={subscription}
+          plan={plan}
           meter={meter}
           payHref={payHref}
           timeZone={tz}
@@ -210,6 +221,33 @@ function Status({ state, children }: { state: ConnectionState; children?: ReactN
   );
 }
 
+const PROVIDER_TITLE: Record<"microsoft" | "google", string> = { microsoft: "Microsoft 365", google: "Google" };
+const WHERE: Record<Exclude<EffectivePlan, "pro">, string> = { trial: "בתקופת הניסיון", basic: "במסלול הבסיסי" };
+const ONE_ACCOUNT_LINE: Record<Exclude<EffectivePlan, "pro">, string> = {
+  trial: "בתקופת הניסיון ובמסלול הבסיסי מחברים חשבון אחד: Google או Microsoft. שניהם יחד: במסלול פרו.",
+  basic: "במסלול הבסיסי מחברים חשבון אחד: Google או Microsoft. שניהם יחד: במסלול פרו.",
+};
+
+/** How the plan treats a provider: connect freely, connected but paused (a second account), or only on pro. */
+type ProviderGate = "open" | "paused" | "pro";
+
+/**
+ * A second account connected before the split (or kept after a downgrade): nothing was disconnected or deleted. One
+ * line says which account works now and the two ways on: disconnect one of them, or upgrade.
+ */
+function PausedNotice({ inForce, paused, plan, payHref }: { inForce: "microsoft" | "google"; paused: "microsoft" | "google"; plan: EffectivePlan; payHref: string }) {
+  return (
+    <div role="status" className="mb-5 rounded-2xl border border-honey/40 bg-honey/10 px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5">
+      <p>
+        {plan === "pro" ? "" : `${WHERE[plan]} `}עובדים עם חשבון אחד. עכשיו פעיל {PROVIDER_TITLE[inForce]}, ו-{PROVIDER_TITLE[paused]} מחובר אבל מושהה. אפשר לנתק את אחד מהם, או לשדרג לפרו ולעבוד עם שניהם יחד.
+      </p>
+      <Link href={payHref as Route} className="mt-2 inline-block rounded-sm font-semibold underline underline-offset-3">
+        לשדרוג לפרו
+      </Link>
+    </div>
+  );
+}
+
 function ConnectionItem({
   provider,
   title,
@@ -217,6 +255,9 @@ function ConnectionItem({
   row,
   state,
   services,
+  gate,
+  plan,
+  payHref,
 }: {
   provider: "microsoft" | "google";
   title: string;
@@ -224,6 +265,9 @@ function ConnectionItem({
   row: ConnectionRow | null;
   state: ConnectionState;
   services: ServiceView[] | null;
+  gate: ProviderGate;
+  plan: EffectivePlan;
+  payHref: string;
 }) {
   const action =
     state === "active" && row ? (
@@ -233,6 +277,11 @@ function ConnectionItem({
           ניתוק
         </Cta>
       </form>
+    ) : gate === "pro" ? (
+      // a second account on a one-account plan: the way there is pro (the start route refuses it as well)
+      <Cta tone="ghost" size="sm" href={payHref} aria-label={`${title} בנוסף: במסלול פרו`}>
+        במסלול פרו
+      </Cta>
     ) : (
       <Cta tone={state === "none" ? "ghost" : "honey"} size="sm" href={`/api/auth/${provider}/start`} aria-label={`${state === "none" ? "חיבור" : "חיבור מחדש"} ${title}`}>
         {state === "none" ? "חיבור" : "חיבור מחדש"}
@@ -249,13 +298,13 @@ function ConnectionItem({
       action={action}
       footer={services?.length ? <ServiceRow services={services} label={`שירותים ב-${title}`} /> : null}
     >
-      <Status state={state} />
+      {gate === "paused" && state === "active" ? <Status state="expired">מושהה: {plan === "pro" ? "" : `${WHERE[plan]} `}עובדים עם חשבון אחד</Status> : <Status state={state} />}
       {row?.account_email && state !== "none" ? (
         <p className="mt-0.5 truncate text-[0.875rem] text-cream-muted">
           <bdi dir="ltr">{row.account_email}</bdi>
         </p>
       ) : state === "none" ? (
-        <p className="mt-0.5 text-[0.875rem] text-cream-muted">מייל ויומן דרך {product}</p>
+        <p className="mt-0.5 text-[0.875rem] text-cream-muted">{gate === "pro" ? `${product} בנוסף לחשבון המחובר: במסלול פרו` : `מייל ויומן דרך ${product}`}</p>
       ) : null}
     </Row>
   );
@@ -369,12 +418,14 @@ const STATUS_CHIP: Record<string, { label: string; className: string }> = {
 
 function SubscriptionSlip({
   subscription,
+  plan: planInForce,
   meter,
   payHref,
   timeZone,
   className,
 }: {
   subscription: SubscriptionRow | null;
+  plan: EffectivePlan;
   meter: UsageView;
   payHref: string;
   timeZone: string;
@@ -415,6 +466,8 @@ function SubscriptionSlip({
               : `המכסה מתחדשת ב-${meter.resetsOn}.`
         }
       />
+
+      <PlanIncludes plan={planInForce} />
 
       {!onTrial && nextCharge ? (
         <dl className="mt-6 flex items-baseline justify-between gap-4 border-t border-ink/12 pt-5 text-[0.9375rem]">
@@ -472,6 +525,31 @@ function SubscriptionSlip({
         </details>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * What the plan in force includes, folded (lib/billing/plans.ts planFeatures — the same lines as the landing and the pay
+ * page): basic's list (the trial is basic in what it connects to), and on basic and in the trial what pro adds.
+ */
+function PlanIncludes({ plan }: { plan: EffectivePlan }) {
+  const basic = planFeatures("basic");
+  const pro = planFeatures("pro");
+  return (
+    <details className="group mt-6 border-t border-ink/12 pt-5">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md text-[0.9375rem] font-semibold [&::-webkit-details-marker]:hidden">
+        {plan === "trial" ? "מה כלול בתקופת הניסיון" : "מה כלול במסלול"}
+        <Chevron />
+      </summary>
+      {plan === "pro" ? <p className="mt-3 text-[0.875rem] text-ink-muted">{pro.lead}</p> : null}
+      <PlanFeatureList lines={plan === "pro" ? pro.lines : basic.lines} className="mt-3" itemClassName="py-2 text-[0.875rem]" />
+      {plan !== "pro" ? (
+        <>
+          <p className="mt-4 text-[0.875rem] text-ink-muted">במסלול פרו, בנוסף:</p>
+          <PlanFeatureList lines={pro.lines} className="mt-2" itemClassName="py-2 text-[0.875rem]" />
+        </>
+      ) : null}
+    </details>
   );
 }
 

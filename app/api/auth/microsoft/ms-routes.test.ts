@@ -118,4 +118,23 @@ describe("Microsoft connect routes (memory mode)", () => {
     expect(await n.json()).toEqual({ accepted: 1 });
     expect(db.audit.filter((a) => a.action === "graph.notification")).toHaveLength(1);
   });
+  it("the plan's gate: on the trial and basic Microsoft 365 cannot join an active Google account (the pay page, why=second_account); pro connects both; the admin consent is not gated", async () => {
+    const APP = "https://app.example.co.il";
+    const user = await db.createUser("dana@example.com");
+    db.seedConnection(user.id, "google", "dana.levi@gmail.com");
+    const start = () => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    const refused = await start();
+    expect(refused.status).toBe(303);
+    const to = new URL(refused.headers.get("location")!);
+    expect(to.origin + to.pathname).toMatch(new RegExp(`^${APP}/pay/[^/]+$`));
+    expect(to.searchParams.get("why")).toBe("second_account");
+    expect((await db.getUser(user.id))!.profile.oauth_pending).toBeUndefined();
+    await db.upsertSubscription(user.id, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
+    expect(new URL((await start()).headers.get("location")!).searchParams.get("why")).toBe("second_account");
+    // the IT admin's tenant-wide consent connects nothing: not gated
+    const admin = await startGet(new Request(`${APP}/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    expect(new URL(admin.headers.get("location")!).pathname).toContain("adminconsent");
+    await db.upsertSubscription(user.id, { plan: "pro" });
+    expect(new URL((await start()).headers.get("location")!).hostname).toBe("login.microsoftonline.com");
+  });
 });

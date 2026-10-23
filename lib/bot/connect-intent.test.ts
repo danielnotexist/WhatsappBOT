@@ -96,6 +96,51 @@ describe("connect intents", () => {
     expect(h.ai.calls).toHaveLength(0); // no model call for any of these
   });
 
+  it("one account on basic / in the trial: a second one is refused in the chat with the plan line (no link, no model); pro gets the link", async () => {
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    h.db.seedConnection(user.id, "microsoft", "dana@contoso.co.il");
+    expect((await processInbound(h.ctx, h.inbound("לחבר את גוגל"))).note).toBe("second account refused");
+    expect(h.wa.texts.at(-1)).toBe(
+      'בתקופת הניסיון עובדים עם חשבון אחד, והחשבון המחובר הוא Microsoft 365. במסלול פרו (299 ₪ לחודש) Microsoft 365 ו-Google עובדים יחד. אפשר לכתוב "שדרוג" ואשלח את הפרטים.\nאפשר גם להחליף חשבון: לנתק את Microsoft 365 באזור האישי, ואז לחבר את Google.',
+    );
+    await h.db.upsertSubscription(user.id, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
+    await processInbound(h.ctx, h.inbound("לחבר את הג׳ימייל"));
+    expect(h.wa.texts.at(-1)).toMatch(/^במסלול הבסיסי עובדים עם חשבון אחד/);
+    expect(h.wa.texts.join("\n")).not.toContain("/api/auth/google/start");
+    // reconnecting the account in force still works
+    await processInbound(h.ctx, h.inbound("לחבר מחדש את המייל"));
+    expect(h.wa.texts.at(-1)).toContain("/api/auth/microsoft/start?t=");
+    await h.db.upsertSubscription(user.id, { plan: "pro" });
+    await processInbound(h.ctx, h.inbound("לחבר את גוגל"));
+    expect(h.wa.texts.at(-1)).toContain("/api/auth/google/start?t=");
+    expect(h.ai.calls).toHaveLength(0);
+  });
+
+  it("both accounts from before the split on basic: the turn uses the newest only, and the model is told the other is paused", async () => {
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    await h.db.upsertSubscription(user.id, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
+    h.db.seedConnection(user.id, "microsoft", "dana@contoso.co.il").created_at = "2026-09-01T00:00:00.000Z";
+    h.db.seedConnection(user.id, "google", "dana.levi@gmail.com").created_at = "2026-10-01T00:00:00.000Z";
+    const seen: string[][] = [];
+    h.ctx.extraTools = async (_user, connections, plan) => {
+      seen.push([...connections.map((c) => c.provider), String(plan)]);
+      return [];
+    };
+    await processInbound(h.ctx, h.inbound("מה יש לי ביומן מחר?"));
+    expect(seen).toEqual([["google", "basic"]]);
+    const system = h.ai.calls.at(-1)!.system;
+    expect(system).toContain("- Microsoft 365 מחובר אבל מושהה: במסלול הזה עובדים עם חשבון אחד, והפעיל הוא Google.");
+    expect(system).not.toContain("- Microsoft 365 מחובר (dana@contoso.co.il)");
+    // nothing was disconnected
+    expect((await h.db.listConnections(user.id)).map((c) => c.status)).toEqual(["active", "active"]);
+  });
+
   it("'הג׳ימייל' right after a Microsoft link brings the Google link, without the model", async () => {
     const h = makeHarness();
     const user = await h.db.createUser("dana@example.com");

@@ -2,11 +2,12 @@ import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { ctaClass } from "@/components/brand/cta";
+import { PlanFeatureList } from "@/components/brand/plan-features";
 import { WaLinkButton } from "@/components/brand/wa-link-button";
-import { BUILTIN_AGENTS } from "@/lib/agents/templates";
 import { formatIls } from "@/lib/billing/money";
-import { PLANS, type PaidPlan } from "@/lib/billing/plans";
+import { PLANS, planFeatures, type PaidPlan, type PlanFeatureLine } from "@/lib/billing/plans";
 import type { UpgradeBlock, UpgradeFailure } from "@/lib/billing/web-upgrade";
+import type { PlanGateReason } from "@/lib/connections/plan-gate";
 import { BRAND } from "@/lib/brand";
 import { daysHe } from "@/lib/copy/bot-billing";
 import { cn } from "@/lib/utils";
@@ -22,18 +23,24 @@ import { PendingSubmit } from "../_components/pending-submit";
 type FormAction = (formData: FormData) => void | Promise<void>;
 
 const count = (n: number) => new Intl.NumberFormat("he-IL").format(n);
-const agents = (n: number) => (n === 1 ? "סוכן אחד" : `${n} סוכנים`);
-const listHe = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} ו${items.at(-1)}`);
 
-/** What pro adds to basic — from the plan table (lib/billing/plans.ts), so the page never promises more than the plan. */
-export function proAdds(): string[] {
+/**
+ * What pro adds to basic: the messages, then pro's lines of the price list (lib/billing/plans.ts planFeatures, from
+ * the entitlements), so the page never promises more than the plan; "בקרוב" on what is coming.
+ */
+export function proAdds(): PlanFeatureLine[] {
   const { basic, pro } = PLANS;
-  return [
-    `עד ${count(pro.messages)} הודעות בחודש, במקום ${count(basic.messages)}`,
-    ...(pro.builtinAgents && !basic.builtinAgents ? [`הסוכנים המובנים: ${listHe(Object.values(BUILTIN_AGENTS).map((a) => a.name))}`] : []),
-    `עד ${agents(pro.customAgents)} משלך, במקום ${agents(basic.customAgents)}`,
-  ];
+  return [{ id: "messages", text: `עד ${count(pro.messages)} הודעות בחודש, במקום ${count(basic.messages)}` }, ...planFeatures("pro").lines];
 }
+
+/**
+ * Why the connect step sent the user here (`?why=`, lib/connections/plan-gate.ts): fixed text by code, never text from
+ * the URL. Shown above the face (the plan choice, the upgrade offer, the card update).
+ */
+export const PLAN_GATE_NOTICES: Record<PlanGateReason, string> = {
+  second_account: "בתקופת הניסיון ובמסלול הבסיסי עובדים עם חשבון אחד: Google או Microsoft. שניהם יחד כלולים במסלול פרו. אפשר גם להחליף חשבון: לנתק את החשבון המחובר באזור האישי, ואז לחבר את השני.",
+  pro_feature: "השירות הזה כלול במסלול פרו. אחרי השדרוג אפשר לאשר אותו מהאזור האישי.",
+};
 
 /** "ל-21 ימים" / "ליומיים" / "ליום אחד" */
 const forDays = (n: number) => (n > 2 ? `ל-${daysHe(n)}` : `ל${daysHe(n)}`);
@@ -100,6 +107,7 @@ export function UpgradeOfferFace({
   action,
   notice,
   error,
+  gate,
 }: {
   name: string;
   token: string;
@@ -109,6 +117,8 @@ export function UpgradeOfferFace({
   action: FormAction;
   notice?: UpgradeNotice | null;
   error?: string;
+  /** the connect step was refused for the plan (`?why=`) */
+  gate?: PlanGateReason | null;
 }) {
   const amount = formatIls(offer.amountIls);
   const next = formatIls(offer.nextAmountIls);
@@ -119,6 +129,7 @@ export function UpgradeOfferFace({
       </PayHeading>
 
       <Notice code={notice} error={error} />
+      {gate ? <PayNotice text={PLAN_GATE_NOTICES[gate]} /> : null}
 
       <div className="grid gap-x-14 md:grid-cols-[minmax(0,34rem)_minmax(0,1fr)]">
         <PayPaper pose="front" tone="honey" className="max-w-none">
@@ -149,13 +160,7 @@ export function UpgradeOfferFace({
           </dl>
 
           <p className="mt-7 text-[1rem] text-ink-muted">כל מה שבבסיסי, ובנוסף:</p>
-          <ul className="mt-2 border-t border-ink/20">
-            {proAdds().map((f) => (
-              <li key={f} className="border-b border-ink/20 py-3 text-[1rem] leading-snug">
-                {f}
-              </li>
-            ))}
-          </ul>
+          <PlanFeatureList lines={proAdds()} rule="border-ink/20" className="mt-2" itemClassName="py-3 text-[1rem]" />
 
           <UpgradeForm token={token} offer={offer} action={action} label="לשדרג עכשיו" pendingLabel="משדרגים…" className="mt-8" />
           <p className="mt-3 text-[0.875rem] text-ink-muted">חיוב אחד של {amount} ₪ עכשיו. הקבלה נשלחת למייל.</p>
@@ -353,6 +358,7 @@ export function CardUpdateFace({
   upgradeHref,
   block,
   notice,
+  gate,
 }: {
   plan: PaidPlan;
   nextDay: string | null;
@@ -363,6 +369,8 @@ export function CardUpdateFace({
   /** basic without one: why (shown above the paper) */
   block: { reason: UpgradeBlock; last4?: string } | null;
   notice?: UpgradeNotice | null;
+  /** the connect step was refused for the plan (`?why=`) */
+  gate?: PlanGateReason | null;
 }) {
   return (
     <>
@@ -370,6 +378,7 @@ export function CardUpdateFace({
         <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">כרטיס חדש לחיובים הבאים. את הפרטים מקלידים בדף המאובטח של HYP, והכרטיס נבדק בלי חיוב.</p>
       </PayHeading>
       {notice ? <Notice code={notice} /> : null}
+      {gate && plan === "basic" ? <PayNotice text={PLAN_GATE_NOTICES[gate]} /> : null}
       {block ? <PayNotice text={BLOCK_TEXT[block.reason](block.last4)} /> : null}
       <PayPaper pose="front">
         <div className="flex items-center justify-between gap-4">

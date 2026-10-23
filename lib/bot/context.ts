@@ -1,5 +1,6 @@
 import type { SpendGuard } from "@/lib/ai/budget";
 import type { AiProvider } from "@/lib/ai/types";
+import type { EffectivePlan } from "@/lib/billing/plans";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import type { OnlineMeetingCheck, Tool } from "@/lib/ai/tools";
 import type { SttProvider } from "@/lib/stt/types";
@@ -15,8 +16,8 @@ export interface BotContext {
   now: () => Date;
   /** public site URL (APP_URL) for links sent in chat */
   appUrl: string;
-  /** provider tools (Graph / Google) for the strong model, by user and connections */
-  extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
+  /** provider tools (Graph / Google) for the strong model, by user, the connections in force and the plan (its entitlements) */
+  extraTools?: (user: UserRow, connections: ConnectionRow[], plan?: EffectivePlan) => Promise<Tool[]>;
   /** whether the account can create an online meeting, asked before a draft names one (lib/ai/tools.ts OnlineMeetingCheck) */
   onlineMeetingCheck?: (connections: ConnectionRow[]) => OnlineMeetingCheck;
   /** speech-to-text for voice notes (lazy: a missing key only fails voice notes); absent → audio is declined */

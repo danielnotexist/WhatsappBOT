@@ -1,4 +1,5 @@
 import { NOT_ORGANIZER, alreadyOnline, onlineMeetingUpdateField, onlineUnavailableResult, type Tool, type ToolContext } from "@/lib/ai/tools";
+import type { Entitlements } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
 import type { ConnectionRow } from "@/lib/db/types";
@@ -21,6 +22,8 @@ export interface GraphToolDeps {
   connectLink?: () => string;
   /** the Microsoft connection (tenant, address): tells a personal account apart when Teams is unavailable */
   connection?: Pick<ConnectionRow, "tenant_id" | "account_email"> | null;
+  /** what the user's plan includes (lib/billing/plans.ts): To Do and SharePoint only with `tasks` / `sharepoint`; default: everything */
+  entitlements?: Pick<Entitlements, "tasks" | "sharepoint">;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -210,7 +213,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           return { name: item.name, pages: res.pages, truncated: res.truncated, text: res.text };
         }),
     },
-    ...msWorkspaceTools({ graph: deps.graph, scopes: deps.scopes, connectLink: deps.connectLink }),
+    ...msWorkspaceTools({ graph: deps.graph, scopes: deps.scopes, connectLink: deps.connectLink, entitlements: deps.entitlements }),
   ];
 }
 

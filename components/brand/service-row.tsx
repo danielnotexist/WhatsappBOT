@@ -14,7 +14,9 @@ import { ServiceGlyph } from "./service-icons";
  *   - Esc or a tap elsewhere closes it; one tooltip at a time;
  *   - the bubble is out of the flow (no layout shift), kept inside the viewport at 390px, and fades in only when
  *     motion is allowed.
- * Status is never colour alone: the name says it, the tile shape says it (solid sage / dark with a honey dot / dashed).
+ * A service the plan does not include ("במסלול פרו") is a link to the upgrade, with the same two-tap behaviour on touch.
+ * Status is never colour alone: the name says it, the tile shape says it (solid sage / dark with a honey dot / dashed /
+ * dark with a small honey ring).
  */
 export function ServiceRow({ services, label, className }: { services: readonly ServiceView[]; label: string; className?: string }) {
   const [open, setOpen] = useState<ServiceId | null>(null);
@@ -68,12 +70,14 @@ const TILE: Record<ServiceView["status"], string> = {
   connected: "bg-sage text-night shadow-[inset_0_-2px_0_rgb(15_28_23/0.18)] hover:bg-[#AFD5B9]",
   needs_consent: "bg-cream/[0.07] text-cream-muted ring-1 ring-cream/15 ring-inset hover:bg-cream/[0.12] hover:text-cream",
   unavailable: "border border-dashed border-cream-muted/35 text-cream-muted/45 hover:border-cream-muted/60",
+  pro_only: "bg-cream/[0.04] text-cream-muted/70 ring-1 ring-honey/35 ring-inset hover:bg-cream/[0.1] hover:text-cream",
 };
 
 const DOT: Record<ServiceView["status"], string> = {
   connected: "bg-sage",
   needs_consent: "bg-honey",
   unavailable: "border-[1.5px] border-ink-muted/60",
+  pro_only: "border-[1.5px] border-honey",
 };
 
 function ServiceIconItem({
@@ -102,7 +106,7 @@ function ServiceIconItem({
     if (mouse) return show();
     setOpen((cur) => (cur === view.id ? null : view.id));
   };
-  // a "needs approval" link: a tap first explains (the tooltip says a second tap starts the consent)
+  // a "needs approval" / "in pro" link: a tap first explains (the tooltip says a second tap starts the consent / upgrade)
   const onLinkClick = (e: ReactMouseEvent<HTMLAnchorElement>) => {
     const touch = pressed() && pressRef.current.type !== "mouse";
     pressRef.current.at = 0;
@@ -145,7 +149,7 @@ function ServiceIconItem({
         if (e.pointerType === "mouse") close();
       }}
     >
-      {view.status === "needs_consent" && view.href ? (
+      {(view.status === "needs_consent" || view.status === "pro_only") && view.href ? (
         <a href={view.href} {...common} onClick={onLinkClick}>
           {glyph}
         </a>

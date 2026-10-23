@@ -92,6 +92,8 @@ describe("in the assistant (memory mode heuristics)", () => {
     const user = await h.db.createUser("dana@example.com");
     await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
     h.db.seedWaIdentity(user.id, "+972501234567");
+    // To Do is pro (lib/billing/plans.ts entitlements)
+    await h.db.upsertSubscription(user.id, { plan: "pro", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
     const fixture = createGraphFixture();
     const graph = new GraphClient({ getAccessToken: async () => "tok", fetchImpl: fixture.fetchImpl });
     h.ctx.extraTools = async () => graphTools({ graph: async () => graph, timeZone: TZ, scopes: [...MS_SCOPES] });
@@ -100,5 +102,25 @@ describe("in the assistant (memory mode heuristics)", () => {
     await processInbound(h.ctx, h.inbound("תוסיפי משימה: להתקשר לבנק"));
     expect(h.wa.texts.at(-1)).toBe("נוספה משימה ל-Microsoft To Do (Tasks): להתקשר לבנק.");
     expect(fixture.state.todo[0]!.tasks[0]!.title).toBe("להתקשר לבנק");
+  });
+
+  it("on the trial (and basic) To Do and SharePoint are pro: no todo_* / sharepoint_* tools, the plan line instead, nothing added", async () => {
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    const fixture = createGraphFixture();
+    const graph = new GraphClient({ getAccessToken: async () => "tok", fetchImpl: fixture.fetchImpl });
+    h.ctx.extraTools = async () => graphTools({ graph: async () => graph, timeZone: TZ, scopes: [...MS_SCOPES] });
+    const before = JSON.stringify(fixture.state.todo);
+    await processInbound(h.ctx, h.inbound("תוסיפי משימה: להתקשר לבנק"));
+    const tools = h.ai.calls[1]!.tools!.map((t) => t.name);
+    expect(tools.filter((t) => t.startsWith("todo_") || t.startsWith("sharepoint_"))).toEqual([]);
+    expect(tools).toEqual(expect.arrayContaining(["search_files", "get_file_text", "pro_feature"]));
+    expect(h.wa.texts.at(-1)).toBe('במסלול פרו (299 ₪ לחודש) יש גם משימות ב-Google Tasks וב-Microsoft To Do. בתקופת הניסיון זה לא כלול. אפשר לכתוב "שדרוג" ואשלח את הפרטים.');
+    expect(JSON.stringify(fixture.state.todo)).toBe(before);
+    // built for basic, the workspace tools leave them out themselves
+    const names = graphTools({ graph: async () => graph, timeZone: TZ, scopes: [...MS_SCOPES], entitlements: { tasks: false, sharepoint: false } }).map((t) => t.name);
+    expect(names.filter((t) => t.startsWith("todo_") || t.startsWith("sharepoint_"))).toEqual([]);
   });
 });

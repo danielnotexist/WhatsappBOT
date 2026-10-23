@@ -11,12 +11,15 @@ import { GoogleApiError, GoogleClient } from "./client";
 import { providerForAction, routeExecutorsByProvider } from "./dispatch";
 import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, normalizeScopes } from "./oauth";
 import { googleExecutors, googleTools } from "./tools";
+import { entitlements } from "@/lib/billing/plans";
 
 const decodeWords = (s: string) => s.replace(/\r\n /g, "").replace(/=\?UTF-8\?B\?([^?]+)\?=/g, (_m, b64: string) => Buffer.from(b64, "base64").toString("utf8"));
 const TZ = "Asia/Jerusalem";
 
-async function googleUser(h: ReturnType<typeof makeHarness>, scopes: string[] = normalizeScopes([...GOOGLE_BASE_SCOPES])) {
+async function googleUser(h: ReturnType<typeof makeHarness>, scopes: string[] = normalizeScopes([...GOOGLE_BASE_SCOPES]), plan: "basic" | "pro" = "pro") {
   const user = await h.db.createUser("dana@example.com");
+  // pro: every Google tool (lib/billing/plans.ts entitlements); basic is tested on its own below
+  await h.db.upsertSubscription(user.id, { plan, status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
   await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
   h.db.seedWaIdentity(user.id, "+972501234567");
   const conn = h.db.seedConnection(user.id, "google", "dana.levi@gmail.com");
@@ -199,6 +202,36 @@ describe("Google tools in the assistant", () => {
     // back on (or unset with a real GOOGLE_CLIENT_ID) → the earlier grant reads again, no new consent
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "");
     expect(build().map((t) => t.name)).toContain("gmail_search_emails");
+  });
+});
+
+describe("Google tools on basic (lib/billing/plans.ts entitlements)", () => {
+  afterEach(() => {
+    clearExecutorsForTests();
+    vi.unstubAllEnvs();
+  });
+
+  it("the pro tools never reach the model, even from a list built for pro; pro_feature answers a task request with the plan line", async () => {
+    const h = makeHarness();
+    await googleUser(h, normalizeScopes([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.driveReadonly]), "basic");
+    await processInbound(h.ctx, h.inbound("תוסיפי משימה: להתקשר לבנק"));
+    const tools = h.ai.calls[1]!.tools!.map((t) => t.name);
+    expect(tools).toEqual(expect.arrayContaining(["gcal_list_events", "gcal_create_event", "gdrive_list_files", "gdrive_get_file_text", "gmail_draft_email", "pro_feature"]));
+    for (const t of ["gdrive_save_doc", "gtasks_list_tasks", "gtasks_create_task", "gdrive_read_status"]) expect(tools, t).not.toContain(t);
+    expect(h.wa.texts.at(-1)).toBe('במסלול פרו (299 ₪ לחודש) יש גם משימות ב-Google Tasks וב-Microsoft To Do. במסלול הבסיסי זה לא כלול. אפשר לכתוב "שדרוג" ואשלח את הפרטים.');
+  });
+
+  it("built for basic: Drive is searched as drive.file even with drive.readonly granted, no save, no Tasks, no drive.readonly consent", () => {
+    vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "true");
+    const fixture = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fixture.fetchImpl });
+    const scopes = normalizeScopes([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.driveReadonly]);
+    const build = (plan: "basic" | "pro") => googleTools({ google: async () => google, timeZone: TZ, scopes, accountEmail: null, entitlements: entitlements(plan) });
+    const basic = build("basic").map((t) => t.name);
+    for (const t of ["gdrive_save_doc", "gtasks_list_tasks", "gtasks_create_task", "gdrive_read_status"]) expect(basic, t).not.toContain(t);
+    expect(build("pro").map((t) => t.name)).toEqual(expect.arrayContaining(["gdrive_save_doc", "gtasks_list_tasks", "gtasks_create_task"]));
+    expect(build("basic").find((t) => t.name === "gdrive_list_files")!.description).toContain("drive.file");
+    expect(build("pro").find((t) => t.name === "gdrive_list_files")!.description).toContain("בכל ה-Google Drive");
   });
 });
 

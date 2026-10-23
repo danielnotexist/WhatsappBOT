@@ -1,6 +1,6 @@
 import type { ChatStep } from "@/components/brand/chat-demo";
 import { BRAND } from "@/lib/brand";
-import { PLANS, TRIAL_MESSAGES, VAT_RATE } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
 import type { MascotPose } from "./mascot";
 
 /**
@@ -146,36 +146,31 @@ const vatPercent = Math.round(VAT_RATE * 100);
 export const PRICING = {
   trial: TRIAL_MESSAGES,
   vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
-  /** lib/integrations/catalogue.ts integrationsForPlan: the plans differ in messages and agents, not in connections */
-  connectionsNote: "החיבורים זהים בשני המסלולים וגם בהודעות החינמיות.",
+  /**
+   * lib/integrations/catalogue.ts integrationsForPlan + lib/billing/plans.ts entitlements: basic and the free messages
+   * work with one account, pro with both and the pro services
+   */
+  connectionsNote: "בבסיסי ובהודעות החינמיות מחברים חשבון אחד, Google או Microsoft. בפרו שניהם עובדים יחד, עם המשימות, SharePoint וכל ה-Drive.",
   plans: [
     {
       id: "basic" as const,
       name: PLANS.basic.nameHe,
       price: PLANS.basic.priceIls,
       allowance: `עד ${formatNumber(PLANS.basic.messages)} הודעות בחודש, בערך ${Math.round(PLANS.basic.messages / 30)} ביום`,
-      lead: null,
-      features: [
-        "חיבור ל-Microsoft 365 או ל-Google: מייל, יומן וקבצים",
-        "קריאה, סיכום, חיפוש וניסוח. שליחה רק באישור",
-        "סיכום בוקר, תזכורות והודעות קוליות",
-        "קריאת קובצי Word, Excel ו-PowerPoint",
-        "סוכן אחד משלך, עם הנחיות ויכולות שבוחרים",
-        "היסטוריה וזיכרון ל-90 יום",
-      ],
+      lead: planFeatures("basic").lead,
+      /** every line of the plan, from lib/billing/plans.ts (the pay page shows them all) */
+      features: planFeatures("basic").lines,
+      /** the label over the plan's icons on the landing (its "account" line stands there instead of in the list) */
+      connectionsLabel: planFeatures("basic").lines.find((l) => l.id === "account")!.text,
     },
     {
       id: "pro" as const,
       name: PLANS.pro.nameHe,
       price: PLANS.pro.priceIls,
       allowance: `עד ${formatNumber(PLANS.pro.messages)} הודעות בחודש, בשימוש הוגן`,
-      lead: "כל מה שבבסיסי, ובנוסף:",
-      features: [
-        `שלושת הסוכנים המובנים (מזכירה, מתמחה ומנהלת חשבונות) ועד ${PLANS.pro.customAgents} סוכנים משלך`,
-        "משימות ואוטומציות, כמו מעקב חשבוניות ותזכורת למי שלא ענה",
-        "היסטוריה וזיכרון לשנה",
-        "עדיפות למודל המתקדם",
-      ],
+      lead: planFeatures("pro").lead,
+      features: planFeatures("pro").lines,
+      connectionsLabel: "כולל חיבור ל:",
     },
   ],
 } as const;
@@ -195,7 +190,7 @@ export const FAQ: readonly { q: string; a: string }[] = [
   },
   {
     q: "עם אילו חשבונות זה עובד?",
-    a: "עם Microsoft 365 (Outlook, היומן ו-OneDrive) ועם Google (היומן, Drive ושליחה מ-Gmail). אפשר לחבר אחד מהם או את שניהם.",
+    a: "עם Microsoft 365 (Outlook, היומן ו-OneDrive) ועם Google (היומן, Drive ושליחה מ-Gmail). במסלול הבסיסי מחברים אחד מהם, ובפרו את שניהם יחד.",
   },
   {
     q: "אפשר לדבר איתה בהקלטות?",

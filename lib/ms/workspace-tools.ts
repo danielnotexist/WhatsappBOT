@@ -1,4 +1,5 @@
 import type { Tool } from "@/lib/ai/tools";
+import type { Entitlements } from "@/lib/billing/plans";
 import { oneLineUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
 import { TASKS_NOTE, cleanTitle, compactTask, dueHe, DUE_RE } from "@/lib/connections/task-format";
 import { scopy } from "@/lib/copy/bot-services";
@@ -21,6 +22,8 @@ export interface MsWorkspaceDeps {
   scopes?: string[];
   /** one-time chat link that reconnects Microsoft 365 (the normal connect re-consents) */
   connectLink?: () => string;
+  /** what the user's plan includes (lib/billing/plans.ts): the To Do tools need `tasks`, SharePoint `sharepoint`; default: both */
+  entitlements?: Pick<Entitlements, "tasks" | "sharepoint">;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -53,7 +56,7 @@ export function msWorkspaceTools(deps: MsWorkspaceDeps): Tool[] {
     return lists.find((l) => l.isDefault) ?? lists[0] ?? null;
   };
 
-  return [
+  const tools: Tool[] = [
     {
       name: "todo_list_tasks",
       description: "המשימות הפתוחות של המשתמש ב-Microsoft To Do (מכל הרשימות), עם תאריך יעד אם יש.",
@@ -133,6 +136,8 @@ export function msWorkspaceTools(deps: MsWorkspaceDeps): Tool[] {
         }),
     },
   ];
+  const plan = deps.entitlements ?? { tasks: true, sharepoint: true };
+  return tools.filter((t) => (t.name.startsWith("todo_") ? plan.tasks : t.name.startsWith("sharepoint_") ? plan.sharepoint : true));
 }
 
 /** "contoso.sharepoint.com/sites/Legal/…" → "sites/Legal"; a personal OneDrive → "OneDrive". */

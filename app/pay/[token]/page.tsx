@@ -9,11 +9,12 @@ import { verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { VAT_RATE, isPaidPlan, type PaidPlan } from "@/lib/billing/plans";
 import { webUpgradeResult, webUpgradeView, type WebUpgradeOffer } from "@/lib/billing/web-upgrade";
 import { BRAND } from "@/lib/brand";
+import { isPlanGateReason, type PlanGateReason } from "@/lib/connections/plan-gate";
 import { getDb } from "@/lib/db";
 import type { SubscriptionRow, UserRow } from "@/lib/db/types";
 import { zonedParts } from "@/lib/time/zoned";
 import { publicWaNumber } from "@/lib/wa/public-number";
-import { Assurance, PayError, PayHeading, PayPaper, PayStage } from "../_components/pay-ui";
+import { Assurance, PayError, PayHeading, PayNotice, PayPaper, PayStage } from "../_components/pay-ui";
 import { upgradeAction } from "./actions";
 import { PlanCard } from "./plan-card";
 import {
@@ -23,6 +24,7 @@ import {
   UpgradeOfferFace,
   UpgradePendingFace,
   UpgradeUnknownFace,
+  PLAN_GATE_NOTICES,
   isUpgradeNotice,
   type OfferFaceData,
 } from "./upgrade-faces";
@@ -40,6 +42,8 @@ const VAT_PERCENT = Math.round(VAT_RATE * 100);
  *  - an active subscription otherwise, or `?view=card`: update the card for the next charges (HYP J2 check, no charge)
  *    via /pay/card/<token>; on basic it says why the upgrade waits (no card, expired card, an overdue charge…);
  *  - an invalid or expired link: how to get a new one.
+ * `?why=` (lib/connections/plan-gate.ts): a connect the plan does not include was refused (a second account, a pro
+ * service) — its fixed notice stands above the face that leads to pro.
  */
 export default function PayPage(props: PageProps<"/pay/[token]">) {
   return (
@@ -73,6 +77,7 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
   const cardHref = `${self}?view=card`;
   const cardUpdateHref = cardLinkFor(process.env.APP_URL || "http://localhost:3000", user.id);
   const notice = isUpgradeNotice(sp.r) ? sp.r : null;
+  const gate = isPlanGateReason(sp.why) ? sp.why : null;
   const sub = await db.getSubscription(user.id);
   const offerData = (o: WebUpgradeOffer): OfferFaceData => ({ ...o, periodEndDay: dayOf(o.periodEnd.toISOString(), user.timezone) });
 
@@ -103,7 +108,7 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
   if (sub?.status === "active" && isPaidPlan(sub.plan)) {
     const view = sub.plan === "basic" ? await webUpgradeView(read, user, sub) : null;
     if (view?.kind === "offer" && sp.view !== "card") {
-      return <UpgradeOfferFace name={firstName(user)} token={token} offer={offerData(view.offer)} cardHref={cardHref} action={upgradeAction} notice={notice} error={error} />;
+      return <UpgradeOfferFace name={firstName(user)} token={token} offer={offerData(view.offer)} cardHref={cardHref} action={upgradeAction} notice={notice} error={error} gate={gate} />;
     }
     return (
       <CardUpdateFace
@@ -113,10 +118,11 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
         upgradeHref={view?.kind === "offer" ? self : null}
         block={view?.kind === "blocked" ? { reason: view.reason, last4: view.last4 } : null}
         notice={notice === "expired" ? "changed" : notice}
+        gate={gate}
       />
     );
   }
-  return <ChoosePlan user={user} sub={sub} token={token} error={error} now={now} />;
+  return <ChoosePlan user={user} sub={sub} token={token} error={error} gate={gate} now={now} />;
 }
 
 /** The way back to the chat (null when no public number is configured: the page still says what happened). */
@@ -137,7 +143,7 @@ function dayOf(iso: string, timeZone: string): string {
 
 /* ---------- choose a plan ---------- */
 
-function ChoosePlan({ user, sub, token, error, now }: { user: UserRow; sub: SubscriptionRow | null; token: string; error: string; now: Date }) {
+function ChoosePlan({ user, sub, token, error, gate, now }: { user: UserRow; sub: SubscriptionRow | null; token: string; error: string; gate: PlanGateReason | null; now: Date }) {
   const name = firstName(user);
   const past = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
   const cancelledUntil = sub?.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime() ? dayOf(sub.next_charge_at, user.timezone) : null;
@@ -166,6 +172,7 @@ function ChoosePlan({ user, sub, token, error, now }: { user: UserRow; sub: Subs
       </PayHeading>
 
       {error ? <PayError text={error} /> : null}
+      {gate ? <PayNotice text={PLAN_GATE_NOTICES[gate]} /> : null}
 
       {/* the hoopoe stands on the papers' top edge at the inline end: on the pro paper when they stand side by side */}
       <div className="relative mt-28 grid gap-5 sm:mt-32 md:grid-cols-2 md:gap-6">

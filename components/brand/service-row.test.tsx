@@ -129,6 +129,19 @@ describe("ServiceRow", () => {
     }
   });
 
+  it("on basic: the pro services are 'במסלול פרו' links to the upgrade, never a consent; Drive stays connected with what basic has", () => {
+    const views = connectionServices({ provider: "google", scopes: normalizeScopes([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly]) }, { plan: "basic", upgradeHref: "/pay/tok" });
+    render(<ServiceRow services={views} label="שירותים ב-Google" />);
+    const tasks = screen.getByRole("link", { name: "Google Tasks - במסלול פרו" });
+    expect(tasks).toHaveAttribute("href", "/pay/tok");
+    expect(tasks).toHaveAttribute("data-status", "pro_only");
+    expect(tasks).toHaveAccessibleDescription("הצגה והוספה של משימות לחיצה פותחת את השדרוג לפרו");
+    for (const name of ["Google Docs", "Google Sheets", "Google Slides"]) expect(screen.getByRole("link", { name: `${name} - במסלול פרו` })).toHaveAttribute("href", "/pay/tok");
+    expect(screen.getByRole("button", { name: "Google Drive - מחובר" })).toHaveAccessibleDescription("קבצים שנפתחו דרכי. חיפוש בכל ה-Drive ושמירת מסמכים: במסלול פרו");
+    expect(screen.queryByText(/מחכים לאישור נוסף|מחכה לאישור נוסף/)).toBeNull();
+    expect(screen.getAllByRole("link").every((a) => !a.getAttribute("href")!.startsWith("/api/auth"))).toBe(true);
+  });
+
   it("uses logical (RTL-safe) classes only and respects reduced motion", () => {
     const PHYSICAL = /(^|:)-?(ml|mr|pl|pr|left|right|rounded-l|rounded-r|border-l|border-r)-|(^|:)(text-left|text-right)$/;
     for (const file of ["service-row.tsx", "service-icons.tsx"]) {

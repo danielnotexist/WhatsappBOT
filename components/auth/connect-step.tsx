@@ -166,6 +166,22 @@ export function ConnectError({ error, adminLink }: { error: string; adminLink?: 
   );
 }
 
+/**
+ * Back on this step with an account already connected, on a one-account plan (the trial, basic): which account, and
+ * that the other one joins it on pro (lib/billing/plans.ts entitlements).
+ */
+export function OneAccountNote({ connected }: { connected: ProviderId }) {
+  const name = connected === "microsoft" ? "Microsoft 365" : "Google";
+  return (
+    <p role="status" className="mb-5 rounded-field border-2 border-ink/15 bg-white/40 px-4 py-3.5 text-[0.9375rem] leading-snug">
+      {name} כבר מחובר. בתקופת הניסיון ובמסלול הבסיסי עובדים עם חשבון אחד, ושני החשבונות יחד כלולים במסלול פרו.{" "}
+      <Link href="/start/ready" className="font-semibold underline underline-offset-3">
+        להמשיך
+      </Link>
+    </p>
+  );
+}
+
 const MS_NOTE = "הנפוץ במשרדים";
 
 /**

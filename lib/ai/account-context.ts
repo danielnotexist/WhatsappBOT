@@ -1,5 +1,19 @@
 import { BUILTIN_AGENTS, BUILTIN_ORDER } from "@/lib/agents/templates";
-import { PLANS, TRIAL_MESSAGES, builtinAgentsIncluded, customAgentLimit, effectivePlan, isPaidPlan, type EffectivePlan, type PaidPlan } from "@/lib/billing/plans";
+import {
+  PLANS,
+  PRO_FEATURES,
+  TRIAL_MESSAGES,
+  builtinAgentsIncluded,
+  customAgentLimit,
+  effectivePlan,
+  entitlements,
+  isPaidPlan,
+  missingProFeatures,
+  planFeatures,
+  type EffectivePlan,
+  type Entitlements,
+  type PaidPlan,
+} from "@/lib/billing/plans";
 import type { ConnectionProvider, SubscriptionRow } from "@/lib/db/types";
 import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, hasScope } from "@/lib/google/oauth";
 import { MS_SCOPES } from "@/lib/ms/oauth";
@@ -41,14 +55,33 @@ const dayOf = (iso: string, tz: string) => dayLabelHe(localDateOf(new Date(iso),
 const customAgentsHe = (n: number) => (n === 0 ? "בלי סוכנים משלך" : n === 1 ? "סוכן אחד משלך" : `עד ${n} סוכנים משלך`);
 const BUILTIN_NAMES = BUILTIN_ORDER.map((r) => BUILTIN_AGENTS[r].name).join(", ");
 
+/** What a plan includes, in one clause list (lib/billing/plans.ts entitlements). */
+export function includesHe(e: Entitlements): string {
+  const parts = [
+    e.maxProviders > 1 ? "Google ו-Microsoft יחד" : "חשבון אחד: Google או Microsoft (לא שניהם)",
+    "מייל, יומן (כולל קישור Meet / Teams), קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות",
+  ];
+  if (e.tasks) parts.push("Google Tasks ו-Microsoft To Do");
+  if (e.sharepoint) parts.push("SharePoint");
+  if (e.driveFullRead) parts.push("חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides)");
+  if (e.fileCreate) parts.push("שמירת מסמכים חדשים ב-Drive");
+  return parts.join("; ");
+}
+
 /** One line per plan, from lib/billing/plans.ts — the only plan facts the model may state. */
 export function planFactsLines(): string[] {
   const builtins = (included: boolean, editable: boolean) => (included ? `שלושת הסוכנים המובנים (${BUILTIN_NAMES})${editable ? "" : " כמו שהם"}` : "בלי הסוכנים המובנים");
+  const soon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
   const paid = (p: PaidPlan) => {
     const s = PLANS[p];
-    return `- מסלול ${s.nameHe}: ${s.priceIls} ₪ לחודש כולל מע״מ, עד ${s.messages.toLocaleString("en-US")} הודעות בחודש, ${builtins(s.builtinAgents, true)}, ${customAgentsHe(s.customAgents)}.`;
+    const later = p === "pro" && soon.length ? ` בקרוב, עוד לא פעיל ובלי מועד: ${soon.join(", ")}.` : "";
+    return `- מסלול ${s.nameHe}: ${s.priceIls} ₪ לחודש כולל מע״מ, עד ${s.messages.toLocaleString("en-US")} הודעות בחודש. כולל: ${includesHe(entitlements(p))}. ${builtins(s.builtinAgents, true)}, ${customAgentsHe(s.customAgents)}.${later}`;
   };
-  return [`- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות, ${builtins(builtinAgentsIncluded("trial"), false)}, ${customAgentsHe(customAgentLimit("trial"))}.`, paid("basic"), paid("pro")];
+  return [
+    `- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות. כולל: ${includesHe(entitlements("trial"))}. ${builtins(builtinAgentsIncluded("trial"), false)}, ${customAgentsHe(customAgentLimit("trial"))}.`,
+    paid("basic"),
+    paid("pro"),
+  ];
 }
 
 /** "## החשבון" — the user's plan, what is left, and the agents available right now. */
@@ -69,6 +102,9 @@ export function accountLines(a: AccountContext, agentNames: readonly string[], t
   }
   lines.push(`- סוכנים במסלול הזה: ${builtinAgentsIncluded(a.plan) ? `שלושת המובנים${a.plan === "trial" ? " (כמו שהם)" : ""}` : "בלי המובנים"}, ${customAgentsHe(customAgentLimit(a.plan))}.`);
   lines.push(agentNames.length ? `- סוכנים פעילים עכשיו: ${agentNames.map((n) => `״${n}״`).join(", ")}.` : "- אין כרגע סוכנים פעילים.");
+  lines.push(`- כלול במסלול הזה: ${includesHe(entitlements(a.plan))}.`);
+  const missing = missingProFeatures(a.plan);
+  if (missing.length) lines.push(`- לא כלול במסלול הזה (רק בפרו): ${missing.map((f) => PRO_FEATURES[f].label).join("; ")}. בקשה לאחד מהם: הכלי pro_feature.`);
   if (a.plan !== "pro") lines.push(`- שדרוג${a.plan === "trial" ? " או הפעלת מנוי" : " לפרו"}: הכלי start_upgrade.`);
   return lines;
 }
@@ -95,25 +131,25 @@ const DRIVE_FILE_NOTE =
  * Google: one phrase per granted scope. Gmail reading needs the scope AND the feature on (`gmailRead`: the read tools
  * exist); `null` = not connected yet — reading is open to the first users only, behind one more consent.
  */
-function googleCan(scopes: readonly string[], gmailRead: boolean | null): string[] {
+function googleCan(scopes: readonly string[], gmailRead: boolean | null, e: Entitlements): string[] {
   const can: string[] = [];
   if (hasScope(scopes, GOOGLE_SCOPES.calendarEvents)) can.push("יומן Google — הצגה, קביעה, הזזה וביטול של פגישות (אחרי אישור בכפתור), כולל פגישה עם קישור Google Meet");
   if (hasScope(scopes, GOOGLE_SCOPES.gmailSend)) can.push("שליחת מיילים מ-Gmail — רק אחרי אישור בכפתור");
   if (gmailRead === null) can.push("קריאת מיילים ב-Gmail — בשלב הזה רק למשתמשים הראשונים, עם אישור נוסף מ-Google");
   else can.push(hasScope(scopes, GOOGLE_SCOPES.gmailReadonly) && gmailRead ? "קריאה, חיפוש וסיכום של מיילים ב-Gmail" : "קריאת מיילים ב-Gmail — עדיין אין הרשאה (הכלי gmail_read_status מסביר מה אפשר)");
-  if (hasScope(scopes, GOOGLE_SCOPES.driveFile)) can.push(DRIVE_FILE_NOTE);
+  if (hasScope(scopes, GOOGLE_SCOPES.driveFile)) can.push(e.driveFullRead ? DRIVE_FILE_NOTE : `${DRIVE_FILE_NOTE}. חיפוש בכל ה-Drive ושמירת מסמכים — רק בפרו`);
   return can;
 }
 
 const msHas = (scopes: readonly string[], scope: string) => scopes.some((s) => s.replace(/^https:\/\/graph\.microsoft\.com\//i, "").toLowerCase() === scope.toLowerCase());
 
 /** Microsoft 365: Mail.ReadWrite / Mail.Send / Calendars.ReadWrite / Files.Read.All (lib/ms/oauth.ts MS_SCOPES). */
-function microsoftCan(scopes: readonly string[]): string[] {
+function microsoftCan(scopes: readonly string[], e: Entitlements): string[] {
   const can: string[] = [];
   if (msHas(scopes, "Mail.ReadWrite")) can.push("מייל Outlook — קריאה, חיפוש, סיכום והעברה (העברה אחרי אישור בכפתור)");
   if (msHas(scopes, "Mail.Send")) can.push("שליחת מיילים מ-Outlook — רק אחרי אישור בכפתור");
   if (msHas(scopes, "Calendars.ReadWrite")) can.push("יומן Outlook — הצגה, קביעה, הזזה וביטול של פגישות (אחרי אישור בכפתור), כולל פגישה עם קישור Teams (בחשבון עבודה או לימודים עם Teams; בחשבון Microsoft אישי — בלי קישור)");
-  if (msHas(scopes, "Files.Read.All")) can.push("קבצים ב-OneDrive וב-SharePoint — חיפוש וקריאה בלבד (בלי שמירה ובלי שיתוף)");
+  if (msHas(scopes, "Files.Read.All")) can.push(e.sharepoint ? "קבצים ב-OneDrive וב-SharePoint — חיפוש וקריאה בלבד (בלי שמירה ובלי שיתוף)" : "קבצים ב-OneDrive — חיפוש וקריאה בלבד (בלי שמירה ובלי שיתוף; SharePoint רק בפרו)");
   return can;
 }
 
@@ -124,16 +160,27 @@ const LABEL: Record<ConnectionProvider, string> = { microsoft: "Microsoft 365", 
  * its granted scopes allow; a provider that is not connected with what a connection would allow (the scopes the app
  * asks for), so "תהיה לך גישה ל-Drive?" has a factual answer before connecting too.
  */
-export function connectionLines(connections: readonly ConnectionFacts[], opts: { gmailRead: boolean }): string[] {
+export function connectionLines(connections: readonly ConnectionFacts[], opts: { gmailRead: boolean; plan?: EffectivePlan; paused?: readonly ConnectionProvider[] }): string[] {
   const lines: string[] = [];
+  const e = entitlements(opts.plan ?? "pro");
+  const inForce = connections.find((x) => !opts.paused?.includes(x.provider))?.provider ?? null;
   for (const provider of ["microsoft", "google"] as const) {
     const c = connections.findLast((x) => x.provider === provider);
+    if (opts.paused?.includes(provider)) {
+      // a second account on a one-account plan: connected, kept, not used (lib/billing/plans.ts providerGate)
+      lines.push(`- ${LABEL[provider]} מחובר אבל מושהה: במסלול הזה עובדים עם חשבון אחד, והפעיל הוא ${inForce ? LABEL[inForce] : "החשבון השני"}. אין גישה ל-${LABEL[provider]} עד שבוחרים: ניתוק של אחד מהם באזור האישי, או שדרוג לפרו (שניהם יחד).`);
+      continue;
+    }
+    if (!c && e.maxProviders < 2 && inForce && inForce !== provider) {
+      lines.push(`- ${LABEL[provider]} לא מחובר, ובמסלול הזה אי אפשר לחבר אותו בנוסף ל-${LABEL[inForce]} (חשבון אחד). חשבון שני: הכלי pro_feature (second_account).`);
+      continue;
+    }
     if (c) {
-      const can = provider === "google" ? googleCan(c.scopes.length ? c.scopes : GOOGLE_BASE_SCOPES, opts.gmailRead) : microsoftCan(c.scopes.length ? c.scopes : MS_SCOPES);
+      const can = provider === "google" ? googleCan(c.scopes.length ? c.scopes : GOOGLE_BASE_SCOPES, opts.gmailRead, e) : microsoftCan(c.scopes.length ? c.scopes : MS_SCOPES, e);
       const again = `חשבון אחר או חיבור מחדש: אפשר לכתוב ״לחבר מחדש את ${provider === "google" ? "גוגל" : "המייל"}״`;
       lines.push(`- ${LABEL[provider]} מחובר${c.accountEmail ? ` (${c.accountEmail})` : ""}:`, ...[...can, again].map((x) => `  • ${x}`));
     } else {
-      const can = provider === "google" ? googleCan(GOOGLE_BASE_SCOPES, null) : microsoftCan(MS_SCOPES);
+      const can = provider === "google" ? googleCan(GOOGLE_BASE_SCOPES, null, e) : microsoftCan(MS_SCOPES, e);
       lines.push(`- ${LABEL[provider]} לא מחובר. אחרי חיבור (״לחבר את ${provider === "google" ? "גוגל" : "המייל"}״):`, ...can.map((x) => `  • ${x}`));
     }
   }

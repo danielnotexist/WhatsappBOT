@@ -107,6 +107,47 @@ describe("Microsoft: status from the granted scopes", () => {
   });
 });
 
+describe("the plan (lib/billing/plans.ts entitlements): 'במסלול פרו' instead of 'צריך אישור נוסף'", () => {
+  it("basic / trial, Google: Tasks and the Docs family are pro (to the upgrade, not a consent); Drive keeps what basic has; mail and calendar as before", () => {
+    for (const plan of ["basic", "trial"] as const) {
+      const v = byId(connectionServices(google(BASE), { plan, upgradeHref: "/pay/tok" }));
+      expect(statuses(Object.values(v))).toEqual({ gmail: "needs_consent", google_calendar: "connected", google_tasks: "pro_only", google_drive: "connected", google_docs: "pro_only", google_sheets: "pro_only", google_slides: "pro_only" });
+      expect(v.google_tasks).toMatchObject({ name: "Google Tasks - במסלול פרו", statusLabel: "במסלול פרו", note: "הצגה והוספה של משימות", href: "/pay/tok", action: "לחיצה פותחת את השדרוג לפרו" });
+      expect(v.google_drive).toMatchObject({ note: "קבצים שנפתחו דרכי. חיפוש בכל ה-Drive ושמירת מסמכים: במסלול פרו", href: null });
+      // a token that holds drive.readonly from before still shows the plan, not "connected"
+      expect(byId(connectionServices(google(ALL_GOOGLE), { plan })).google_docs!.status).toBe("pro_only");
+    }
+    // no upgrade link known → the icon only explains
+    expect(byId(connectionServices(google(BASE), { plan: "basic" })).google_tasks).toMatchObject({ status: "pro_only", href: null, action: null });
+  });
+
+  it("basic, Microsoft: To Do and SharePoint are pro; Office files say OneDrive only", () => {
+    const v = byId(connectionServices(microsoft(MS_SCOPES), { plan: "basic", upgradeHref: "/pay/tok" }));
+    expect(statuses(Object.values(v))).toEqual({ outlook: "connected", outlook_calendar: "connected", onedrive: "connected", sharepoint: "pro_only", microsoft_todo: "pro_only", office_files: "connected" });
+    expect(v.office_files!.note).toBe("קריאה של מסמכים, גיליונות ומצגות מ-OneDrive. SharePoint: במסלול פרו");
+    // a v1 connection on basic: To Do / SharePoint are pro, not "needs approval"
+    expect(byId(connectionServices(microsoft(MS_SCOPES_V1), { plan: "basic" })).microsoft_todo!.status).toBe("pro_only");
+  });
+
+  it("pro: exactly as before (the default)", () => {
+    expect(connectionServices(google(BASE), { plan: "pro" })).toEqual(connectionServices(google(BASE)));
+    expect(connectionServices(microsoft(MS_SCOPES_V1), { plan: "pro" })).toEqual(connectionServices(microsoft(MS_SCOPES_V1)));
+  });
+
+  it("a paused second account: every service 'במסלול פרו' with the one-account line", () => {
+    const views = connectionServices(microsoft(MS_SCOPES), { plan: "basic", paused: true, upgradeHref: "/pay/tok" });
+    expect(views.every((v) => v.status === "pro_only" && v.href === "/pay/tok")).toBe(true);
+    expect(views[0]!.note).toBe("במסלול הנוכחי עובדים עם חשבון אחד. Google ו-Microsoft יחד: במסלול פרו");
+    for (const v of views) expect(`${v.name} ${v.note} ${v.action}`).not.toMatch(/[–—]/);
+  });
+
+  it("the account-context line names only what the plan includes", () => {
+    expect(activeServicesFor(google(BASE), { gmail_read: "disabled", drive_read: "disabled" }, "basic")).toBe("Gmail, יומן Google ו-Google Drive");
+    expect(activeServicesFor(microsoft(MS_SCOPES), OPEN_GATES, "basic")).toBe("Outlook, יומן Outlook, OneDrive וקבצי Word, Excel ו-PowerPoint");
+    expect(activeServicesFor(microsoft(MS_SCOPES), OPEN_GATES, "pro")).toBe("Outlook, יומן Outlook, OneDrive, SharePoint, Microsoft To Do וקבצי Word, Excel ו-PowerPoint");
+  });
+});
+
 describe("helpers", () => {
   it("gates from the user-cap decision and from the switches", () => {
     expect(gateFrom({ allowed: true, reason: "already_counted" })).toBe("open");

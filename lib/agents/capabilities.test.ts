@@ -6,13 +6,15 @@ import { GOOGLE_SCOPES } from "@/lib/google/oauth";
 import { googleTools } from "@/lib/google/tools";
 import type { GraphClient } from "@/lib/ms/graph";
 import { graphTools } from "@/lib/ms/tools";
+import { proFeatureTool } from "@/lib/ai/plan-tools";
 import { CAPABILITIES, CAPABILITY_IDS, MAIN_ONLY_TOOLS, TOOL_BUNDLES, capabilityOfTool, capsLine, normalizeCapabilities, toolsForAgent } from "./capabilities";
 import { BUILTIN_AGENTS, BUILTIN_ORDER } from "./templates";
 
 const graph = graphTools({ graph: async () => ({}) as GraphClient, timeZone: "Asia/Jerusalem" });
 const googleAll = googleTools({ google: async () => ({}) as GoogleClient, timeZone: "Asia/Jerusalem", scopes: [GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly], accountEmail: null, gmailReadEnabled: true });
 const googleBase = googleTools({ google: async () => ({}) as GoogleClient, timeZone: "Asia/Jerusalem", scopes: [], accountEmail: null });
-const ALL_TOOLS = [...BASE_TOOLS, ...graph, ...googleAll, ...googleBase];
+// pro_feature (lib/ai/plan-tools.ts) joins the list on basic and in the trial: main-only
+const ALL_TOOLS = [...BASE_TOOLS, ...graph, ...googleAll, ...googleBase, proFeatureTool("basic")];
 
 describe("capabilities", () => {
   it("every tool (base, Microsoft, Google with any scopes) maps to exactly one capability or is main-only", () => {

@@ -5,6 +5,7 @@ import { MS_SCOPES } from "@/lib/ms/oauth";
 import { zonedParts, zonedToUtc } from "@/lib/time/zoned";
 import { accountContextOf } from "./account-context";
 import { startAgentCreationTool, startUpgradeTool } from "./account-tools";
+import { proFeatureTool } from "./plan-tools";
 import { createReminderTool } from "./reminder-tools";
 import { ROUTER_INSTRUCTIONS, buildSystemPrompt } from "./system-prompt";
 
@@ -55,7 +56,8 @@ describe("the Hebrew eval runs the product prompt", () => {
       `export const PRODUCT_SYSTEM_PROMPT_DAY = ${JSON.stringify(promptAt(day))};`,
       `export const PRODUCT_SYSTEM_PROMPT_SMALL_HOURS = ${JSON.stringify(promptAt(night))};`,
       `export const PRODUCT_ROUTER_INSTRUCTIONS = ${JSON.stringify(ROUTER_INSTRUCTIONS)};`,
-      `export const PRODUCT_TOOLS = ${JSON.stringify([startUpgradeTool, startAgentCreationTool, createReminderTool].map(tool), null, 2)};`,
+      // the eval user is on the trial: pro_feature is offered there too (lib/ai/plan-tools.ts)
+      `export const PRODUCT_TOOLS = ${JSON.stringify([startUpgradeTool, startAgentCreationTool, createReminderTool, proFeatureTool("trial")].map(tool), null, 2)};`,
       "",
     ].join("\n");
     await expect(out).toMatchFileSnapshot("../../scripts/hebrew-eval/src/product-prompt.generated.ts");

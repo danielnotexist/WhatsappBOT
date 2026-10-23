@@ -1,5 +1,6 @@
 import { Cta } from "@/components/brand/cta";
 import { IntegrationChipRow } from "@/components/brand/integrations/chip-row";
+import { PlanFeatureList } from "@/components/brand/plan-features";
 import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import { cn } from "@/lib/utils";
 import { PRICING } from "./content";
@@ -7,9 +8,12 @@ import { CONTAINER, H2, LEDE } from "./ui";
 
 /**
  * Pricing as a printed price list: one paper sheet on the night stage (the signup cards' paper), two columns split by
- * a rule. Prices, allowances and the trial come from lib/billing/plans.ts. Each plan ends with "כולל חיבור ל:" and
- * the product tiles it connects to (lib/integrations/catalogue.ts - the same on both plans today, and the sheet says
- * so). One call to action: the plan is chosen in WhatsApp after the free messages, not here.
+ * a rule. Prices, allowances, the trial and every feature line come from lib/billing/plans.ts (planFeatures, generated
+ * from the entitlements): basic lists what one account gives, pro opens with "כל מה שבבסיסי, ובנוסף:" and its own
+ * lines, "בקרוב" on what is coming. Each plan ends with the product tiles it connects to
+ * (lib/integrations/catalogue.ts integrationsForPlan): basic under "חשבון אחד: Google או Microsoft" (its account line
+ * stands there instead of in the list), pro under "כולל חיבור ל:" with the full set. One call to action: the plan is
+ * chosen in WhatsApp after the free messages, not here.
  */
 export function Pricing() {
   return (
@@ -24,7 +28,7 @@ export function Pricing() {
             שני מסלולים. מתחילים בחינם.
           </h2>
           <p className={cn(LEDE, "mt-6 max-w-[31rem]")}>
-            {PRICING.trial} ההודעות הראשונות בחינם, עם חיבור מלא למייל וליומן. אחר כך בוחרים מסלול,
+            {PRICING.trial} ההודעות הראשונות בחינם, עם חיבור למייל וליומן. אחר כך בוחרים מסלול,
             בלי התחייבות.
           </p>
         </div>
@@ -53,20 +57,18 @@ export function Pricing() {
               </p>
               <p className="mt-6 text-[1.0625rem] font-semibold">{plan.allowance}</p>
               {plan.lead ? <p className="mt-9 text-[1rem] text-ink-muted">{plan.lead}</p> : null}
-              <ul className={cn("border-t border-ink/15", plan.lead ? "mt-3" : "mt-9")}>
-                {plan.features.map((f) => (
-                  <li
-                    key={f}
-                    className="border-b border-ink/15 py-3.5 text-[1.0625rem] leading-snug"
-                  >
-                    {f}
-                  </li>
-                ))}
-              </ul>
+              <PlanFeatureList
+                lines={plan.features.filter((f) => f.id !== "account")}
+                className={plan.lead ? "mt-3" : "mt-9"}
+                itemClassName="text-[1.0625rem]"
+              />
               {/* pinned to the foot of the card, so both plans' rows line up */}
               <div className="mt-auto pt-10">
-                <p id={`plan-${plan.id}-connections`} className="text-[0.9375rem] text-ink-muted">
-                  כולל חיבור ל:
+                <p
+                  id={`plan-${plan.id}-connections`}
+                  className={cn("text-[0.9375rem]", plan.id === "basic" ? "font-semibold" : "text-ink-muted")}
+                >
+                  {plan.connectionsLabel}
                 </p>
                 <IntegrationChipRow
                   groups={integrationsForPlan(plan.id)}

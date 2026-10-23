@@ -227,6 +227,21 @@ export function executeTool(
         // the product's account tools: the pipeline sends the offer / the create flow after the turn
         return { output: { status: 'started', note: 'המערכת שולחת עכשיו את ההמשך בהודעה נפרדת. לא לכתוב על התהליך עצמו (סכומים, קישורים, הוראות). אם בהודעה של המשתמש יש בקשה נוספת — לענות עליה כרגיל; אחרת אין צורך בטקסט.' }, isError: false };
       }
+      case 'pro_feature': {
+        // the product's plan line (lib/ai/plan-tools.ts; the eval user is on the trial)
+        const labels: Record<string, string> = {
+          second_account: 'חיבור של Google ושל Microsoft יחד',
+          tasks: 'משימות ב-Google Tasks וב-Microsoft To Do',
+          sharepoint: 'חיפוש וקריאה ב-SharePoint של הארגון',
+          file_create: 'שמירת מסמכים חדשים ב-Google Drive',
+          drive_full_read: 'חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides)',
+        };
+        const feature = labels[s('feature')] ? s('feature') : 'second_account';
+        return {
+          output: { status: 'not_in_plan', feature, say: `במסלול פרו (299 ₪ לחודש) יש גם ${labels[feature]}. בתקופת הניסיון זה לא כלול. אפשר לכתוב "שדרוג" ואשלח את הפרטים.`, note: 'להעביר למשתמש את הטקסט שב-say כלשונו, בלי להוסיף הסבר.' },
+          isError: false,
+        };
+      }
       case 'get_morning_summary': {
         const date = s('date') || today;
         const events = context.events.map(eventSummary).filter((ev) => dateOnly(ev['start']) === date);

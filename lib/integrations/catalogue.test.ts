@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PLANS, type PaidPlan } from "@/lib/billing/plans";
+import { entitlements, type PaidPlan } from "@/lib/billing/plans";
 import { GOOGLE_BASE_SCOPES, GOOGLE_FEATURE_SCOPES } from "@/lib/google/oauth";
 import { MS_SCOPES } from "@/lib/ms/oauth";
 import {
@@ -107,12 +107,18 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
 });
 
 describe("plans", () => {
-  it("both plans include the same connections - only available ones - and nothing that is not in the catalogue", () => {
+  it("basic: the available one-account systems of both vendors (either can be the one); pro: everything, the business systems as 'soon'", () => {
     const ids = (plan: PaidPlan) => integrationsForPlan(plan).flatMap((g) => g.items.map((i) => i.id));
-    expect(ids("basic")).toEqual(ids("pro"));
-    expect(ids("basic")).toEqual(availableIntegrations().map((i) => i.id));
-    // what differs between the plans lives in lib/billing/plans.ts
-    expect(PLANS.basic.messages).not.toBe(PLANS.pro.messages);
+    expect(ids("basic")).toEqual(["gmail", "google-calendar", "google-drive", "google-docs", "google-sheets", "google-meet", "outlook", "onedrive", "word", "excel", "powerpoint", "teams"]);
+    expect(integrationsForPlan("basic").map((g) => g.vendor)).toEqual(["google", "microsoft"]);
+    expect(new Set(ids("pro"))).toEqual(new Set(INTEGRATIONS.map((i) => i.id)));
+    expect(integrationsForPlan("pro").map((g) => g.vendor)).toEqual(["google", "microsoft", "business"]);
+    // every basic system is in pro too; what only pro has follows the entitlements (lib/billing/plans.ts)
+    for (const id of ids("basic")) expect(ids("pro"), id).toContain(id);
+    const proOnly = INTEGRATIONS.filter((i) => i.plan === "pro").map((i) => i.id);
+    expect(proOnly).toEqual(["google-slides", "google-tasks", "sharepoint", "todo", "monday", "priority", "morning", "icount"]);
+    expect(entitlements("basic")).toMatchObject({ tasks: false, sharepoint: false, driveFullRead: false, businessSystems: false });
+    expect(entitlements("pro")).toMatchObject({ tasks: true, sharepoint: true, driveFullRead: true, businessSystems: true });
   });
 
   it("groups by vendor in a fixed order, available before soon, empty groups dropped", () => {

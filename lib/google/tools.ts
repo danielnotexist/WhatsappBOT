@@ -1,4 +1,5 @@
 import { NOT_ORGANIZER, alreadyOnline, onlineMeetingField, onlineMeetingUpdateField, type Tool } from "@/lib/ai/tools";
+import { entitlements, type Entitlements } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { GOOGLE_LABEL, gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionRow, PendingActionRow } from "@/lib/db/types";
@@ -36,6 +37,12 @@ export interface GoogleToolDeps {
   consentLink?: (feature: GoogleFeature) => string;
   /** GOOGLE_DRIVE_READ_ENABLED (the kill switch for drive.readonly); default: read from the environment, fail closed */
   driveReadEnabled?: boolean;
+  /**
+   * what the user's plan includes (lib/billing/plans.ts); default: pro (everything). Without `driveFullRead` Drive is
+   * searched as drive.file even when the token holds drive.readonly, and nothing offers the drive.readonly consent;
+   * without `fileCreate` there is no gdrive_save_doc; without `tasks` no gtasks_* tools.
+   */
+  entitlements?: Entitlements;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -70,6 +77,7 @@ function dayRange(from: string, to: string, tz: string): { timeMin: Date; timeMa
 
 export function googleTools(deps: GoogleToolDeps): Tool[] {
   const granted = deps.scopes.length ? deps.scopes : [...GOOGLE_BASE_SCOPES];
+  const plan = deps.entitlements ?? entitlements("pro");
   const guard = async (fn: (g: GoogleClient) => Promise<unknown>) => {
     try {
       return await fn(await deps.google());
@@ -196,7 +204,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
   }
 
   // drive.readonly granted AND switched on (GOOGLE_DRIVE_READ_ENABLED): search and read every file in the Drive
-  const driveFull = hasScope(granted, GOOGLE_SCOPES.driveReadonly) && (deps.driveReadEnabled ?? driveReadActive());
+  const driveFull = plan.driveFullRead && hasScope(granted, GOOGLE_SCOPES.driveReadonly) && (deps.driveReadEnabled ?? driveReadActive());
   if (hasScope(granted, GOOGLE_SCOPES.driveFile) || driveFull) {
     tools.push(
       {
@@ -209,7 +217,12 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         run: (input) =>
           guard(async (g) => {
             const files = await g.listFiles({ query: String(input.query ?? ""), pageSize: 10, fullText: driveFull });
-            const note = files.length || driveFull ? undefined : "רק קבצים שנפתחו או נוצרו דרך האפליקציה נגישים. לחיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) צריך אישור נוסף: gdrive_read_status מחזיר מה לומר למשתמש.";
+            const note =
+              files.length || driveFull
+                ? undefined
+                : plan.driveFullRead
+                  ? "רק קבצים שנפתחו או נוצרו דרך האפליקציה נגישים. לחיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) צריך אישור נוסף: gdrive_read_status מחזיר מה לומר למשתמש."
+                  : "רק קבצים שנפתחו דרך האפליקציה נגישים. חיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) כלול רק במסלול פרו: pro_feature מחזיר מה לומר למשתמש.";
             return { count: files.length, files: files.map((f) => ({ id: f.id, name: f.name, modified: f.modifiedTime.slice(0, 10), type: f.mimeType })), note };
           }),
       },
@@ -229,7 +242,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
       },
     );
   }
-  if (hasScope(granted, GOOGLE_SCOPES.driveFile)) {
+  if (plan.fileCreate && hasScope(granted, GOOGLE_SCOPES.driveFile)) {
     tools.push(
       {
         name: "gdrive_save_doc",
@@ -296,9 +309,9 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
   }
 
   // Google Tasks: the tools answer with the consent link while the `tasks` scope is missing
-  tools.push(...googleTasksTools({ google: deps.google, granted: hasScope(granted, GOOGLE_SCOPES.tasks), consentLink: consentFor("tasks") }));
+  if (plan.tasks) tools.push(...googleTasksTools({ google: deps.google, granted: hasScope(granted, GOOGLE_SCOPES.tasks), consentLink: consentFor("tasks") }));
 
-  if (!driveFull) {
+  if (plan.driveFullRead && !driveFull) {
     // existing Docs / Sheets / Slides need drive.readonly (restricted, under the user cap): link, or one line when unavailable
     tools.push({
       name: "gdrive_read_status",

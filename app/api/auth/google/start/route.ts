@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { getSession } from "@/lib/auth/current-user";
+import { entitlements } from "@/lib/billing/plans";
+import { planGateFor, planGateUrl } from "@/lib/connections/plan-gate";
 import { demoConnect } from "@/lib/auth/demo-connect";
 import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { gcopy } from "@/lib/copy/bot-google";
@@ -26,6 +28,10 @@ const text = (body: string, status: number) => new Response(body, { status, head
  * (it re-checks what Google returns — keepGrantedRestrictedRead). The cap is decided for the account of the user's
  * existing Google connection (also a revoked one), and that same account is the login_hint, so the consent screen
  * opens on the account the decision was made for.
+ * The plan comes first (lib/connections/plan-gate.ts): on a one-account plan (basic, the trial) Google cannot join an
+ * active Microsoft 365 connection, and the pro-only consents (`drive_read`, `tasks`) are refused; both land on the
+ * personal pay page with the reason. A plan without the full Drive read does not ask for drive.readonly on a plain
+ * connect either.
  * DEMO_MODE=1 → no Google at all: lib/auth/demo-connect.ts writes a fixture connection and we land right away.
  */
 export async function GET(request: Request) {
@@ -47,6 +53,8 @@ export async function GET(request: Request) {
 
   const featureParam = url.searchParams.get("feature");
   const feature = isGoogleFeature(featureParam) ? featureParam : null;
+  const gate = await planGateFor(db, user.id, "google", feature);
+  if (gate.reason) return Response.redirect(planGateUrl(appUrl, user.id, gate.reason), 303);
   const connections = await db.listConnections(user.id);
   const account = googleAccountOf(connections);
   let cfg;
@@ -66,7 +74,7 @@ export async function GET(request: Request) {
     }
     cfg = getGoogleConfig();
     // base connect (onboarding / reconnect): gmail.readonly and drive.readonly ride along while this account may still get them
-    scopes = scopesForRequest(feature, { withGmailRead: gmail.allowed, withDriveRead: drive.allowed });
+    scopes = scopesForRequest(feature, { withGmailRead: gmail.allowed, withDriveRead: drive.allowed && entitlements(gate.plan).driveFullRead });
   } catch (e) {
     if (e instanceof EnvError) return text(e.message, 503);
     throw e;

@@ -5,8 +5,9 @@ import { maybeSummarize } from "@/lib/ai/memory";
 import { runAssistant } from "@/lib/ai/orchestrator";
 import { AiProviderError } from "@/lib/ai/types";
 import { payLinkFor } from "@/lib/billing/pay-link";
-import { isPaidPlan } from "@/lib/billing/plans";
+import { connectionsInForce, isPaidPlan, mayConnect, primaryProvider } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
+import { scopy } from "@/lib/copy/bot-services";
 import { acopy } from "@/lib/copy/bot-agents";
 import { budgetReply, liveCopy } from "@/lib/copy/bot-live";
 import type { MessageRow, MessageType, UserRow } from "@/lib/db/types";
@@ -220,10 +221,20 @@ async function afterStored(
     return { handled: true, note: "quota exhausted" };
   }
 
-  // 6. explicit connect requests ("לחבר את המייל", "חבר שוב") — no model needed
+  // 6. explicit connect requests ("לחבר את המייל", "חבר שוב") — no model needed. The plan decides which accounts the
+  //    turn may use (lib/billing/plans.ts): on a one-account plan a second account is refused here (and by the start
+  //    route), and one connected before the split is paused — left out of the tools, not disconnected.
   const freshUser = (await ctx.db.getUser(user.id)) ?? user;
-  const connections = await ctx.db.listConnections(user.id);
+  const account = accountContextOf(sub, remaining, ctx.now());
+  const allConnections = await ctx.db.listConnections(user.id);
+  const connections = connectionsInForce(allConnections, account.plan);
   const connectProvider = connectRequestProvider(ask, connections);
+  if (connectProvider && !mayConnect(allConnections, account.plan, connectProvider)) {
+    const inForce = primaryProvider(allConnections)!;
+    await say(scopy["s.plan.one_account"](providerLabel(inForce), providerLabel(connectProvider), account.plan === "trial"));
+    if (awaitingAnswer(freshUser)) await afterFirstTask(ctx, freshUser, to);
+    return { handled: true, note: "second account refused" };
+  }
   if (connectProvider) {
     const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
     const link = connectLinkFor(ctx, user.id, connectProvider);
@@ -249,16 +260,17 @@ async function afterStored(
       db: ctx.db,
       ai: ctx.ai,
       user: freshUser,
-      connections,
+      // all of them: the orchestrator leaves a paused account out itself and tells the model about it
+      connections: allConnections,
       text: ask,
       now: ctx.now(),
-      tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections) : [],
+      tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections, account.plan) : [],
       onlineMeetingCheck: ctx.onlineMeetingCheck?.(connections),
       agent: routing.agent,
       agentVia: routing.via,
       agentChoices: routing.choices,
       activeAgentKey: routing.activeKey,
-      account: accountContextOf(sub, remaining, ctx.now()),
+      account,
       inboundId: stored.id,
     });
     const header = out.agent ? `${acopy["agent.reply_header"](out.agent.name)}\n` : "";

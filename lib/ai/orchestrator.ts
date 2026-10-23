@@ -2,12 +2,14 @@ import { toolsForAgent } from "@/lib/agents/capabilities";
 import { dailyCapMessage, guardAgentAction } from "@/lib/agents/guard";
 import { maxOutboundPerDay, type ResolvedAgent } from "@/lib/agents/policy";
 import { agentChoices, buildAgentSection, buildRouterAgentBlock } from "@/lib/agents/prompt";
-import { activeServicesFor } from "@/lib/connections/services";
+import { connectionsInForce, providerGate } from "@/lib/billing/plans";
+import { activeServicesFor, envReadGates } from "@/lib/connections/services";
 import { AgentDailyCapError } from "@/lib/db/errors";
 import type { AgentKey, ConnectionRow, Db, PendingActionRow, UserRow } from "@/lib/db/types";
 import type { ReplyButton } from "@/lib/wa/types";
 import type { AccountContext } from "./account-context";
 import { loadMemory } from "./memory";
+import { toolsForPlan } from "./plan-tools";
 import { ROUTER_INSTRUCTIONS, buildSystemPrompt } from "./system-prompt";
 import { BASE_TOOLS, toolDefinitions, type AssistantFlow, type OnlineMeetingCheck, type Tool, type ToolContext } from "./tools";
 import type { AiProvider, ChatMessage, CompletionResponse, ToolCall, Usage } from "./types";
@@ -130,8 +132,12 @@ const addUsage = (a: Usage, b: Usage): Usage => ({ input: a.input + b.input, out
 export async function runAssistant(input: AssistantInput): Promise<AssistantOutput> {
   const now = input.now ?? new Date();
   const memory = await loadMemory(input.db, input.user.id, { exclude: input.inboundId });
-  // only active connections, the newest per provider — the one the tools use (lib/ms, lib/google active*Connection)
-  const active = input.connections.filter((c) => c.status === "active");
+  // the plan decides which accounts and services the turn has (lib/billing/plans.ts entitlements; unknown → as given)
+  const plan = input.account?.plan ?? null;
+  const paused = plan ? providerGate(input.connections, plan).paused : [];
+  // only active connections of the accounts in force, the newest per provider — the one the tools use (lib/ms,
+  // lib/google active*Connection)
+  const active = (plan ? connectionsInForce(input.connections, plan) : input.connections).filter((c) => c.status === "active");
   const inUse = (["microsoft", "google"] as const).map((p) => active.findLast((c) => c.provider === p)).filter((c): c is ConnectionRow => Boolean(c));
   const system = buildSystemPrompt({
     name: input.user.name,
@@ -139,7 +145,8 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
     businessType: input.user.business_type,
     timezone: input.user.timezone,
     morningTime: input.user.morning_time,
-    connections: inUse.map((c) => ({ provider: c.provider, accountEmail: c.account_email, scopes: c.scopes, services: activeServicesFor(c) })),
+    connections: inUse.map((c) => ({ provider: c.provider, accountEmail: c.account_email, scopes: c.scopes, services: activeServicesFor(c, envReadGates(), plan ?? "pro") })),
+    pausedProviders: paused,
     profile: input.user.profile,
     summary: memory.summary,
     facts: memory.facts,
@@ -178,7 +185,8 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
   }
 
   // 2. strong model with tools (an agent: its section, its tools, its guard)
-  const allTools = [...BASE_TOOLS, ...(input.tools ?? [])];
+  // the plan's gate by tool name (pro tools out, `pro_feature` in), then the agent's capabilities on what is left
+  const allTools = toolsForPlan([...BASE_TOOLS, ...(input.tools ?? [])], plan);
   const tools = agent ? toolsForAgent(allTools, agent.capabilities) : allTools;
   const strongSystem = agent ? `${system}\n\n${buildAgentSection(agent)}` : system;
   const byName = new Map(tools.map((t) => [t.name, t]));

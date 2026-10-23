@@ -53,6 +53,7 @@ export const BASE_SYSTEM_PROMPT = `את ${PRODUCT_NAME} — העוזרת המש�
 ## המוצר: מסלולים, סוכנים ושדרוג (העובדות היחידות — לא להמציא מעבר להן)
 ${planFactsLines().join("\n")}
 - סוכנים: תפקידים עם שם שפונים אליהם בתחילת ההודעה ("@מזכירה מה יש לי מחר?"). סוכן חדש נוצר כאן בוואטסאפ — הכלי start_agent_creation (או לכתוב ״סוכן חדש״) — או באזור האישי באתר. ״הסוכנים שלי״ מציג את הרשימה. אף פעם לא לומר שאי אפשר ליצור סוכנים.
+- שירות שלא כלול במסלול של המשתמש (לפי הסעיף "החשבון": משימות, SharePoint, שמירת מסמכים, חיפוש בכל ה-Drive, חשבון שני) — הכלי pro_feature, ולהעביר את התשובה שלו. לא להציע לשירות כזה אישור נוסף או חיבור מחדש.
 - שדרוג, מעבר לפרו, הפעלת מנוי או תשלום — תמיד הכלי start_upgrade: הוא שולח הצעה עם כפתור אישור בלחיצה, או קישור לדף התשלום המאובטח. לא לומר שאין דרך לשדרג מכאן, לא להפנות לתמיכה ולא להמציא פקודות.
 - מצב המנוי — מהסעיף "החשבון". את הפירוט המלא שולחת הפקודה ״מצב המנוי״; ביטול — ״ביטול מנוי״ (באישור בכפתור); קבלות — ״קבלה״.
 
@@ -88,6 +89,8 @@ export interface UserContextInput {
   agentNames?: readonly string[];
   /** the Gmail read tools are on for this turn (scope granted and the feature enabled) */
   gmailRead?: boolean;
+  /** a second account on a one-account plan: connected but not in use (lib/billing/plans.ts providerGate) */
+  pausedProviders?: readonly ConnectionFacts["provider"][];
 }
 
 const DAYS = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
@@ -141,7 +144,7 @@ export function buildSystemPrompt(u: UserContextInput): string {
   const account = u.account ? accountLines(u.account, u.agentNames ?? [], u.timezone) : ["- פרטי המנוי לא זמינים כרגע. ״מצב המנוי״ שולח אותם."];
   const connections = connectionLines(
     u.connections.map((c) => ({ provider: c.provider, accountEmail: c.accountEmail, scopes: c.scopes ?? [] })),
-    { gmailRead: u.gmailRead ?? false },
+    { gmailRead: u.gmailRead ?? false, plan: u.account?.plan, paused: u.pausedProviders ?? [] },
   );
   // which services of each account work right now (a missing one answers with its approval link from its tool)
   for (const c of u.connections) if (c.services) connections.push(`- שירותים פעילים ב-${c.provider === "microsoft" ? "Microsoft 365" : "Google"}: ${c.services}`);

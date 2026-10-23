@@ -83,10 +83,16 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page).toHaveURL(/\/account\?notice=/);
     await expect(page.getByRole("status").filter({ hasText: "Microsoft 365" })).toBeVisible();
     await expect(page.getByText("אני זמינה בוואטסאפ ומחוברת ל-Outlook.")).toBeVisible();
-    // the services behind the account: one named icon each, a tooltip on hover; Esc closes it
+    // the services behind the account: one named icon each, a tooltip on hover; Esc closes it. The trial is basic in
+    // what it connects (lib/billing/plans.ts): To Do is pro, a link to the upgrade
     const services = page.getByRole("list", { name: "שירותים ב-Microsoft 365" });
     await expect(services.getByRole("listitem")).toHaveCount(6);
-    const todo = services.getByRole("button", { name: "Microsoft To Do - מחובר" });
+    await expect(services.getByRole("button", { name: "Outlook - מחובר", exact: true })).toBeVisible();
+    const todo = services.getByRole("link", { name: "Microsoft To Do - במסלול פרו" });
+    await expect(todo).toHaveAttribute("href", /^\/pay\//);
+    // one account in the trial: Google joins on pro (the start route refuses it as well)
+    await expect(page.getByRole("link", { name: "Google בנוסף: במסלול פרו" })).toHaveAttribute("href", /^\/pay\//);
+    await expect(page.getByRole("link", { name: "חיבור Google" })).toHaveCount(0);
     // right after the OAuth landing the row may not be hydrated yet: move away and hover again until it answers
     await expect(async () => {
       await page.mouse.move(1, 1);
@@ -98,6 +104,7 @@ test.describe("personal area — same server actions, new design", () => {
     await page.getByRole("button", { name: "ניתוק Microsoft 365" }).click();
     await expect(page.getByRole("status").filter({ hasText: "החיבור ל-Microsoft 365 נותק." })).toBeVisible();
     await expect(page.getByRole("link", { name: "חיבור Microsoft 365" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "חיבור Google" })).toBeVisible();
 
     // pay (mock) → basic, 0 of 750; cancel from the fold
     await page.goto((await page.getByRole("link", { name: "בחירת מסלול" }).getAttribute("href"))!);
@@ -126,9 +133,9 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page).toHaveURL(/\/account\?notice=/);
     const services = page.getByRole("list", { name: "שירותים ב-Google" });
     await expect(services.getByRole("listitem")).toHaveCount(7);
-    await expect(services.getByRole("button", { name: "Google Tasks - מחובר" })).toBeVisible();
-    // memory mode has no Google project: the restricted Drive read is off → the Docs family is unavailable
-    await expect(services.getByRole("button", { name: "Google Docs - לא זמין" })).toHaveAttribute("data-status", "unavailable");
+    // the trial is basic in what it connects (lib/billing/plans.ts): Tasks and the Docs family are pro, links to the upgrade
+    await expect(services.getByRole("link", { name: "Google Tasks - במסלול פרו" })).toHaveAttribute("href", /^\/pay\//);
+    await expect(services.getByRole("link", { name: "Google Docs - במסלול פרו" })).toHaveAttribute("data-status", "pro_only");
     const gmail = services.getByRole("button", { name: "Gmail - מחובר" });
     const tip = page.getByRole("tooltip");
     await expect(async () => {

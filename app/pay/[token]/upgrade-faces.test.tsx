@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { PLANS } from "@/lib/billing/plans";
-import { CardUpdateFace, UPGRADE_NOTICES, UpgradeDoneFace, UpgradeFailedFace, UpgradeOfferFace, UpgradeUnknownFace, proAdds, type OfferFaceData } from "./upgrade-faces";
+import { PLANS, planFeatures } from "@/lib/billing/plans";
+import { CardUpdateFace, PLAN_GATE_NOTICES, UPGRADE_NOTICES, UpgradeDoneFace, UpgradeFailedFace, UpgradeOfferFace, UpgradeUnknownFace, proAdds, type OfferFaceData } from "./upgrade-faces";
 
 afterEach(cleanup);
 
@@ -25,7 +25,10 @@ describe("the upgrade face", () => {
     expect(text()).toContain("ההפרש בין המסלולים ל-21 ימים, עד 10.11.2026.");
     expect(text()).toContain("299 ₪ לחודש, מ-10.11.2026");
     expect(text()).toContain("מסתיים ב-4580");
-    for (const line of proAdds()) expect(screen.getByText(line)).toBeInTheDocument();
+    for (const line of proAdds()) expect(screen.getByText(line.text)).toBeInTheDocument();
+    // what is coming carries "בקרוב" on its row
+    for (const line of proAdds().filter((l) => l.soon)) expect(screen.getByText(line.text).closest("li")).toHaveTextContent("בקרוב");
+    expect(screen.getByText("חיבור של Google ו-Microsoft יחד").closest("li")).not.toHaveTextContent("בקרוב");
     const button = screen.getByRole("button", { name: "לשדרג עכשיו" });
     expect(button).toHaveAttribute("type", "submit");
     const form = button.closest("form")!;
@@ -36,12 +39,28 @@ describe("the upgrade face", () => {
     expectShortHyphens();
   });
 
-  it("what pro adds comes from the plan table only", () => {
-    expect(proAdds()).toEqual([
+  it("what pro adds comes from the plan table only (the messages, then pro's lines of the price list)", () => {
+    expect(proAdds().map((l) => l.text)).toEqual([
       `עד ${PLANS.pro.messages.toLocaleString("he-IL")} הודעות בחודש, במקום ${PLANS.basic.messages}`,
-      "הסוכנים המובנים: מזכירה, מתמחה ומנהלת חשבונות",
-      `עד ${PLANS.pro.customAgents} סוכנים משלך, במקום סוכן אחד`,
+      "חיבור של Google ו-Microsoft יחד",
+      "משימות ב-Google Tasks וב-Microsoft To Do",
+      "חיפוש וקריאה בכל ה-Drive: Docs, Sheets ו-Slides",
+      "חיפוש ב-SharePoint, בספריות המסמכים של הארגון",
+      "שמירת מסמכים חדשים ב-Drive",
+      `שלושת הסוכנים המובנים, ועד ${PLANS.pro.customAgents} סוכנים משלך`,
+      "סיכומי פגישות",
+      "התראות יזומות ואזהרות פישינג",
+      "חיבור למערכות העסק, כמו monday.com",
     ]);
+    expect(proAdds().slice(1)).toEqual(planFeatures("pro").lines);
+    expect(proAdds().filter((l) => l.soon).map((l) => l.id)).toEqual(["meetings", "proactive", "business"]);
+  });
+
+  it("a connect the plan refused (?why=): its fixed notice above the offer", () => {
+    render(<UpgradeOfferFace name="" token="t" offer={OFFER} cardHref="/c" action={noop} gate="second_account" />);
+    expect(screen.getByRole("status")).toHaveTextContent(PLAN_GATE_NOTICES.second_account);
+    expect(PLAN_GATE_NOTICES.second_account).toContain("עובדים עם חשבון אחד: Google או Microsoft");
+    expectShortHyphens();
   });
 
   it("singular days and the notices of the action (fixed text)", () => {
@@ -127,6 +146,11 @@ describe("the card update face", () => {
     unmount();
     render(<CardUpdateFace plan="basic" nextDay={null} cardUpdateHref="/x" upgradeHref={null} block={{ reason: "settle" }} />);
     expect(screen.getByRole("status")).toHaveTextContent("לפני שדרוג צריך להסדיר את החיוב החודשי שלא עבר");
+  });
+
+  it("basic, a refused connect (?why=pro_feature): the notice stands above the card face", () => {
+    render(<CardUpdateFace plan="basic" nextDay="10.11.2026" cardUpdateHref="/x" upgradeHref={null} block={{ reason: "no_card" }} gate="pro_feature" />);
+    expect(screen.getAllByRole("status").map((s) => s.textContent)).toContain(PLAN_GATE_NOTICES.pro_feature);
   });
 
   it("pro: a neutral line about moving to basic in WhatsApp", () => {

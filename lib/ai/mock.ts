@@ -93,6 +93,12 @@ function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   if (listTasks && /משימות/.test(text)) {
     return { toolCalls: [{ id: "call_tasks_1", name: listTasks, input: { include_completed: false } }], stopReason: "tool_use", text: "" };
   }
+  // a pro service on basic / in the trial (lib/ai/plan-tools.ts): tasks are the one the heuristics know
+  const proSay = toolReply(req, ["pro_feature"], "say");
+  if (proSay) return { text: proSay };
+  if (tools.has("pro_feature") && !createTask && !listTasks && /משימ/.test(text)) {
+    return { toolCalls: [{ id: "call_pro_1", name: "pro_feature", input: { feature: "tasks" } }], stopReason: "tool_use", text: "" };
+  }
   if (tools.has("create_reminder") && /תזכיר|תזכורת ל/.test(text)) {
     return { toolCalls: [{ id: "call_reminder_1", name: "create_reminder", input: { text: "", when: text } }], stopReason: "tool_use", text: "" };
   }

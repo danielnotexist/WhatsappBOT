@@ -56,8 +56,15 @@ describe("system prompt — neutral Hebrew (Daniel's live test: \"כתוב\", \"
 describe("system prompt — the product and the account (\"איזה מנוי אני\", \"אתה יכול ליצור לי סוכן\", \"לשדרג לפרו\")", () => {
   it("states the plans from lib/billing/plans.ts, the agents, and the upgrade / agent tools", () => {
     expect(BASE_SYSTEM_PROMPT).toContain(`- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות`);
-    expect(BASE_SYSTEM_PROMPT).toContain(`- מסלול בסיסי: ${PLANS.basic.priceIls} ₪ לחודש כולל מע״מ, עד ${PLANS.basic.messages} הודעות בחודש, בלי הסוכנים המובנים, סוכן אחד משלך.`);
-    expect(BASE_SYSTEM_PROMPT).toContain(`- מסלול פרו: ${PLANS.pro.priceIls} ₪ לחודש כולל מע״מ, עד 3,000 הודעות בחודש, שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות), עד ${PLANS.pro.customAgents} סוכנים משלך.`);
+    // what each plan includes (lib/billing/plans.ts entitlements, the split of 23.10.2026)
+    const oneAccount = "חשבון אחד: Google או Microsoft (לא שניהם); מייל, יומן (כולל קישור Meet / Teams), קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות";
+    expect(BASE_SYSTEM_PROMPT).toContain(`- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות. כולל: ${oneAccount}. שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות) כמו שהם, בלי סוכנים משלך.`);
+    expect(BASE_SYSTEM_PROMPT).toContain(`- מסלול בסיסי: ${PLANS.basic.priceIls} ₪ לחודש כולל מע״מ, עד ${PLANS.basic.messages} הודעות בחודש. כולל: ${oneAccount}. בלי הסוכנים המובנים, סוכן אחד משלך.`);
+    expect(BASE_SYSTEM_PROMPT).toContain(
+      `- מסלול פרו: ${PLANS.pro.priceIls} ₪ לחודש כולל מע״מ, עד 3,000 הודעות בחודש. כולל: Google ו-Microsoft יחד; מייל, יומן (כולל קישור Meet / Teams), קריאת קבצים, תזכורות, סיכום בוקר והודעות קוליות; Google Tasks ו-Microsoft To Do; SharePoint; חיפוש וקריאה בכל ה-Drive (Docs, Sheets, Slides); שמירת מסמכים חדשים ב-Drive. שלושת הסוכנים המובנים (מזכירה, מתמחה, מנהלת חשבונות), עד ${PLANS.pro.customAgents} סוכנים משלך. בקרוב, עוד לא פעיל ובלי מועד: סיכומי פגישות, התראות יזומות ואזהרות פישינג, חיבור למערכות העסק, כמו monday.com.`,
+    );
+    expect(BASE_SYSTEM_PROMPT).toContain("- שירות שלא כלול במסלול של המשתמש");
+    expect(BASE_SYSTEM_PROMPT).toContain("הכלי pro_feature");
     expect(BASE_SYSTEM_PROMPT).toContain("start_agent_creation");
     expect(BASE_SYSTEM_PROMPT).toContain("אף פעם לא לומר שאי אפשר ליצור סוכנים");
     expect(BASE_SYSTEM_PROMPT).toContain("תמיד הכלי start_upgrade");
@@ -73,6 +80,8 @@ describe("system prompt — the product and the account (\"איזה מנוי א�
     const basic = buildSystemPrompt({ ...base, account: accountContextOf(sub({}), 740, NOW) });
     expect(basic).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 740 מתוך 750 הודעות החודש (ההודעה הנוכחית כבר נספרה). החיוב הבא: יום ג׳ 10.11.");
     expect(basic).toContain("- סוכנים במסלול הזה: בלי המובנים, סוכן אחד משלך.");
+    expect(basic).toContain("- כלול במסלול הזה: חשבון אחד: Google או Microsoft (לא שניהם);");
+    expect(basic).toContain("- לא כלול במסלול הזה (רק בפרו): חיבור של Google ושל Microsoft יחד; משימות ב-Google Tasks וב-Microsoft To Do; חיפוש וקריאה ב-SharePoint של הארגון; שמירת מסמכים חדשים ב-Google Drive; חיפוש וקריאה בכל הקבצים ב-Google Drive (Docs, Sheets ו-Slides). בקשה לאחד מהם: הכלי pro_feature.");
     expect(basic).toContain("- שדרוג לפרו: הכלי start_upgrade.");
 
     const pro = buildSystemPrompt({ ...base, account: accountContextOf(sub({ plan: "pro", scheduled_plan: "basic" }), 2990, NOW) });
@@ -80,6 +89,8 @@ describe("system prompt — the product and the account (\"איזה מנוי א�
     expect(BASE_SYSTEM_PROMPT).toContain("לא לתקן בסוגריים הודעות קודמות");
     expect(pro).toContain("- מתוכנן מעבר למסלול בסיסי ב-יום ג׳ 10.11.");
     expect(pro).not.toContain("start_upgrade.\n"); // no upgrade line for pro
+    expect(pro).toContain("- כלול במסלול הזה: Google ו-Microsoft יחד;");
+    expect(pro).not.toContain("- לא כלול במסלול הזה");
 
     const cancelled = buildSystemPrompt({ ...base, account: accountContextOf(sub({ status: "cancelled", cancelled_at: "2026-10-20T08:00:00Z" }), 10, NOW) });
     expect(cancelled).toContain("- מסלול: בסיסי (99 ₪ לחודש) — המנוי בוטל, והמסלול פעיל עד יום ג׳ 10.11.");
@@ -140,6 +151,23 @@ describe("system prompt — connections and what they allow (granted scopes)", (
     expect(prompt).toContain("קבצים ב-Google Drive — רק קבצים שנוצרו או נפתחו דרכי");
     expect(prompt).toContain("קריאת מיילים ב-Gmail — בשלב הזה רק למשתמשים הראשונים");
     expect(prompt).not.toContain("Microsoft 365 לא מחובר");
+  });
+
+  it("one account on basic: the other provider cannot join; a paused second account is named as such; SharePoint and the whole Drive are pro", () => {
+    const account = accountContextOf(sub({}), 700, NOW);
+    const ms = { provider: "microsoft" as const, accountEmail: "dana@levi-law.co.il", scopes: [...MS_SCOPES] };
+    const one = buildSystemPrompt({ ...base, account, connections: [ms] });
+    const section = one.slice(one.indexOf("## חיבורים"), one.indexOf("## זמן"));
+    expect(section).toContain("- Google לא מחובר, ובמסלול הזה אי אפשר לחבר אותו בנוסף ל-Microsoft 365 (חשבון אחד). חשבון שני: הכלי pro_feature (second_account).");
+    expect(section).not.toContain("אחרי חיבור (״לחבר את גוגל״)");
+    expect(section).toContain("קבצים ב-OneDrive — חיפוש וקריאה בלבד (בלי שמירה ובלי שיתוף; SharePoint רק בפרו)");
+
+    const paused = buildSystemPrompt({ ...base, account, connections: [ms], pausedProviders: ["google"] });
+    expect(paused).toContain("- Google מחובר אבל מושהה: במסלול הזה עובדים עם חשבון אחד, והפעיל הוא Microsoft 365. אין גישה ל-Google עד שבוחרים: ניתוק של אחד מהם באזור האישי, או שדרוג לפרו (שניהם יחד).");
+
+    const google = buildSystemPrompt({ ...base, account, connections: [{ provider: "google", accountEmail: "a@gmail.com", scopes: [GOOGLE_SCOPES.driveFile] }] });
+    expect(google).toContain("חיפוש בכל ה-Drive ושמירת מסמכים — רק בפרו");
+    expect(google).toContain("- Microsoft 365 לא מחובר, ובמסלול הזה אי אפשר לחבר אותו בנוסף ל-Google");
   });
 });
 
