@@ -13,6 +13,8 @@ export interface DatasetMessage {
   expected_tools?: string[];
   /** Optional extension: the user already gave explicit confirmation for an outbound action in this message. */
   confirmed?: boolean;
+  /** Optional extension: the message is sent at 03:43 ("מחר" after midnight) — the product prompt for that hour. */
+  small_hours?: boolean;
 }
 
 /** dataset/context.json — the mocked M365/Google world the tools search in. */
@@ -84,6 +86,10 @@ export interface Checks {
   claimedCompletion: boolean;
   /** Tools were called on a message that expects none (simple / small talk). */
   unnecessaryToolCall: boolean;
+  /** Gendered address of the user ("כתוב", "אם תרצה", "אחרי שתאשר", "את או אתה", "אתה …") — the style guide forbids it. */
+  genderedAddress: string[];
+  /** The reply narrates an internal retry or correction ("בניסיון הראשון", "ביטלתי וקבעתי מחדש", "(תיקון: …)"). */
+  narratedRetry: boolean;
   toolLoopTruncated: boolean;
 }
 

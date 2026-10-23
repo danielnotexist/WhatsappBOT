@@ -106,6 +106,26 @@ describe("processInbound", () => {
     expect(await consumeLoginToken(h.db, token, { now: h.ctx.now() })).toEqual({ ok: true, userId: user.id });
   });
 
+  it("the model sees each user message once — the stored inbound row is not repeated (review 23.10.2026)", async () => {
+    const h = makeHarness();
+    await readyUser(h);
+    await processInbound(h.ctx, h.inbound("מה את יודעת לעשות?"));
+    expect(h.ai.calls[0]!.messages).toEqual([{ role: "user", content: "מה את יודעת לעשות?" }]);
+    await processInbound(h.ctx, h.inbound("תודה רבה!"));
+    const last = h.ai.calls.at(-1)!.messages;
+    expect(last.filter((m) => m.role === "user" && m.content === "תודה רבה!")).toHaveLength(1);
+    expect(last.at(-1)).toEqual({ role: "user", content: "תודה רבה!" });
+    expect(last.at(-2)?.role).toBe("assistant");
+  });
+
+  it("a Hebrew line that opens in English gets a right-to-left mark before it is sent", async () => {
+    const h = makeHarness();
+    await readyUser(h);
+    h.ai.enqueue({ text: '{"intent":"meta","complexity":"tool","needs_tools":false,"reply":null,"agent":null}' }, { text: "יש לי גישה חלקית:\n• Google Drive: רק קבצים שנוצרו דרכי." });
+    await processInbound(h.ctx, h.inbound("תהיה לך גישה לדרייב?"));
+    expect(h.wa.texts.at(-1)).toBe("יש לי גישה חלקית:\n\u200F• Google Drive: רק קבצים שנוצרו דרכי.");
+  });
+
   it("recognises only the whole-message login keyword", () => {
     for (const t of ["כניסה", "כניסה.", "קישור כניסה", "כניסה לאתר", "לאזור האישי", "LOGIN"]) expect(LOGIN_RE.test(t), t).toBe(true);
     for (const t of ["כניסה לפגישה מחר ב-10", "מה הכניסה?", "תזכיר לי כניסה"]) expect(LOGIN_RE.test(t), t).toBe(false);

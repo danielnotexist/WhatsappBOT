@@ -236,6 +236,40 @@ describe("reminders — 'מחר' after midnight (Daniel's 03:43 voice note, 23.1
     expect((await h.db.getReminder(r.id))!.due_at).toBe("2026-10-24T06:00:00.000Z");
   });
 
+  it("two reminders for 'מחר' in one message after midnight share one button that moves both (review 23.10.2026)", async () => {
+    const { h } = await setup(il(2026, 10, 23, 1, 10));
+    h.ai.enqueue(
+      { text: '{"intent":"reminder","complexity":"tool","needs_tools":true,"reply":null,"agent":null}' },
+      {
+        toolCalls: [
+          { id: "r1", name: "create_reminder", input: { text: "לבנק", when: "מחר ב-9" } },
+          { id: "r2", name: "create_reminder", input: { text: "להתקשר לרוני", when: "מחר ב-10" } },
+        ],
+        stopReason: "tool_use",
+      },
+      { text: "אזכיר: לבנק — היום, יום ו׳ 23.10, 9:00.\nאזכיר: להתקשר לרוני — היום, יום ו׳ 23.10, 10:00." },
+    );
+    await processInbound(h.ctx, h.inbound("תזכירי לי מחר ב-9 לבנק ומחר ב-10 לרוני"));
+    const reply = h.wa.sent.filter((s) => s.kind === "buttons").at(-1)!;
+    const [a, b] = h.db.reminders;
+    expect(reply.buttons).toEqual([{ id: `rem:next:${a!.id},${b!.id}`, title: "הכול ליום ש׳ 24.10" }]);
+    expect(reply.buttons![0]!.title.length).toBeLessThanOrEqual(20);
+    await processInbound(h.ctx, h.button(`rem:next:${a!.id},${b!.id}`, "הכול ליום ש׳ 24.10"));
+    expect((await h.db.getReminder(a!.id))!.due_at).toBe("2026-10-24T06:00:00.000Z");
+    expect((await h.db.getReminder(b!.id))!.due_at).toBe("2026-10-24T07:00:00.000Z");
+    expect(h.wa.texts.at(-1)).toBe("לבנק: הועבר. אזכיר מחר, יום ש׳ 24.10, 9:00.\nלהתקשר לרוני: הועבר. אזכיר מחר, יום ש׳ 24.10, 10:00.");
+  });
+
+  it("when the buttons cannot be sent, the confirmation still goes out as text", async () => {
+    const { h } = await setup(il(2026, 10, 23, 3, 43));
+    h.wa.sendButtons = async () => {
+      throw new Error("WhatsApp 400: duplicate button title");
+    };
+    expect((await processInbound(h.ctx, h.inbound("תזכירי אותי מחר בשעה תשע על לאכול"))).note).toBe("replied");
+    expect(h.wa.texts.at(-1)).toContain("אזכיר: לאכול");
+    expect(h.db.reminders).toHaveLength(1);
+  });
+
   it("during the day 'מחר' is the next date, with no button", async () => {
     const { h, user } = await setup(il(2026, 10, 23, 10, 0));
     const r = await createReminder(h.db, user, { text: "לאכול", when: "מחר בשעה תשע" }, h.ctx.now());

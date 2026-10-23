@@ -41,7 +41,21 @@ export function maxTokensFor(req: Pick<CompletionRequest, "tier" | "maxTokens">)
  * per-turn deadline (lib/ai/budget.ts) aborts whatever is still running before the platform kills the function.
  */
 export const ANTHROPIC_REQUEST = { timeoutMs: 60_000, maxRetries: 2 } as const;
-export const ANTHROPIC_REQUEST_DEMO = { timeoutMs: 25_000, maxRetries: 1 } as const;
+/**
+ * `coldTimeoutMs`: the first call with a tool set or an output schema this process has not sent yet waits longer and
+ * is not retried. Strict tools and structured outputs compile the schema once (cached for 24 h by the API): the live
+ * eval measured 19–50 s for that first call against 1–6 s afterwards, past the 25 s timeout. Still inside the demo's
+ * per-turn deadline (DEMO_TURN_MS, 48 s). After a deploy that changes a tool description, one warm-up message per
+ * tool-set variant (base, + Microsoft, + Google) avoids the wait altogether.
+ */
+export const ANTHROPIC_REQUEST_DEMO = { timeoutMs: 25_000, maxRetries: 1, coldTimeoutMs: 45_000 } as const;
+
+/** Tool sets / output schemas already sent by this process (see coldTimeoutMs). */
+const warmSignatures = new Set<string>();
+function signatureOf(req: CompletionRequest): string | null {
+  if (!req.tools?.length && !req.jsonSchema) return null;
+  return JSON.stringify([(req.tools ?? []).map((t) => [t.name, t.description, t.input_schema]), req.jsonSchema ?? null]);
+}
 
 function toAnthropicMessages(messages: ChatMessage[]): MessageParam[] {
   return messages.map((m): MessageParam => {
@@ -75,12 +89,14 @@ export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   private readonly client: Anthropic;
 
-  constructor(opts: { apiKey: string; fetch?: typeof fetch; models?: Partial<Record<ModelTier, string>>; baseURL?: string; timeoutMs?: number; maxRetries?: number }) {
+  constructor(opts: { apiKey: string; fetch?: typeof fetch; models?: Partial<Record<ModelTier, string>>; baseURL?: string; timeoutMs?: number; maxRetries?: number; coldTimeoutMs?: number }) {
     this.client = new Anthropic({ apiKey: opts.apiKey, fetch: opts.fetch, baseURL: opts.baseURL, maxRetries: opts.maxRetries ?? ANTHROPIC_REQUEST.maxRetries, timeout: opts.timeoutMs ?? ANTHROPIC_REQUEST.timeoutMs });
     this.models = { ...DEFAULT_MODELS, ...opts.models };
+    this.coldTimeoutMs = opts.coldTimeoutMs && opts.coldTimeoutMs > (opts.timeoutMs ?? ANTHROPIC_REQUEST.timeoutMs) ? opts.coldTimeoutMs : null;
   }
 
   readonly models: Record<ModelTier, string>;
+  private readonly coldTimeoutMs: number | null;
 
   /** Hebrew EnvError when ANTHROPIC_API_KEY is missing. The live demo gets the shorter timeout and fewer retries. */
   static fromEnv(fetchImpl?: typeof fetch, source: Record<string, string | undefined> = process.env): AnthropicProvider {
@@ -91,6 +107,8 @@ export class AnthropicProvider implements AiProvider {
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
     const model = this.models[req.tier];
     const tools: Tool[] = (req.tools ?? []).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema as Tool["input_schema"], strict: true }));
+    const signature = this.coldTimeoutMs ? signatureOf(req) : null;
+    const cold = signature !== null && !warmSignatures.has(`${model}:${signature}`);
     try {
       const res = await this.client.messages.create(
         {
@@ -101,10 +119,12 @@ export class AnthropicProvider implements AiProvider {
           messages: toAnthropicMessages(req.messages),
           ...(tools.length ? { tools, tool_choice: { type: "auto" } } : {}),
           thinking: { type: "adaptive" },
-          output_config: { effort: "low" },
+          // the router's verdict as structured output: always valid JSON (plain text and ```json fences happened live)
+          output_config: req.json && req.jsonSchema ? { effort: "low", format: { type: "json_schema", schema: req.jsonSchema } } : { effort: "low" },
         },
-        req.signal ? { signal: req.signal } : undefined,
+        { ...(req.signal ? { signal: req.signal } : {}), ...(cold ? { timeout: this.coldTimeoutMs!, maxRetries: 0 } : {}) },
       );
+      if (signature !== null) warmSignatures.add(`${model}:${signature}`);
       const text = res.content
         .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
         .map((b) => b.text)

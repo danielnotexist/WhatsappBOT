@@ -55,7 +55,8 @@ export function planFactsLines(): string[] {
 export function accountLines(a: AccountContext, agentNames: readonly string[], tz: string = DEFAULT_TZ): string[] {
   const lines: string[] = [];
   const limit = a.plan === "trial" ? TRIAL_MESSAGES : PLANS[a.plan].messages;
-  const left = a.messagesLeft === null ? "" : ` נשארו ${a.messagesLeft.toLocaleString("en-US")} מתוך ${limit.toLocaleString("en-US")} הודעות${a.plan === "trial" ? "" : " החודש"}.`;
+  // the basis is stated: this message is counted already (״מצב המנוי״ reports before counting — one more)
+  const left = a.messagesLeft === null ? "" : ` נשארו ${a.messagesLeft.toLocaleString("en-US")} מתוך ${limit.toLocaleString("en-US")} הודעות${a.plan === "trial" ? "" : " החודש"} (ההודעה הנוכחית כבר נספרה).`;
   if (a.plan === "trial") {
     lines.push(`- מסלול: תקופת ניסיון (אין מנוי בתשלום).${left}`);
   } else {
@@ -83,7 +84,12 @@ export interface ConnectionFacts {
   scopes: readonly string[];
 }
 
-const DRIVE_FILE_NOTE = "Google Drive — רק קבצים שנוצרו או נפתחו דרכי (הרשאת drive.file). אין גישה לשאר הקבצים ב-Drive, וכך לענות אם שואלים";
+/**
+ * drive.file in plain words — including what it does NOT cover. Sonnet once added "או ששותפו איתי" on its own: files
+ * shared with the user are outside drive.file, so the line says so explicitly.
+ */
+const DRIVE_FILE_NOTE =
+  "קבצים ב-Google Drive — רק קבצים שנוצרו או נפתחו דרכי (הרשאת drive.file). אין גישה לשאר הקבצים ב-Drive, גם לא לקבצים או לתיקיות ששותפו עם המשתמש — וכך לענות אם שואלים";
 
 /**
  * Google: one phrase per granted scope. Gmail reading needs the scope AND the feature on (`gmailRead`: the read tools
@@ -124,7 +130,8 @@ export function connectionLines(connections: readonly ConnectionFacts[], opts: {
     const c = connections.findLast((x) => x.provider === provider);
     if (c) {
       const can = provider === "google" ? googleCan(c.scopes.length ? c.scopes : GOOGLE_BASE_SCOPES, opts.gmailRead) : microsoftCan(c.scopes.length ? c.scopes : MS_SCOPES);
-      lines.push(`- ${LABEL[provider]} מחובר${c.accountEmail ? ` (${c.accountEmail})` : ""}:`, ...can.map((x) => `  • ${x}`));
+      const again = `חשבון אחר או חיבור מחדש: אפשר לכתוב ״לחבר מחדש את ${provider === "google" ? "גוגל" : "המייל"}״`;
+      lines.push(`- ${LABEL[provider]} מחובר${c.accountEmail ? ` (${c.accountEmail})` : ""}:`, ...[...can, again].map((x) => `  • ${x}`));
     } else {
       const can = provider === "google" ? googleCan(GOOGLE_BASE_SCOPES, null) : microsoftCan(MS_SCOPES);
       lines.push(`- ${LABEL[provider]} לא מחובר. אחרי חיבור (״לחבר את ${provider === "google" ? "גוגל" : "המייל"}״):`, ...can.map((x) => `  • ${x}`));

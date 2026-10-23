@@ -15,12 +15,13 @@ import type { InboundMessage } from "@/lib/wa/types";
 import { basicLimitReached, handleBillingPress, handleBillingText, pausedAccount, upgradeOffer } from "./billing";
 import { connectLinkFor, type BotContext } from "./context";
 import { handleUnlinkedPhone } from "./linking";
-import { afterFirstTask, handleOnboarding, onboardingOf } from "./onboarding";
+import { afterFirstTask, awaitingAnswer, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
 import { handleLoginKeyword } from "./login-link";
 import { transcribeVoiceNote } from "./voice";
 import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
+import { rtlLines } from "@/lib/wa/rtl";
 
 const toDbType = (t: InboundMessage["type"]): MessageType =>
   t === "text" ? "text" : t === "audio" ? "audio" : t === "image" ? "image" : t === "document" ? "doc" : t === "button" || t === "list" || t === "template_button" ? "button" : "other";
@@ -227,11 +228,14 @@ async function afterStored(
     const expired = connections.find((c) => c.provider === connectProvider && c.status === "expired");
     const link = connectLinkFor(ctx, user.id, connectProvider);
     await say((expired ? copy["err.connection_expired"](providerLabel(connectProvider), link) : copy["onb.connect_link"](providerLabel(connectProvider), link)) + (await connectHeadsUpSuffix(ctx.db, connections, connectProvider)));
+    // a link while an onboarding question is open: the question again, so "חיברתי" afterwards is not taken as the answer
+    if (awaitingAnswer(freshUser)) await afterFirstTask(ctx, freshUser, to);
     return { handled: true, note: "connect link" };
   }
   const reconnect = reconnectProviderFor(ask, connections);
   if (reconnect) {
     await say(copy["err.connection_expired"](providerLabel(reconnect), connectLinkFor(ctx, user.id, reconnect)) + (await connectHeadsUpSuffix(ctx.db, connections, reconnect)));
+    if (awaitingAnswer(freshUser)) await afterFirstTask(ctx, freshUser, to);
     return { handled: true, note: "connection expired" };
   }
 
@@ -239,6 +243,7 @@ async function afterStored(
   //    opens with its name (§5.5) and the agent stays sticky for 10 minutes (§5.3).
   let reply: string;
   let ranFlow = false;
+  let morningTimeSet = false;
   try {
     const out = await runAssistant({
       db: ctx.db,
@@ -253,19 +258,32 @@ async function afterStored(
       agentChoices: routing.choices,
       activeAgentKey: routing.activeKey,
       account: accountContextOf(sub, remaining, ctx.now()),
+      inboundId: stored.id,
     });
     const header = out.agent ? `${acopy["agent.reply_header"](out.agent.name)}\n` : "";
-    reply = out.text.trim() ? `${header}${out.text}` : out.text;
+    reply = out.text.trim() ? rtlLines(`${header}${out.text}`) : out.text;
     // A pending action is rendered by us (draft + buttons), and a flow (upgrade, a new agent) sends its own messages:
-    // the model's one-liner would be redundant. Reply buttons (a reminder's "move to the next date") ride on the reply.
-    const rendered = out.pendingActions.length > 0 || out.flows.length > 0;
-    const withButtons = out.replyButtons.length > 0 && reply.length <= MAX_BUTTON_BODY;
-    if (reply.trim() && !rendered) await (withButtons ? ctx.wa.sendButtons(to, reply, out.replyButtons) : ctx.wa.sendText(to, reply));
+    // the model's one-liner would be redundant — unless the text also answers something else in the same message.
+    // Reply buttons (a reminder's "move to the next date") ride on the reply.
+    const flowOnly = out.flows.length > 0 && !out.textBeyondFlows;
+    const rendered = out.pendingActions.length > 0 || flowOnly;
+    let withButtons = out.replyButtons.length > 0 && reply.length <= MAX_BUTTON_BODY;
+    if (reply.trim() && !rendered) {
+      if (withButtons) {
+        // the buttons are an extra; the answer itself (a reminder's confirmation) must never be lost with them
+        withButtons = await ctx.wa.sendButtons(to, reply, out.replyButtons).then(
+          () => true,
+          (e: unknown) => (console.warn("[bot] reply buttons failed, sending text:", (e as Error).message), false),
+        );
+      }
+      if (!withButtons) await ctx.wa.sendText(to, reply);
+    }
     for (const action of out.pendingActions) await presentPendingAction(ctx, to, action);
-    const stored = (out.flows.length ? "" : reply) || `[${[...out.pendingActions.map((a) => a.kind), ...out.flows].join(",")}]`;
-    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length || withButtons ? "button" : "text", text: stored, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
+    const storedText = (flowOnly ? "" : reply) || `[${[...out.pendingActions.map((a) => a.kind), ...out.flows].join(",")}]`;
+    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length || withButtons ? "button" : "text", text: storedText, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
     for (const flow of out.flows) await (flow === "upgrade" ? upgradeOffer(ctx, freshUser, to) : startAgentCreation(ctx, freshUser, to, sub));
     ranFlow = out.flows.length > 0;
+    morningTimeSet = out.toolsUsed.includes("set_morning_time");
     await updateStickyAfterTurn(ctx, user, out.agent?.key ?? null, Boolean(routing.activeKey) || routing.clearSticky);
   } catch (e) {
     if (e instanceof BudgetExceededError) return capReached(e.reason); // the cap was reached between the check and a call
@@ -281,7 +299,7 @@ async function afterStored(
   else if (remaining === 1 && onTrial) await say(copy["bill.trial_left_1"](payLink));
 
   // 9. onboarding continues after the first task (not on top of a flow that just asked its own question)
-  if (!ranFlow) await afterFirstTask(ctx, freshUser, to);
+  if (!ranFlow) await afterFirstTask(ctx, freshUser, to, { morningTimeSet });
 
   // 10. memory (best effort)
   await maybeSummarize(ctx.db, ctx.ai, freshUser, ctx.now());

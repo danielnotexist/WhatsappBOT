@@ -4,9 +4,11 @@ import type { AssistantFlow, Tool, ToolContext } from "./tools";
  * Account tools for the main assistant (never an agent — lib/agents/capabilities.ts MAIN_ONLY_TOOLS): they start the
  * deterministic flows that "שדרוג" and "סוכן חדש" start, so a request in any wording ends in the real offer or the real
  * create flow — never in "אין לי כלי לזה" or an invented instruction. The pipeline runs the flow after the turn and the
- * flow's own messages are the answer (the model's text is not sent, like a pending action).
+ * flow's own messages are the answer; the model's text is sent only when it answers something else in the same message
+ * (AssistantOutput.textBeyondFlows).
  */
-const STARTED_NOTE = "המערכת שולחת עכשיו את ההמשך בהודעה נפרדת. לא לכתוב סכומים, קישורים או הוראות — לכל היותר משפט קצר אחד.";
+const STARTED_NOTE =
+  "המערכת שולחת עכשיו את ההמשך בהודעה נפרדת. לא לכתוב על התהליך עצמו (סכומים, קישורים, הוראות). אם בהודעה של המשתמש יש בקשה נוספת — לענות עליה כרגיל; אחרת אין צורך בטקסט.";
 
 function startFlow(ctx: ToolContext, flow: AssistantFlow) {
   if (!ctx.requestFlow) return { status: "unavailable", note: "אפשר להציע לכתוב את הפקודה במילה אחת." };

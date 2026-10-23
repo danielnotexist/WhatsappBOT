@@ -3,7 +3,11 @@ import { PLANS, TRIAL_MESSAGES } from "@/lib/billing/plans";
 import type { SubscriptionRow } from "@/lib/db/types";
 import { GOOGLE_SCOPES } from "@/lib/google/oauth";
 import { MS_SCOPES } from "@/lib/ms/oauth";
+import { BUILTIN_AGENTS } from "@/lib/agents/templates";
+import { agentChoices, buildAgentSection, buildRouterAgentBlock } from "@/lib/agents/prompt";
+import type { ResolvedAgent } from "@/lib/agents/policy";
 import { accountContextOf } from "./account-context";
+import { SUMMARY_PROMPT } from "./memory";
 import { BASE_SYSTEM_PROMPT, ROUTER_INSTRUCTIONS, buildSystemPrompt, type UserContextInput } from "./system-prompt";
 
 const NOW = new Date("2026-10-23T07:00:00Z"); // Friday 23.10.2026, 10:00 in Israel (summer time, +03:00)
@@ -20,9 +24,21 @@ describe("system prompt — neutral Hebrew (Daniel's live test: \"כתוב\", \"
     expect(BASE_SYSTEM_PROMPT).toContain("ואף פעם לא \"את או אתה\"");
   });
 
+  it("forbids a gendered pronoun as the subject, in the present too (live eval: \"אתה על המסלול הבסיסי\" 3 of 3)", () => {
+    expect(BASE_SYSTEM_PROMPT).toContain('- כן: "המסלול שלך: בסיסי" / "נשארו לך 749 הודעות" · לא: "אתה על המסלול הבסיסי" / "את בתקופת ניסיון".');
+    expect(BASE_SYSTEM_PROMPT).toContain('לא לפתוח משפט ב"אתה" או "את" כנושא, גם בהווה');
+  });
+
+  it("the router's own reply is neutral too (live eval: \"אם תרצה\" / \"אם תצטרך\" in 6 of 8)", () => {
+    expect(ROUTER_INSTRUCTIONS).toContain('- ב-reply: פנייה ניטרלית בלבד — "אם יש צורך" / "אם יעלה משהו", אף פעם לא "אם תרצה" / "אם תצטרך" / "אתה" / "את".');
+    expect(ROUTER_INSTRUCTIONS).toContain('"תהיה לך גישה לדרייב?"');
+  });
+
   it("writes its own rules in the infinitive — no masculine imperative outside the \"לא:\" examples", () => {
-    const masculine = /(?:^|[\s"(])(?:כתוב|ענה|השתמש|אמור|הסבר|התעלם|ציין|שאל|טפל|תן|אתה)(?=[\s,.:;!?")]|$)/u;
-    for (const text of [BASE_SYSTEM_PROMPT, ROUTER_INSTRUCTIONS]) {
+    const masculine = /(?:^|[\s"(])(?:כתוב|ענה|השתמש|אמור|הסבר|התעלם|ציין|שאל|טפל|תן|אתה|סכם|הוסף|בחר|החזר)(?=[\s,.:;!?")]|$)/u;
+    const secretary = { key: "builtin:secretary", kind: "builtin", role: "secretary", rowId: null, name: BUILTIN_AGENTS.secretary.name, aliases: [], template: "secretary", capabilities: [], templateInstructions: BUILTIN_AGENTS.secretary.instructions, userInstructions: null, permissions: {}, status: "active", createdAt: null } as unknown as ResolvedAgent;
+    // every model-facing text: the base prompt, the router, the memory summary, the agent section and the router's agent block
+    for (const text of [BASE_SYSTEM_PROMPT, ROUTER_INSTRUCTIONS, SUMMARY_PROMPT, buildAgentSection(secretary), buildRouterAgentBlock(agentChoices([secretary]), "a1")]) {
       // the "don't" examples quote the forbidden forms on purpose; the button labels (שלח / ערוך / בטל) are the style guide's
       for (const line of text.split("\n").filter((l) => !l.includes("לא:") && !l.includes("אף פעם לא") && !l.includes("שלח בלי לשאול") && !l.includes("שלח / ערוך"))) {
         expect(line, line).not.toMatch(masculine);
@@ -50,17 +66,18 @@ describe("system prompt — the product and the account (\"איזה מנוי א�
 
   it("gives the plan in force and what is left of it, from the subscription and the usage counter", () => {
     const trial = buildSystemPrompt({ ...base, account: accountContextOf(null, 7, NOW), agentNames: ["מזכירה", "מתמחה", "מנהלת חשבונות"] });
-    expect(trial).toContain("- מסלול: תקופת ניסיון (אין מנוי בתשלום). נשארו 7 מתוך 10 הודעות.");
+    expect(trial).toContain("- מסלול: תקופת ניסיון (אין מנוי בתשלום). נשארו 7 מתוך 10 הודעות (ההודעה הנוכחית כבר נספרה).");
     expect(trial).toContain("- סוכנים פעילים עכשיו: ״מזכירה״, ״מתמחה״, ״מנהלת חשבונות״.");
     expect(trial).toContain("- שדרוג או הפעלת מנוי: הכלי start_upgrade.");
 
     const basic = buildSystemPrompt({ ...base, account: accountContextOf(sub({}), 740, NOW) });
-    expect(basic).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 740 מתוך 750 הודעות החודש. החיוב הבא: יום ג׳ 10.11.");
+    expect(basic).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 740 מתוך 750 הודעות החודש (ההודעה הנוכחית כבר נספרה). החיוב הבא: יום ג׳ 10.11.");
     expect(basic).toContain("- סוכנים במסלול הזה: בלי המובנים, סוכן אחד משלך.");
     expect(basic).toContain("- שדרוג לפרו: הכלי start_upgrade.");
 
     const pro = buildSystemPrompt({ ...base, account: accountContextOf(sub({ plan: "pro", scheduled_plan: "basic" }), 2990, NOW) });
-    expect(pro).toContain("- מסלול: פרו (299 ₪ לחודש), פעיל. נשארו 2,990 מתוך 3,000 הודעות החודש.");
+    expect(pro).toContain("- מסלול: פרו (299 ₪ לחודש), פעיל. נשארו 2,990 מתוך 3,000 הודעות החודש (ההודעה הנוכחית כבר נספרה).");
+    expect(BASE_SYSTEM_PROMPT).toContain("לא לתקן בסוגריים הודעות קודמות");
     expect(pro).toContain("- מתוכנן מעבר למסלול בסיסי ב-יום ג׳ 10.11.");
     expect(pro).not.toContain("start_upgrade.\n"); // no upgrade line for pro
 
@@ -103,6 +120,11 @@ describe("system prompt — connections and what they allow (granted scopes)", (
     expect(section).toContain("כולל פגישה עם קישור Teams");
     expect(section).toContain("- Google מחובר (dana.levi@gmail.com):");
     expect(section).toContain("רק קבצים שנוצרו או נפתחו דרכי (הרשאת drive.file). אין גישה לשאר הקבצים ב-Drive");
+    // live eval: Sonnet added "או ששותפו איתי" — the line rules it out explicitly
+    expect(section).toContain("גם לא לקבצים או לתיקיות ששותפו עם המשתמש");
+    expect(section).toContain("  • חשבון אחר או חיבור מחדש: אפשר לכתוב ״לחבר מחדש את גוגל״");
+    // every capability line opens in Hebrew (WhatsApp lays a line out by its first letter)
+    for (const line of section.split("\n").filter((l) => l.startsWith("  • "))) expect(line.slice(4), line).toMatch(/^[\u0590-\u05FF]/);
     expect(section).toContain("כולל פגישה עם קישור Google Meet");
     expect(section).toContain("קריאת מיילים ב-Gmail — עדיין אין הרשאה");
     expect(prompt).toContain('לא לומר "יתברר אחרי האישור"');
@@ -115,7 +137,7 @@ describe("system prompt — connections and what they allow (granted scopes)", (
   it("a provider that is not connected: what a connection would allow (the scopes the app asks for)", () => {
     const prompt = buildSystemPrompt({ ...base, connections: [{ provider: "microsoft", accountEmail: "dana@levi-law.co.il", scopes: [...MS_SCOPES] }] });
     expect(prompt).toContain("- Google לא מחובר. אחרי חיבור (״לחבר את גוגל״):");
-    expect(prompt).toContain("Google Drive — רק קבצים שנוצרו או נפתחו דרכי");
+    expect(prompt).toContain("קבצים ב-Google Drive — רק קבצים שנוצרו או נפתחו דרכי");
     expect(prompt).toContain("קריאת מיילים ב-Gmail — בשלב הזה רק למשתמשים הראשונים");
     expect(prompt).not.toContain("Microsoft 365 לא מחובר");
   });

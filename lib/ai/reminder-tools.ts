@@ -1,6 +1,6 @@
 import { reminderButtons } from "@/lib/copy/bot-m5";
 import { cancelReminder, createReminder, listOpenReminders } from "@/lib/reminders/service";
-import type { Tool } from "./tools";
+import type { Tool, ToolContext } from "./tools";
 
 /**
  * Reminder tools for the strong model (Milestone 5). Internal actions — no approval buttons (PLAN §2.3 covers
@@ -8,6 +8,8 @@ import type { Tool } from "./tools";
  * parser (lib/reminders/parse.ts) computes the instant, and `reply` carries the absolute-time echo.
  */
 const str = (description: string) => ({ type: "string", description });
+/** The reminders of one turn (one ToolContext) set for the coming morning, per next-date button. */
+const nextDayIds = new WeakMap<ToolContext, Map<string, string[]>>();
 const REPLY_NOTE = "לענות למשתמש בדיוק בנוסח שב-reply, בלי להוסיף או לשנות את הזמן, ובלי לספר על ניסיונות קודמים.";
 
 export const createReminderTool: Tool = {
@@ -29,8 +31,12 @@ export const createReminderTool: Tool = {
     if (!user) return { status: "error", error: "user not found" };
     const r = await createReminder(ctx.db, user, { text: String(input.text ?? ""), when: String(input.when ?? "") }, ctx.now);
     if (r.status === "created" && r.nextDay) {
-      // "מחר" after midnight: set for the coming morning; the next date rides on the reply as one button
-      ctx.addReplyButtons?.(reminderButtons.nextDay(r.reminder.id, r.nextDay.label));
+      // "מחר" after midnight: set for the coming morning; the next date rides on the reply as one button — one for all
+      // the reminders of this turn that share that date
+      const key = `rem:next:${r.nextDay.label}`;
+      const ids = [...(nextDayIds.get(ctx)?.get(key) ?? []), r.reminder.id];
+      nextDayIds.set(ctx, new Map(nextDayIds.get(ctx)).set(key, ids));
+      ctx.addReplyButtons?.(reminderButtons.nextDay(ids, r.nextDay.label), key);
       return { status: "done", reminder_id: r.reminder.id, when: r.whenAbs, reply: r.reply, note: `${REPLY_NOTE} התזכורת נקבעה לבוקר הקרוב בכוונה, ומצורף כפתור להעברה ל${r.nextDay.label}. לא לשנות, לבטל או לקבוע אותה מחדש.` };
     }
     if (r.status === "created") return { status: "done", reminder_id: r.reminder.id, when: r.whenAbs, recurring: r.recurring, reply: r.reply, note: REPLY_NOTE };

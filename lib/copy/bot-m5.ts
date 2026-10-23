@@ -76,6 +76,10 @@ export const reminderButtons = {
       { id: `rem:hour:${reminderId}`, title: "דחה לשעה" },
       { id: `rem:tmrw:${reminderId}`, title: "דחה למחר" },
     ] satisfies ReplyButton[],
-  /** with act.reminder.set_small_hours: the other reading of "מחר" — "ליום ש׳ 24.10" */
-  nextDay: (reminderId: string, dayLabel: string) => [{ id: `rem:next:${reminderId}`, title: `ל${dayLabel}` }] satisfies ReplyButton[],
+  /**
+   * with act.reminder.set_small_hours: the other reading of "מחר" — "ליום ש׳ 24.10". Several reminders set for that
+   * morning in one message share one button ("הכול ליום ש׳ 24.10"): two buttons with the same title would be rejected.
+   */
+  nextDay: (reminderIds: readonly string[], dayLabel: string) =>
+    [{ id: `rem:next:${reminderIds.join(",")}`, title: reminderIds.length > 1 ? `הכול ל${dayLabel}` : `ל${dayLabel}` }] satisfies ReplyButton[],
 };

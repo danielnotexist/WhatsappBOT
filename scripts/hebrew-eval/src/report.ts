@@ -26,6 +26,8 @@ interface ModelAgg {
   unconfirmedSends: number;
   claimedCompletions: number;
   brokenRecords: number;
+  genderedRecords: number;
+  narratedRecords: number;
   nonHebrewRecords: number;
   hebrewRatio: number | null;
   p50: number | null;
@@ -82,6 +84,8 @@ export function aggregate(scores: ScoresFile, meta: RunMeta, profiles: { light: 
       unconfirmedSends: recs.filter((r) => r.checks.unconfirmedSend).length,
       claimedCompletions: recs.filter((r) => r.checks.claimedCompletion).length,
       brokenRecords: recs.filter((r) => r.checks.brokenDirectionLines > 0).length,
+      genderedRecords: recs.filter((r) => (r.checks.genderedAddress ?? []).length > 0).length,
+      narratedRecords: recs.filter((r) => r.checks.narratedRetry === true).length,
       nonHebrewRecords: ok.filter((r) => r.checks.hasResponse && r.checks.hebrewRatio < 0.5).length,
       hebrewRatio: mean(ok.map((r) => r.checks.hebrewRatio)),
       p50: percentile(ok.map((r) => r.latencyMs).filter((v): v is number => v !== null), 50),
@@ -157,13 +161,13 @@ export function renderReport(scores: ScoresFile, meta: RunMeta, aggs: ModelAgg[]
   // ---- deterministic checks
   L.push(`## בדיקות אוטומטיות`);
   L.push('');
-  L.push(`| מודל | קרא לכלי הצפוי | שליחה בלי אישור | "שלחתי/קבעתי" בלי אישור | תשובות עם שורה בכיוון מעורב | תשובות לא בעברית | חלק עברי ממוצע |`);
-  L.push(`|---|---:|---:|---:|---:|---:|---:|`);
+  L.push(`| מודל | קרא לכלי הצפוי | שליחה בלי אישור | "שלחתי/קבעתי" בלי אישור | תשובות עם שורה בכיוון מעורב | פנייה מגדרית | סיפור על ניסיון פנימי | תשובות לא בעברית | חלק עברי ממוצע |`);
+  L.push(`|---|---:|---:|---:|---:|---:|---:|---:|---:|`);
   for (const a of aggs) {
-    L.push(`| ${cell(a.modelName)} | ${a.toolOkRate === null ? '—' : `${pct(a.toolOkRate)} (${a.toolOkN})`} | ${a.unconfirmedSends} | ${a.claimedCompletions} | ${a.brokenRecords} | ${a.nonHebrewRecords} | ${pct(a.hebrewRatio)} |`);
+    L.push(`| ${cell(a.modelName)} | ${a.toolOkRate === null ? '—' : `${pct(a.toolOkRate)} (${a.toolOkN})`} | ${a.unconfirmedSends} | ${a.claimedCompletions} | ${a.brokenRecords} | ${a.genderedRecords} | ${a.narratedRecords} | ${a.nonHebrewRecords} | ${pct(a.hebrewRatio)} |`);
   }
   L.push('');
-  L.push(`"שורה בכיוון מעורב" = שורה שמתחילה באות לטינית ומכילה עברית (בוואטסאפ היא מתהפכת). "קרא לכלי הצפוי" נמדד רק בהודעות שיש להן ציפייה (expected_tools / must_do / כוונה).`);
+  L.push(`"פנייה מגדרית" = "כתוב", "אם תרצה", "אחרי שתאשר", "את או אתה", "אתה" כנושא (מדריך הסגנון: ניסוח ניטרלי בלבד). "שורה בכיוון מעורב" = שורה שמתחילה באות לטינית ומכילה עברית (בוואטסאפ היא מתהפכת). "קרא לכלי הצפוי" נמדד רק בהודעות שיש להן ציפייה (expected_tools / must_do / כוונה).`);
   L.push('');
 
   // ---- latency & cost
@@ -219,6 +223,8 @@ export function renderReport(scores: ScoresFile, meta: RunMeta, aggs: ModelAgg[]
       if (r.checks.unnecessaryToolCall) flags.push('כלי מיותר');
       if (r.checks.hasResponse && r.checks.hebrewRatio < 0.5) flags.push('לא בעברית');
       if (r.checks.toolLoopTruncated) flags.push('ביקש סבב כלים נוסף');
+      if ((r.checks.genderedAddress ?? []).length) flags.push(`פנייה מגדרית (${r.checks.genderedAddress.join(', ')})`);
+      if (r.checks.narratedRetry) flags.push('מספר על ניסיון פנימי');
       const scoreStr = dims.map((d) => `${d.label} ${r.scores[d.id] ?? '—'}`).join(', ');
       L.push(`- **${r.messageId}** (${r.expectedComplexity}, ${cell(r.persona || '—')}) — ציון ${f(r.overall)} · ${scoreStr}${flags.length ? ` · ⚠ ${flags.join(' · ')}` : ''}`);
       L.push(`  - המשתמש: «${cell(truncate(r.userText, 140))}»`);

@@ -91,12 +91,23 @@ npm run report -- --run-id <id>   # results/<run-id>/report.md
 
 ספק חדש: קובץ ב-`src/providers/` שמממש את `Provider` (`src/providers/types.ts`), רישום ב-`src/providers/index.ts` ומשתנה סביבה ב-`PROVIDER_ENV` ב-`src/models.ts`.
 
+## ה-prompt של המוצר (מ-23.10.2026)
+
+הבדיקה מריצה את ה-system prompt של המוצר עצמו (`lib/ai/system-prompt.ts`), כפי שהוא נבנה למשתמשת של `context.json` בשעה של `now` — ובשעה 03:43 באותו לילה להודעות עם `"small_hours": true`. הקובץ `src/product-prompt.generated.ts` נוצר מבדיקה בשורש הפרויקט, שנכשלת אם ה-prompt השתנה בלי לחדש אותו:
+
+```bash
+pnpm vitest run lib/ai/eval-prompt-sync.test.ts -u   # מהשורש, אחרי שינוי ב-prompt
+```
+
+ההודעות msg-101 עד msg-108 הן קטעים מהבדיקה החיה של דניאל (מנוי, שדרוג, יצירת סוכן, Drive/Meet, "מחר" אחרי חצות, "תודה רבה!"). שתי בדיקות אוטומטיות חדשות לכל תשובה: **פנייה מגדרית** ("כתוב", "אם תרצה", "אחרי שתאשר", "את או אתה", "אתה" כנושא) ו**סיפור על ניסיון פנימי** ("בניסיון הראשון", "ביטלתי וקבעתי מחדש", "(תיקון: …)"). הריצה של 20.10.2026 (`docs/hebrew-eval-report.md`) נעשתה עם prompt ישן ונפרד.
+
 ## מבנה
 
 ```
 models.json              מודלים, שופט, פרופילי שימוש, ספים
 dataset/                 messages.json, context.json, rubric.md (חיצוניים) · _sample.json (לבדיקות)
-src/system-prompt.ts     ה-system prompt בעברית + סכמות 12 הכלים
+src/system-prompt.ts     ה-system prompt (של המוצר) + פרטי הפרופיל + סכמות הכלים
+src/product-prompt.generated.ts  ה-prompt של המוצר וכלי החשבון/התזכורות — נוצר מ-lib/ai/eval-prompt-sync.test.ts
 src/mock-tools.ts        ביצוע הכלים מול context.json (חיפוש מילות מפתח)
 src/providers/           anthropic, openai (+openrouter), gemini, mock
 src/pricing.ts           טבלת מחירים + דריסה מ-env

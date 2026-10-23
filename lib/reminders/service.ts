@@ -155,6 +155,16 @@ export async function moveReminderToNextDay(db: Db, user: UserRow, reminderId: s
   return copyM5["act.reminder.moved"](formatWhenAbs(due, now, tz, { dated: true }));
 }
 
+/** `rem:next:<id>,<id>` — every reminder of the button; one line per moved reminder (null when none was found). */
+async function moveAllToNextDay(db: Db, user: UserRow, reminderIds: readonly string[], now: Date): Promise<string | null> {
+  const lines: string[] = [];
+  for (const id of reminderIds) {
+    const moved = await moveReminderToNextDay(db, user, id, now);
+    if (moved) lines.push(reminderIds.length > 1 ? `${(await db.getReminder(id))?.text ?? ""}: ${moved}`.replace(/^: /, "") : moved);
+  }
+  return lines.length ? lines.join("\n") : null;
+}
+
 export async function markReminderDone(db: Db, user: UserRow, reminderId: string): Promise<string | null> {
   const r = await db.getReminder(reminderId);
   if (!r || r.user_id !== user.id) return null;
@@ -212,10 +222,15 @@ export async function runReminderJob(deps: ProactiveDeps, job: Pick<JobRow, "id"
   return { status: "sent", mode: sent.mode, next };
 }
 
-/** Reminder buttons (`rem:done|hour|tmrw|next:<id>`) from the free-form message or the template's quick replies. */
-export function parseReminderButton(id: string): { verb: "done" | "hour" | "tmrw" | "next"; reminderId: string } | null {
-  const m = id.match(/^rem:(done|hour|tmrw|next):([0-9a-f-]{36})$/);
-  return m ? { verb: m[1] as "done" | "hour" | "tmrw" | "next", reminderId: m[2]! } : null;
+/**
+ * Reminder buttons (`rem:done|hour|tmrw|next:<id>`) from the free-form message or the template's quick replies.
+ * `rem:next:` may carry several ids ("הכול ליום ש׳ 24.10" — the reminders of one message set after midnight).
+ */
+export function parseReminderButton(id: string): { verb: "done" | "hour" | "tmrw" | "next"; reminderId: string; reminderIds: string[] } | null {
+  const m = id.match(/^rem:(done|hour|tmrw):([0-9a-f-]{36})$/) ?? id.match(/^rem:(next):([0-9a-f-]{36}(?:,[0-9a-f-]{36}){0,4})$/);
+  if (!m) return null;
+  const ids = m[2]!.split(",");
+  return { verb: m[1] as "done" | "hour" | "tmrw" | "next", reminderId: ids[0]!, reminderIds: ids };
 }
 
 export async function handleReminderButton(deps: ProactiveDeps, user: UserRow, to: string, buttonId: string): Promise<boolean> {
@@ -226,7 +241,7 @@ export async function handleReminderButton(deps: ProactiveDeps, user: UserRow, t
     parsed.verb === "done"
       ? await markReminderDone(deps.db, user, parsed.reminderId)
       : parsed.verb === "next"
-        ? await moveReminderToNextDay(deps.db, user, parsed.reminderId, now)
+        ? await moveAllToNextDay(deps.db, user, parsed.reminderIds, now)
         : await snoozeReminder(deps.db, user, parsed.reminderId, parsed.verb === "hour" ? "hour" : "tomorrow", now);
   const text = reply ?? copyM5["act.reminder.not_found"]();
   await deps.wa.sendText(to, text);

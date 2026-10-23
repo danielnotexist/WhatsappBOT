@@ -59,7 +59,7 @@ describe("plan status from data", () => {
     await user(h, "basic");
     h.ai.enqueue(tool, { text: "המסלול שלך בסיסי, 99 ₪ לחודש." });
     await processInbound(h.ctx, h.inbound("אני על הבסיסי או על משהו אחר? תסבירי"));
-    expect(h.ai.calls[0]!.system).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 749 מתוך 750 הודעות החודש. החיוב הבא: יום ג׳ 10.11.");
+    expect(h.ai.calls[0]!.system).toContain("- מסלול: בסיסי (99 ₪ לחודש), פעיל. נשארו 749 מתוך 750 הודעות החודש (ההודעה הנוכחית כבר נספרה). החיוב הבא: יום ג׳ 10.11.");
     expect(h.ai.calls[1]!.tools!.map((t) => t.name)).toEqual(expect.arrayContaining(["start_upgrade", "start_agent_creation"]));
   });
 });

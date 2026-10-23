@@ -67,6 +67,14 @@ describe("billing commands typed in the chat", () => {
     ["מה המסלול שלי?", "status"],
     ["מה המנוי שלי", "status"],
     ["כמה הודעות יש לי בניסיון?", "status"],
+    ["מה מצב המנוי שלי", "status"],
+    ["באיזה מסלול אני נמצאת?", "status"],
+    ["שדרגי את המנוי", "upgrade"],
+    ["תשדרג אותי", "upgrade"],
+    ["תשדרגי לי את המנוי לפרו", "upgrade"],
+    ["תשדרג לפרו", "upgrade"],
+    ["לשדרג לי את המנוי", "upgrade"],
+    ["לשדרג אותי לפרו", "upgrade"],
   ])("%s → %s", (text, cmd) => {
     expect(billingCommandOf(text)).toBe(cmd);
   });
@@ -88,6 +96,19 @@ describe("billing commands typed in the chat", () => {
     "איך עוברים לשם?",
     "איזה מייל קיבלתי מכהן?",
     "פרופורציה",
+    // review 23.10.2026: a delivery or a route is not the plan; a bare imperative is a reply to a draft
+    "איזו חבילה?",
+    "איזו חבילה יש לי",
+    "מה החבילה",
+    "איזה מסלול?",
+    "באיזה מסלול",
+    "מה המסלול",
+    "תשדרגי",
+    "שדרגי",
+    "שדרג",
+    "תשדרגי לי",
+    "לשדרג לי",
+    "תשדרג לי את הטיוטה",
   ])("leaves %s to the assistant", (text) => {
     expect(billingCommandOf(text)).toBeNull();
   });

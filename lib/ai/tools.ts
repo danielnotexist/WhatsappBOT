@@ -20,8 +20,11 @@ export interface ToolContext {
   createPending(kind: PendingActionRow["kind"], payload: Record<string, unknown>): Promise<PendingActionRow>;
   /** asks the pipeline to run a flow after the reply (absent outside the WhatsApp pipeline → the tool says so) */
   requestFlow?(flow: AssistantFlow): void;
-  /** quick-reply buttons for the turn's reply (at most 3 in all; e.g. "move the reminder to the next date") */
-  addReplyButtons?(buttons: ReplyButton[]): void;
+  /**
+   * quick-reply buttons for the turn's reply (at most 3 in all, distinct ids and titles; e.g. "move the reminder to the
+   * next date"). Buttons added under a `key` replace the ones added earlier under the same key in this turn.
+   */
+  addReplyButtons?(buttons: ReplyButton[], key?: string): void;
   /**
    * The turn's agent may only reach a list of addresses (docs/design/agents.md §7.2): a tool that changes or cancels
    * an existing event first looks up who that reaches (`current_attendees` in the payload) so the guard can check it.
