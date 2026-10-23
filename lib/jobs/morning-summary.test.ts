@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
 import type { UserRow } from "@/lib/db/types";
-import { createGoogleFixture, fixtureMail } from "@/lib/google/__fixtures__/google-fixtures";
+import { FIXTURE_MEET_URL, createGoogleFixture, fixtureMail } from "@/lib/google/__fixtures__/google-fixtures";
 import { GoogleClient } from "@/lib/google/client";
 import { GmailReader } from "@/lib/google/gmail";
-import { createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
+import { FIXTURE_TEAMS_JOIN_URL, createGraphFixture } from "@/lib/ms/__fixtures__/graph-fixtures";
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
 import { zonedToUtc } from "@/lib/time/zoned";
-import { emailsAwaitingReply, morningDedupeKey, nextMorningRun, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
+import { MORNING_TEXT_BUDGET, emailsAwaitingReply, morningDedupeKey, nextMorningRun, renderMorningText, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
 
 const il = (y: number, mo: number, d: number, h: number, mi = 0) => zonedToUtc({ year: y, month: mo, day: d, hour: h, minute: mi }, "Asia/Jerusalem");
 
@@ -36,7 +36,10 @@ async function setup(opts: { at?: Date; connected?: boolean; sent?: { conversati
   return { h, user, deps, job, graphState: g.state };
 }
 
+// the template keeps one line per meeting: join links do not fit its 300 characters
 const MEETINGS = "• 09:00 דיון בבית משפט השלום ת״א  • 12:00 פגישה עם רו״ח ברק";
+const TEAMS_LINE = `קישור לפגישה: ${FIXTURE_TEAMS_JOIN_URL}`;
+const MEET_LINE = `קישור לפגישה: ${FIXTURE_MEET_URL}`;
 
 describe("morning summary — the job", () => {
   it("outside the window sends the morning_summary template from Graph (meetings, emails awaiting reply) + today's reminders", async () => {
@@ -60,7 +63,7 @@ describe("morning summary — the job", () => {
     await processInbound(h.ctx, h.inbound("תודה"));
     expect(await runMorningSummaryJob(deps, job)).toMatchObject({ status: "sent", mode: "text" });
     expect(h.wa.texts.at(-1)).toBe(
-      "*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• 09:00 דיון בבית משפט השלום ת״א\n• 12:00 פגישה עם רו״ח ברק\n\n*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n\nרוצה שאנסח תשובה למישהו מהם?",
+      `*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• 09:00 דיון בבית משפט השלום ת״א\n• 12:00 פגישה עם רו״ח ברק\n${TEAMS_LINE}\n\n*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n\nרוצה שאנסח תשובה למישהו מהם?`,
     );
   });
 
@@ -127,7 +130,7 @@ describe("morning summary — the job", () => {
     const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: createGoogleFixture().fetchImpl });
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google }) }, job);
-    expect(h.wa.texts.at(-1)).toContain("*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n• 13:00 שיחה עם משפחת אברהם\n\n*מיילים שמחכים לתשובה*");
+    expect(h.wa.texts.at(-1)).toContain(`*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 דיון בבית משפט השלום ת״א\n• 09:00 פגישת צוות שבועית\n• 12:00 פגישה עם רו״ח ברק\n${TEAMS_LINE}\n• 13:00 שיחה עם משפחת אברהם\n${MEET_LINE}\n\n*מיילים שמחכים לתשובה*`);
   });
 
   it("Gmail with gmail.readonly: emails awaiting a reply from Gmail (threads.list + threads.get, own replies respected)", async () => {
@@ -154,7 +157,7 @@ describe("morning summary — the job", () => {
     const google = new GoogleClient({ getAccessToken: async () => "ya29.tok", fetchImpl: fx.fetchImpl });
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob({ ...deps, googleFor: async () => ({ google, gmail: null, accountEmail: "dana.levi@gmail.com" }) }, job);
-    expect(h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 פגישת צוות שבועית\n• 13:00 שיחה עם משפחת אברהם\n\nשיהיה יום טוב.");
+    expect(h.wa.texts.at(-1)).toBe(`*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• כל היום — יום הולדת לנועה\n• 09:00 פגישת צוות שבועית\n• 13:00 שיחה עם משפחת אברהם\n${MEET_LINE}\n\nשיהיה יום טוב.`);
     expect(fx.state.calls.some((c) => c.url.includes("gmail.googleapis.com"))).toBe(false);
   });
 
@@ -208,6 +211,23 @@ describe("morning summary — the job", () => {
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob(quiet, job);
     expect(h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\nהיומן ריק, אין מיילים שמחכים לתשובה ואין תזכורות. יום שקט.");
+  });
+
+  it("join links go under their meetings while the free-text message stays within its budget; meetings, e-mails and the closer always stay", () => {
+    const longLink = (i: number) => `${FIXTURE_TEAMS_JOIN_URL}&m=${String(i).repeat(420)}`;
+    const meetings = Array.from({ length: 8 }, (_, i) => `• ${String(9 + i).padStart(2, "0")}:00 פגישה ${i + 1}`);
+    const summary = { dayLabel: "יום ד׳ 21.10", meetings, meetingLinks: meetings.map((_, i) => (i === 1 ? null : longLink(i))), emails: ["• עו״ד שפירא — הצעת פשרה"], reminders: [], closer: "רוצה שאנסח תשובה למישהו מהם?", connected: true, empty: false };
+    const text = renderMorningText(summary);
+    expect(text.length).toBeLessThanOrEqual(MORNING_TEXT_BUDGET);
+    for (const m of meetings) expect(text).toContain(`${m}\n`);
+    expect(text).toContain("*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה");
+    expect(text.endsWith("רוצה שאנסח תשובה למישהו מהם?")).toBe(true);
+    // links in meeting order, each whole, up to the first one that does not fit
+    expect(text).toContain(`• 09:00 פגישה 1\nקישור לפגישה: ${longLink(0)}\n• 10:00 פגישה 2\n• 11:00 פגישה 3\nקישור לפגישה: ${longLink(2)}\n`);
+    expect(text).not.toContain(longLink(6));
+    expect(text).not.toContain(longLink(7));
+    // a short day keeps every link
+    expect(renderMorningText({ ...summary, meetings: meetings.slice(0, 2), meetingLinks: [FIXTURE_TEAMS_JOIN_URL, FIXTURE_MEET_URL] })).toContain(`• 09:00 פגישה 1\n${TEAMS_LINE}\n• 10:00 פגישה 2\n${MEET_LINE}\n`);
   });
 });
 

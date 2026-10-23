@@ -6,11 +6,12 @@ import type { PaidPlan } from "@/lib/billing/plans";
  * three places (a drawn mark goes in components/brand/integrations/icons.tsx; without one the tile shows `monogram`).
  *
  * Statuses follow the code on this branch, not the plan - flip `soon` to `available` in the commit that ships it:
- *  - Google (lib/google/oauth.ts + tools.ts): Gmail, Calendar, Drive (drive.file), and Docs/Sheets/Slides read through
- *    `gdrive_get_file_text`. Not yet: Meet links (no conferenceData), Google Tasks (no scope).
- *  - Microsoft (lib/ms/oauth.ts + tools.ts): Outlook mail and calendar, OneDrive search and Word/Excel/PowerPoint
- *    text. Not yet: SharePoint (Files.Read.All is granted, but `searchFiles` covers /me/drive only), Teams meeting
- *    links (no isOnlineMeeting), To Do (no Tasks.* scope).
+ *  - Google (lib/google/oauth.ts + tools.ts): Gmail, Calendar, Drive (drive.file), Docs/Sheets/Slides read through
+ *    `gdrive_get_file_text`, Google Tasks, and Meet links on the meetings she creates or updates when asked
+ *    (`online_meeting` → conferenceData under calendar.events).
+ *  - Microsoft (lib/ms/oauth.ts + tools.ts): Outlook mail and calendar, OneDrive and SharePoint search,
+ *    Word/Excel/PowerPoint text, To Do, and Teams links on the meetings she creates or updates when asked
+ *    (`online_meeting` → isOnlineMeeting under Calendars.ReadWrite; work or school accounts with Teams only).
  *  - Business systems (docs/research/connectors-israel.md): monday.com, Priority, מורנינג, iCount - all planned.
  *
  * Trademarks: every product name and mark here belongs to its owner (Google LLC, Microsoft Corporation, monday.com
@@ -45,7 +46,7 @@ export const INTEGRATIONS: readonly Integration[] = [
   { id: "google-docs", name: "Google Docs", vendor: "google", status: "available", featured: true, benefit: "קוראת מסמך ועונה עליו בכמה שורות" },
   { id: "google-sheets", name: "Google Sheets", vendor: "google", status: "available", benefit: "שולפת מספר או שורה מתוך גיליון" },
   { id: "google-slides", name: "Google Slides", vendor: "google", status: "available", benefit: "מסכמת מצגת לפני פגישה" },
-  { id: "google-meet", name: "Google Meet", vendor: "google", status: "soon", benefit: "קישור Meet בכל זימון שהיא קובעת" },
+  { id: "google-meet", name: "Google Meet", vendor: "google", status: "available", benefit: "מצרפת קישור Meet לפגישה כשמבקשים" },
   { id: "google-tasks", name: "Google Tasks", vendor: "google", status: "available", benefit: "מוסיפה משימות לרשימה ישר מהשיחה" },
 
   // Microsoft 365 - one OAuth connection (lib/ms/oauth.ts)
@@ -55,7 +56,7 @@ export const INTEGRATIONS: readonly Integration[] = [
   { id: "excel", name: "Excel", vendor: "microsoft", status: "available", featured: true, benefit: "קוראת גיליון ומוציאה ממנו את המספר" },
   { id: "powerpoint", name: "PowerPoint", vendor: "microsoft", status: "available", benefit: "מסכמת מצגת בכמה שורות" },
   { id: "sharepoint", name: "SharePoint", vendor: "microsoft", status: "available", benefit: "חיפוש בספריות המסמכים של הצוות" },
-  { id: "teams", name: "Microsoft Teams", vendor: "microsoft", status: "soon", benefit: "קישור Teams בכל זימון שהיא קובעת" },
+  { id: "teams", name: "Microsoft Teams", vendor: "microsoft", status: "available", benefit: "מצרפת קישור Teams לפגישה בחשבון עבודה" },
   { id: "todo", name: "Microsoft To Do", vendor: "microsoft", status: "available", benefit: "מוסיפה משימות ומזכירה ביום היעד" },
 
   // business systems (docs/research/connectors-israel.md)

@@ -102,6 +102,14 @@ export function expectedToolsFor(message: DatasetMessage): { tools: string[]; no
   return { tools: [...tools], noToolsExpected };
 }
 
+/** Did every meeting draft carry the expected online_meeting (a link nobody asked for goes to every attendee)? */
+export function onlineMeetingMatches(message: DatasetMessage, toolCalls: ToolCallRecord[]): boolean | null {
+  if (typeof message.expected_online_meeting !== 'boolean') return null;
+  const meetings = toolCalls.filter((c) => c.name === 'create_event' || c.name === 'update_event');
+  if (!meetings.length) return null;
+  return meetings.every((c) => (c.input['online_meeting'] === true) === message.expected_online_meeting);
+}
+
 export function runChecks(message: DatasetMessage, text: string, toolCalls: ToolCallRecord[], toolLoopTruncated: boolean): Checks {
   const toolsCalled = [...new Set(toolCalls.map((c) => c.name))];
   const { tools: expectedTools, noToolsExpected } = expectedToolsFor(message);
@@ -124,6 +132,7 @@ export function runChecks(message: DatasetMessage, text: string, toolCalls: Tool
     unconfirmedSend,
     claimedCompletion,
     unnecessaryToolCall: noToolsExpected && toolsCalled.length > 0,
+    onlineMeetingOk: onlineMeetingMatches(message, toolCalls),
     toolLoopTruncated,
     genderedAddress: genderedAddress(text),
     narratedRetry: narratedRetry(text),

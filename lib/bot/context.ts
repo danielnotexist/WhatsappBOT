@@ -1,7 +1,7 @@
 import type { SpendGuard } from "@/lib/ai/budget";
 import type { AiProvider } from "@/lib/ai/types";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
-import type { Tool } from "@/lib/ai/tools";
+import type { OnlineMeetingCheck, Tool } from "@/lib/ai/tools";
 import type { SttProvider } from "@/lib/stt/types";
 import type { HypGateway } from "@/lib/hyp/client";
 import type { WaSender } from "@/lib/wa/sender";
@@ -17,6 +17,8 @@ export interface BotContext {
   appUrl: string;
   /** provider tools (Graph / Google) for the strong model, by user and connections */
   extraTools?: (user: UserRow, connections: ConnectionRow[]) => Promise<Tool[]>;
+  /** whether the account can create an online meeting, asked before a draft names one (lib/ai/tools.ts OnlineMeetingCheck) */
+  onlineMeetingCheck?: (connections: ConnectionRow[]) => OnlineMeetingCheck;
   /** speech-to-text for voice notes (lazy: a missing key only fails voice notes); absent → audio is declined */
   stt?: () => SttProvider;
   /** HYP gateway for one-tap charges from WhatsApp (lazy: a missing HYP_* only fails the press that charges) */

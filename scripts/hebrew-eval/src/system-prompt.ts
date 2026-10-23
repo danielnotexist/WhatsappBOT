@@ -154,8 +154,13 @@ export const TOOL_DEFS: ToolDef[] = [
         end: str('End, ISO 8601 date-time. "" = start + 1 hour.'),
         location: str('Location or "" if unknown.'),
         attendees: str('Comma-separated attendee names/emails, or "".'),
+        online_meeting: {
+          type: 'boolean',
+          description:
+            'true when the user asks for an online meeting (Teams/טימס, Meet/מיט, Zoom/זום, video/וידאו, "אונליין", "קישור לפגישה") or says plainly that it is remote ("נדבר מרחוק"); the Teams link is created and sent with the invitation. false for an in-person meeting, for "שיחה" alone (usually a phone call) and when unclear. An attendee in another city or abroad is not a request: ask one short question first.',
+        },
       },
-      required: ['title', 'start', 'end', 'location', 'attendees'],
+      required: ['title', 'start', 'end', 'location', 'attendees', 'online_meeting'],
       additionalProperties: false,
     },
   },
@@ -169,8 +174,12 @@ export const TOOL_DEFS: ToolDef[] = [
         title: str('New title or "".'),
         start: str('New start (ISO 8601) or "".'),
         end: str('New end (ISO 8601) or "".'),
+        online_meeting: {
+          type: 'boolean',
+          description: 'true only when the user asks to add a Teams link to a meeting that has none. Moving or editing an existing online meeting: false.',
+        },
       },
-      required: ['event_id', 'title', 'start', 'end'],
+      required: ['event_id', 'title', 'start', 'end', 'online_meeting'],
       additionalProperties: false,
     },
   },

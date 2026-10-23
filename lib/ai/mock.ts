@@ -105,7 +105,8 @@ function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
     return { toolCalls: [call], stopReason: "tool_use", text: "" };
   }
   if (tools.has("create_event") && /תקבע|קבע לי|פגישה חדשה/.test(text) && !hasToolResult(req, "create_event")) {
-    const call: ToolCall = { id: "call_event_1", name: "create_event", input: { title: "פגישה", date: "2026-10-22", start: "10:00", end: "11:00", location: "", attendees: [] } };
+    const online = /teams|טימס|\bmeet\b|zoom|זום|וידאו|אונליין|מקוונת/i.test(text);
+    const call: ToolCall = { id: "call_event_1", name: "create_event", input: { title: "פגישה", date: "2026-10-22", start: "10:00", end: "11:00", location: "", attendees: [], online_meeting: online } };
     return { toolCalls: [call], stopReason: "tool_use", text: "" };
   }
   if (hasToolResult(req, "draft_email")) return { text: "הכנתי טיוטה — לשלוח?" };

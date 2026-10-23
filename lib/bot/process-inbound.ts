@@ -253,6 +253,7 @@ async function afterStored(
       text: ask,
       now: ctx.now(),
       tools: ctx.extraTools ? await ctx.extraTools(freshUser, connections) : [],
+      onlineMeetingCheck: ctx.onlineMeetingCheck?.(connections),
       agent: routing.agent,
       agentVia: routing.via,
       agentChoices: routing.choices,

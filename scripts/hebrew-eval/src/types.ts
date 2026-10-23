@@ -15,6 +15,8 @@ export interface DatasetMessage {
   confirmed?: boolean;
   /** Optional extension: the message is sent at 03:43 ("מחר" after midnight) — the product prompt for that hour. */
   small_hours?: boolean;
+  /** Optional extension: the online_meeting value a create_event / update_event call should carry (Teams/Meet link or not). */
+  expected_online_meeting?: boolean;
 }
 
 /** dataset/context.json — the mocked M365/Google world the tools search in. */
@@ -90,6 +92,11 @@ export interface Checks {
   genderedAddress: string[];
   /** The reply narrates an internal retry or correction ("בניסיון הראשון", "ביטלתי וקבעתי מחדש", "(תיקון: …)"). */
   narratedRetry: boolean;
+  /**
+   * Every create_event / update_event call carried the expected online_meeting value. null = no expectation, or no such
+   * call (asking a clarifying question instead is not judged here).
+   */
+  onlineMeetingOk: boolean | null;
   toolLoopTruncated: boolean;
 }
 

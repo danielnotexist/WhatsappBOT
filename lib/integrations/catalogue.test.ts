@@ -47,6 +47,7 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
       "google-docs",
       "google-sheets",
       "google-slides",
+      "google-meet",
       "google-tasks",
       "outlook",
       "onedrive",
@@ -54,6 +55,7 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
       "excel",
       "powerpoint",
       "sharepoint",
+      "teams",
       "todo",
     ]);
   });
@@ -67,6 +69,8 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
       "google-sheets": "drive.file",
       "google-slides": "drive.file",
       "google-tasks": "/auth/tasks",
+      // Meet links: conferenceData on the events she writes (lib/google/tools.ts, online_meeting)
+      "google-meet": "calendar.events",
     };
     for (const [id, scope] of Object.entries(needs)) {
       if (byId(id).status === "available") expect(googleScopes.some((s) => s.includes(scope)), id).toBe(true);
@@ -85,6 +89,8 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
       powerpoint: "Files.Read.All",
       todo: "Tasks.ReadWrite",
       sharepoint: "Sites.Read.All",
+      // Teams links: isOnlineMeeting on the events she writes (lib/ms/tools.ts, online_meeting)
+      teams: "Calendars.ReadWrite",
     };
     for (const [id, scope] of Object.entries(needs)) {
       if (byId(id).status === "available") expect(msScopes, id).toContain(scope);
@@ -94,8 +100,9 @@ describe("statuses are truthful (they follow the code, not the plan)", () => {
     expect(byId("todo").status).toBe("available");
   });
 
-  it("meeting links and every business system are still marked 'soon'", () => {
-    for (const id of ["google-meet", "teams", "monday", "priority", "morning", "icount"]) expect(byId(id).status, id).toBe("soon");
+  it("meeting links are available (create_event / update_event online_meeting); every business system is still 'soon'", () => {
+    for (const id of ["google-meet", "teams"]) expect(byId(id).status, id).toBe("available");
+    for (const id of ["monday", "priority", "morning", "icount"]) expect(byId(id).status, id).toBe("soon");
   });
 });
 

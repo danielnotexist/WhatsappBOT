@@ -8,23 +8,24 @@
 
 | קובץ | מה זה |
 |---|---|
-| `messages.json` | 100 הודעות וואטסאפ מדומות של משתמשים, עם כוונה צפויה וקריטריוני הצלחה לכל אחת |
+| `messages.json` | 113 הודעות וואטסאפ מדומות של משתמשים (100 המקוריות, 8 מהבדיקה החיה ו-5 על פגישות מקוונות), עם כוונה צפויה וקריטריוני הצלחה לכל אחת |
 | `context.json` | "העולם" של המשתמש: פרופיל, 12 מיילים, 8 אירועי יומן, 6 קבצים, 3 תזכורות, פרטי מוצר — מה שהמודל מקבל כמידע |
 | `rubric.md` | רובריקת ניקוד 0–5 בחמישה ממדים, כללי כישלון קשה, פורמט פלט לשופט ושלוש דוגמאות מנוקדות |
 | `README.md` | הקובץ הזה |
 
 ## `messages.json`
 
-מערך של 100 פריטים. חלוקה:
+מערך של 113 פריטים. חלוקה:
 
 | `category` | כמות | מה בודקים |
 |---|---|---|
 | `email` | 25 | חיפוש, סיכום, ניסוח תשובה, העברה, שליחה באישור |
-| `calendar` | 20 | היום/מחר, קביעה, הזזה, ביטול, מציאת זמן פנוי |
+| `calendar` | 25 | היום/מחר, קביעה, הזזה, ביטול, מציאת זמן פנוי; `msg-109`…`msg-113`: מתי פגישה מקבלת קישור Teams (`online_meeting`) |
 | `files` | 10 | חיפוש ב-OneDrive/Drive, שליחת קובץ, קריאת Excel/Word/PPT/PDF |
 | `reminders` | 15 | תזכורות ומשימות בזמנים חופשיים ("מחר ב-9", "עוד שעתיים", "ראשון הבא", "כל יום בשמונה") |
 | `summary` | 10 | סיכום בוקר ושאלות סטטוס |
 | `meta` | 10 | small talk, "מה אתה יודע לעשות", מודל, מחיר, "תפסיק", הודעה פוגענית |
+| `account` / `reminder` / `smalltalk` | 6 / 1 / 1 | `msg-101`…`msg-108`, מהבדיקה החיה: מצב המנוי, שדרוג, יצירת סוכן, הרשאות Drive/Meet, "מחר" אחרי חצות, "תודה רבה!" |
 | `tricky` | 10 | prompt injection דרך תוכן מייל/הדבקה, הפניות עמומות, שתי כוונות בהודעה, בקשה לעקוף אישור, ערבית/אנגלית מעורבות, רגישות רפואית |
 
 הטקסטים כתובים בעברית ישראלית מדוברת: שגיאות הקלדה, סלנג, שמות מוצרים באנגלית או בתעתיק ("הוט", "טקווייב"), הודעות קוליות מתומללות בלי פיסוק ועם תיקון עצמי, גרשיים ASCII ועבריים לסירוגין.
@@ -46,14 +47,15 @@
 }
 ```
 
-- `persona` — `lawyer` | `accountant` | `consultant` | `clinic`. קובע את שם המשתמש, העסק **והמגדר** (ראו `context.personas`). חלוקה: 28 / 24 / 23 / 25.
-- `expected_intent` — אחד מ-21 ערכים: `email.search`, `email.summarize`, `email.draft`, `email.send_confirm`, `calendar.query`, `calendar.create`, `calendar.update`, `calendar.delete`, `files.search`, `files.read`, `reminder.create`, `task.create`, `summary.morning`, `smalltalk`, `meta.capabilities`, `meta.pricing`, `meta.model`, `control.stop`, `injection`, `ambiguous`, `multi_intent`.
+- `persona` — `lawyer` | `accountant` | `consultant` | `clinic`. קובע את שם המשתמש, העסק **והמגדר** (ראו `context.personas`). חלוקה: 37 / 25 / 25 / 26.
+- `expected_intent` — אחד מ-26 ערכים: `email.search`, `email.summarize`, `email.draft`, `email.send_confirm`, `calendar.query`, `calendar.create`, `calendar.update`, `calendar.delete`, `files.search`, `files.read`, `reminder.create`, `task.create`, `summary.morning`, `smalltalk`, `smalltalk.thanks`, `meta.capabilities`, `meta.pricing`, `meta.model`, `control.stop`, `injection`, `ambiguous`, `multi_intent`, `account.status`, `account.upgrade`, `account.new_agent`, `account.capabilities`.
   - אין intent נפרד לשיתוף קובץ או להעברת מייל — שניהם `email.send_confirm` (פעולה יוצאת שדורשת אישור).
   - אין `reminder.update` / `reminder.list` — עדכון תזכורת מסווג `reminder.create` (עם הערה), רשימת תזכורות מסווגת `summary.morning`.
-- `expected_complexity` — `simple` (Haiku עונה לבד, בלי כלים) | `tool` (כלי אחד, ישיר) | `complex` (כמה צעדים, ניסוח, שיקול דעת). חלוקה: 17 / 69 / 14.
+- `expected_complexity` — `simple` (Haiku עונה לבד, בלי כלים) | `tool` (כלי אחד, ישיר) | `complex` (כמה צעדים, ניסוח, שיקול דעת). חלוקה: 21 / 78 / 14.
 - `must_do` / `must_not_do` — בולטים קצרים בעברית למה שתשובה נכונה עושה ולא עושה. "בונוס"/"אופציונלי" = לא חובה. כש כתוב "או שואל" — שתי ההתנהגויות תקינות.
 - `notes` — למה הפריט קיים / מה המלכודת. רמז לשופט, לא דרישה מהמודל.
-- `tags` — חופשי, לחיתוכים בדוח (`voice-style`, `outbound`, `injection`, `gender`, `relative-time`, `missing-data`, ...).
+- `tags` — חופשי, לחיתוכים בדוח (`voice-style`, `outbound`, `injection`, `gender`, `relative-time`, `missing-data`, `online-meeting`, ...).
+- `expected_online_meeting` (אופציונלי, בוליאני) — הערך ש-`online_meeting` צריך לקבל בכל קריאה ל-`create_event` / `update_event` בפריט. נבדק אוטומטית ("online_meeting נכון" בדוח); פריט שבו המודל שאל שאלה במקום להכין טיוטה לא נספר.
 
 ## `context.json`
 
@@ -90,7 +92,7 @@ python3 -I -c 'import json;json.load(open("scripts/hebrew-eval/dataset/messages.
 
 ## הוספה / שינוי פריטים
 
-- `id` רץ `msg-001`…`msg-100`; פריט חדש מקבל את המספר הבא ו-`category` מתאים.
+- `id` רץ `msg-001`…`msg-113`; פריט חדש מקבל את המספר הבא ו-`category` מתאים.
 - כל פריט חייב `expected_intent` מהרשימה למעלה, לפחות בולט אחד ב-`must_do` ואחד ב-`must_not_do`.
 - עובדות חדשות (שם, מייל, אירוע) מוסיפים קודם ל-`context.json`, אחרת זו "המצאה" לפי הרובריקה.
 - שומרים על הזמן הקבוע (20.10.2026 08:45). אם משנים — לעדכן את `week_hint`, את כל הפריטים עם `relative-time` / `date-parsing` ואת הדוגמאות ב-`rubric.md`.

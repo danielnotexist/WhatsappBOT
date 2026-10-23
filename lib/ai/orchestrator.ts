@@ -9,7 +9,7 @@ import type { ReplyButton } from "@/lib/wa/types";
 import type { AccountContext } from "./account-context";
 import { loadMemory } from "./memory";
 import { ROUTER_INSTRUCTIONS, buildSystemPrompt } from "./system-prompt";
-import { BASE_TOOLS, toolDefinitions, type AssistantFlow, type Tool, type ToolContext } from "./tools";
+import { BASE_TOOLS, toolDefinitions, type AssistantFlow, type OnlineMeetingCheck, type Tool, type ToolContext } from "./tools";
 import type { AiProvider, ChatMessage, CompletionResponse, ToolCall, Usage } from "./types";
 
 /** How an agent turn was chosen: an explicit address (§5.2), the sticky agent, or the router's pick (§5.4). */
@@ -25,6 +25,8 @@ export interface AssistantInput {
   now?: Date;
   /** extra tools (Graph/Google) registered by later milestones */
   tools?: Tool[];
+  /** asks the account whether it can create an online meeting before a draft names one (ToolContext.onlineMeetingCheck) */
+  onlineMeetingCheck?: OnlineMeetingCheck;
   maxRounds?: number;
   /** an explicitly addressed, available agent ("@מזכירה …") — the router is skipped */
   agent?: ResolvedAgent | null;
@@ -206,6 +208,7 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
       if (key) keyedButtons.set(key, buttons);
       else looseButtons.push(...buttons);
     },
+    onlineMeetingCheck: input.onlineMeetingCheck,
     createPending: (kind, payload) =>
       oneAtATime(async () => {
         if (turnAgent) {

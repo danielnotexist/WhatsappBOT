@@ -7,7 +7,7 @@ import { getSttProvider } from "@/lib/stt";
 import { getWaSender, type WaSender } from "@/lib/wa";
 import type { InboundMessage } from "@/lib/wa/types";
 import { activeMicrosoftConnection, graphForConnection, graphForUser } from "@/lib/ms";
-import { graphExecutors, graphTools } from "@/lib/ms/tools";
+import { graphExecutors, graphTools, teamsAvailability } from "@/lib/ms/tools";
 import { activeGoogleConnection, googleForConnection, googleForUser } from "@/lib/google";
 import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispatch";
 import { googleExecutors, googleTools } from "@/lib/google/tools";
@@ -32,7 +32,7 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
       const user = await base.getUser(userId);
       if (!user) return null;
       const g = await graphForUser(base, user);
-      return g ? { graph: g.graph, timeZone: g.timeZone } : null;
+      return g ? { graph: g.graph, timeZone: g.timeZone, connection: g.connection } : null;
     });
     const google = googleExecutors(async (userId) => {
       const user = await base.getUser(userId);
@@ -55,7 +55,7 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
       const ms = activeMicrosoftConnection(connections);
       const g = activeGoogleConnection(connections);
       return [
-        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone, scopes: ms.scopes, connectLink: () => connectLinkFor(ctx, user.id, "microsoft") }) : []),
+        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone, connection: ms, scopes: ms.scopes, connectLink: () => connectLinkFor(ctx, user.id, "microsoft") }) : []),
         ...(g
           ? googleTools({
               google: async () => googleForConnection(db, g),
@@ -67,6 +67,18 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
             })
           : []),
       ];
+    },
+    onlineMeetingCheck(connections) {
+      const ms = activeMicrosoftConnection(connections);
+      // only Microsoft can be asked (Google: lib/online-meeting.ts); any failure → unknown, the executor checks again
+      return async (provider) => {
+        if (provider !== "microsoft" || !ms) return null;
+        try {
+          return await teamsAvailability(await graphForConnection(db, ms), ms);
+        } catch {
+          return null;
+        }
+      };
     },
   };
   return ctx;

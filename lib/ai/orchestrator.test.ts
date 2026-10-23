@@ -284,13 +284,17 @@ describe("runAssistant with agents", () => {
     });
     expect((await runAssistant({ db, ai: ai2, user, connections: [], text: "x", tools, agent: other.agent, now: NOW })).pendingActions).toEqual([]);
 
-    // the main assistant and an agent without a list do not look anything up
+    // the main assistant keeps no attendee list: a move reads the meeting once (its draft names it), a cancellation not at all
     const reads = () => fixture.state.calls.filter((c) => c.method === "GET" && c.url.includes("/me/events/")).length;
     const before = reads();
-    const ai3 = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' }, { toolCalls: [move("AAMkAGe2", "u3")], stopReason: "tool_use" }, { text: "" });
+    const ai3 = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' }, { toolCalls: [move("AAMkAGe2", "u3"), cancel("AAMkAGe1", "c4")], stopReason: "tool_use" }, { text: "" });
     const main = await runAssistant({ db, ai: ai3, user, connections: [], text: "x", tools, now: NOW });
-    expect(main.pendingActions[0]!.payload).not.toHaveProperty("current_attendees");
-    expect(reads()).toBe(before);
+    // the main assistant's tools run side by side: the move's read lets the cancellation land first
+    expect(main.pendingActions.map((p) => [p.kind, "current_attendees" in p.payload]).sort()).toEqual([
+      ["delete_event", false],
+      ["update_event", false],
+    ]);
+    expect(reads()).toBe(before + 1);
   });
 
   it("parallel draft calls in one response cannot pass the daily cap: drafts are created one at a time", async () => {

@@ -11,6 +11,7 @@
  * The job re-checks everything at run time, so stale jobs (time changed, turned off) are harmless.
  */
 import { oneLineUntrusted } from "@/lib/ai/untrusted";
+import { copy } from "@/lib/copy/bot";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
 import type { GoogleClient, GoogleEvent } from "@/lib/google/client";
@@ -112,9 +113,11 @@ interface DayEvent {
   allDay: boolean;
   start: string;
   title: string;
+  /** Teams / Meet join link, already checked by safeJoinUrl (lib/online-meeting.ts) */
+  joinUrl: string | null;
 }
-const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject });
-const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary });
+const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject, joinUrl: e.joinUrl ?? e.textJoinUrl });
+const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary, joinUrl: e.joinUrl ?? e.textJoinUrl });
 /** Google: drop cancelled occurrences and invitations the user declined. */
 const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.attendees.some((a) => a.self && a.response === "declined");
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
@@ -133,7 +136,10 @@ const capped = (lines: string[], max: number) => (lines.length > max ? [...lines
 
 export interface MorningSummary {
   dayLabel: string;
+  /** one line per meeting (the template) */
   meetings: string[];
+  /** the join link of each of `meetings` (same index; null = not an online meeting), for the free-text message only */
+  meetingLinks?: (string | null)[];
   emails: string[];
   reminders: string[];
   closer: string;
@@ -196,7 +202,9 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
       }
     }
   }
-  const meetings = capped([...dayEvents].sort(byStart).map(meetingLine), MAX_MEETINGS);
+  const sorted = [...dayEvents].sort(byStart);
+  const meetings = capped(sorted.map(meetingLine), MAX_MEETINGS);
+  const meetingLinks = sorted.slice(0, MAX_MEETINGS).map((e) => e.joinUrl);
   // both mailboxes, newest first
   const emails = awaiting
     .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
@@ -210,11 +218,30 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   });
 
   const base = { meetings, emails, reminders, connected };
-  return { dayLabel: dayLabelHe(day), ...base, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
+  return { dayLabel: dayLabelHe(day), ...base, meetingLinks, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
 }
 
+/**
+ * The free-text message keeps well under WhatsApp's 4,096 characters (the sender cuts the rest, which would split a
+ * link and drop the e-mails and the closer). Join links are long (a Teams link is ~300 characters): they are added
+ * under the meetings in order while the whole message stays within this budget; the meetings themselves always stay.
+ */
+export const MORNING_TEXT_BUDGET = 3_500;
+
 export function renderMorningText(s: MorningSummary): string {
-  return s.empty ? copyM5["act.morning.empty"](s.dayLabel) : copyM5["act.morning.summary"](s);
+  if (s.empty) return copyM5["act.morning.empty"](s.dayLabel);
+  const meetings = [...s.meetings];
+  const render = () => copyM5["act.morning.summary"]({ ...s, meetings });
+  for (const [i, url] of (s.meetingLinks ?? []).entries()) {
+    if (!url || i >= meetings.length) continue;
+    const plain = meetings[i]!;
+    meetings[i] = `${plain}\n${copy["act.cal.join_link"](url)}`;
+    if (render().length > MORNING_TEXT_BUDGET) {
+      meetings[i] = plain;
+      break;
+    }
+  }
+  return render();
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,3 +1,5 @@
+import { TEAMS_PROVIDER, joinUrlInText, safeJoinUrl } from "@/lib/online-meeting";
+
 /**
  * Minimal Microsoft Graph client for mail, calendar, OneDrive, SharePoint (Microsoft Search), Microsoft To Do and change
  * notifications (PLAN §11 milestone 4).
@@ -51,6 +53,16 @@ export interface GraphEvent {
   organizer: { name: string; address: string } | null;
   webLink: string | null;
   bodyPreview: string;
+  /** the event has online meeting information (Teams / Skype) */
+  isOnlineMeeting: boolean;
+  /** "teamsForBusiness", "skypeForBusiness", "skypeForConsumer" or "unknown"; null when Graph did not say */
+  onlineMeetingProvider: string | null;
+  /** the user organizes the event (only the organizer's changes reach the attendees); null when Graph did not say */
+  isOrganizer: boolean | null;
+  /** `onlineMeeting.joinUrl` when it is a safe meeting link (lib/online-meeting.ts), else null */
+  joinUrl: string | null;
+  /** a meeting link written in the location or the body preview (e.g. the Zoom add-in), when safe; else null */
+  textJoinUrl: string | null;
 }
 
 export interface DriveItem {
@@ -117,6 +129,13 @@ export interface NewEvent {
   attendees?: string[];
   body?: string;
   isAllDay?: boolean;
+  /** true → a Teams meeting (`isOnlineMeeting` + `onlineMeetingProvider: "teamsForBusiness"`); Graph cannot turn it off later */
+  onlineMeeting?: boolean;
+  /**
+   * POST only: Graph's `transactionId`, "for the server to avoid redundant POST operations in case of client retries".
+   * The pending action's id, so one approved action is one event.
+   */
+  transactionId?: string;
 }
 
 export interface GraphClientOptions {
@@ -146,6 +165,7 @@ export function htmlToText(html: string): string {
 }
 
 const MSG_SELECT = "id,subject,from,toRecipients,receivedDateTime,isRead,hasAttachments,bodyPreview,webLink,conversationId";
+const EVENT_SELECT = "id,subject,start,end,isAllDay,location,attendees,organizer,isOrganizer,webLink,bodyPreview,isOnlineMeeting,onlineMeetingProvider,onlineMeeting";
 
 export class GraphClient {
   private readonly fetchImpl: typeof fetch;
@@ -297,18 +317,23 @@ export class GraphClient {
       organizer: e.organizer?.emailAddress ? { name: e.organizer.emailAddress.name ?? "", address: e.organizer.emailAddress.address ?? "" } : null,
       webLink: e.webLink ?? null,
       bodyPreview: e.bodyPreview ?? "",
+      isOnlineMeeting: Boolean(e.isOnlineMeeting),
+      onlineMeetingProvider: typeof e.onlineMeetingProvider === "string" ? e.onlineMeetingProvider : null,
+      isOrganizer: typeof e.isOrganizer === "boolean" ? e.isOrganizer : null,
+      joinUrl: safeJoinUrl(e.onlineMeeting?.joinUrl),
+      textJoinUrl: joinUrlInText(e.location?.displayName, e.bodyPreview),
     };
   }
 
   /** Events between two instants, returned in `timeZone` (Prefer: outlook.timezone). */
   async calendarView(start: Date, end: Date, timeZone = "Asia/Jerusalem", top = 50): Promise<GraphEvent[]> {
-    const q = new URLSearchParams({ startDateTime: start.toISOString(), endDateTime: end.toISOString(), $top: String(top), $orderby: "start/dateTime", $select: "id,subject,start,end,isAllDay,location,attendees,organizer,webLink,bodyPreview" });
+    const q = new URLSearchParams({ startDateTime: start.toISOString(), endDateTime: end.toISOString(), $top: String(top), $orderby: "start/dateTime", $select: EVENT_SELECT });
     const r = await this.request<{ value: RawEvent[] }>("GET", `/me/calendarView?${q}`, undefined, { Prefer: `outlook.timezone="${timeZone}"` });
     return r.value.map((e) => this.mapEvent(e));
   }
 
   async getEvent(id: string, timeZone = "Asia/Jerusalem"): Promise<GraphEvent> {
-    const q = new URLSearchParams({ $select: "id,subject,start,end,isAllDay,location,attendees,organizer,webLink,bodyPreview" });
+    const q = new URLSearchParams({ $select: EVENT_SELECT });
     const e = await this.request<RawEvent>("GET", `/me/events/${encodeURIComponent(id)}?${q}`, undefined, { Prefer: `outlook.timezone="${timeZone}"` });
     return this.mapEvent(e);
   }
@@ -321,6 +346,24 @@ export class GraphClient {
   async updateEvent(id: string, patch: Partial<NewEvent> & { timeZone: string }): Promise<GraphEvent> {
     const e = await this.request<RawEvent>("PATCH", `/me/events/${encodeURIComponent(id)}`, this.eventBody(patch), { Prefer: `outlook.timezone="${patch.timeZone}"` });
     return this.mapEvent(e);
+  }
+
+  /**
+   * The online meeting providers the default calendar allows (GET /me/calendar, covered by Calendars.ReadWrite).
+   * A work or school account with Teams lists "teamsForBusiness"; a personal Microsoft account lists
+   * "skypeForConsumer" (and Graph then creates the event without a meeting: 201 with onlineMeeting null). A successful
+   * answer without the list counts as none allowed. Null only when Graph may answer later (429, 5xx, 408, a network
+   * error); anything else throws (an expired connection, 403 ErrorAccessDenied, 404 MailboxNotEnabledForRESTAPI), so
+   * the caller reports it as it is and nobody is told to wait for a check that will never pass.
+   */
+  async onlineMeetingProviders(): Promise<string[] | null> {
+    try {
+      const c = await this.request<{ allowedOnlineMeetingProviders?: unknown }>("GET", "/me/calendar?$select=allowedOnlineMeetingProviders,defaultOnlineMeetingProvider");
+      return Array.isArray(c?.allowedOnlineMeetingProviders) ? c.allowedOnlineMeetingProviders.filter((p): p is string => typeof p === "string") : [];
+    } catch (e) {
+      if (e instanceof GraphError ? e.retryable : isNetworkError(e)) return null;
+      throw e;
+    }
   }
 
   /** Cancels (organizer: sends cancellation) or deletes the event. */
@@ -342,6 +385,8 @@ export class GraphClient {
     if (e.attendees !== undefined) body.attendees = e.attendees.map((address) => ({ emailAddress: { address }, type: "required" }));
     if (e.body !== undefined) body.body = { contentType: "Text", content: e.body };
     if (e.isAllDay !== undefined) body.isAllDay = e.isAllDay;
+    if (e.onlineMeeting) Object.assign(body, { isOnlineMeeting: true, onlineMeetingProvider: TEAMS_PROVIDER });
+    if (e.transactionId) body.transactionId = e.transactionId;
     return body;
   }
 
@@ -452,6 +497,12 @@ function mapTodoTask(t: RawTodoTask): TodoTask {
   return { id: t.id, title: t.title ?? "", status: t.status ?? "notStarted", due: t.dueDateTime?.dateTime ? t.dueDateTime.dateTime.slice(0, 10) : null, notes: t.body?.contentType === "html" ? htmlToText(t.body.content ?? "") : (t.body?.content ?? ""), importance: t.importance ?? "normal" };
 }
 
+/** fetch failed before Graph answered (connection reset, DNS, a timeout): Graph may answer the same request later */
+function isNetworkError(e: unknown): boolean {
+  const name = (e as { name?: unknown } | null)?.name;
+  return e instanceof TypeError || name === "AbortError" || name === "TimeoutError";
+}
+
 // ---- raw Graph shapes (subset) ----
 interface RawTodoTask {
   id: string;
@@ -488,6 +539,10 @@ interface RawEvent {
   organizer?: RawAddress;
   webLink?: string;
   bodyPreview?: string;
+  isOnlineMeeting?: boolean;
+  onlineMeetingProvider?: string;
+  isOrganizer?: boolean;
+  onlineMeeting?: { joinUrl?: string } | null;
 }
 interface RawDriveItem {
   id: string;

@@ -112,7 +112,7 @@ function microsoftCan(scopes: readonly string[]): string[] {
   const can: string[] = [];
   if (msHas(scopes, "Mail.ReadWrite")) can.push("מייל Outlook — קריאה, חיפוש, סיכום והעברה (העברה אחרי אישור בכפתור)");
   if (msHas(scopes, "Mail.Send")) can.push("שליחת מיילים מ-Outlook — רק אחרי אישור בכפתור");
-  if (msHas(scopes, "Calendars.ReadWrite")) can.push("יומן Outlook — הצגה, קביעה, הזזה וביטול של פגישות (אחרי אישור בכפתור), כולל פגישה עם קישור Teams");
+  if (msHas(scopes, "Calendars.ReadWrite")) can.push("יומן Outlook — הצגה, קביעה, הזזה וביטול של פגישות (אחרי אישור בכפתור), כולל פגישה עם קישור Teams (בחשבון עבודה או לימודים עם Teams; בחשבון Microsoft אישי — בלי קישור)");
   if (msHas(scopes, "Files.Read.All")) can.push("קבצים ב-OneDrive וב-SharePoint — חיפוש וקריאה בלבד (בלי שמירה ובלי שיתוף)");
   return can;
 }

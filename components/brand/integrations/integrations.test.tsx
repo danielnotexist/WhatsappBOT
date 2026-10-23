@@ -194,8 +194,11 @@ describe("the chip row (toolbar + tooltips)", () => {
 
   it("says 'בקרוב' in the name of a product that is not connected yet, and in its tooltip", () => {
     renderRow(integrationGroups());
-    const teams = screen.getByRole("button", { name: "Microsoft Teams, בקרוב" });
-    act(() => teams.focus());
+    const monday = screen.getByRole("button", { name: "monday.com, בקרוב" });
+    act(() => monday.focus());
     expect(screen.getByRole("tooltip")).toHaveTextContent("בקרוב");
+    // meeting links ship with the calendar tools (online_meeting): no "בקרוב" on Teams or Meet
+    expect(screen.getByRole("button", { name: "Microsoft Teams" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Google Meet" })).toBeInTheDocument();
   });
 });

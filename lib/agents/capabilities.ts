@@ -1,3 +1,5 @@
+import type { PendingActionKind } from "@/lib/db/types";
+
 /**
  * Capabilities (docs/design/agents.md §3): an agent stores provider-neutral capability ids, never tool names. At run
  * time they map to the tools that actually exist for the user's connections, so one agent works with Microsoft and
@@ -45,6 +47,19 @@ export function normalizeCapabilities(list: readonly unknown[]): Capability[] {
 
 export function capabilityOfTool(toolName: string): Capability | null {
   return TOOL_TO_CAPABILITY.get(toolName) ?? null;
+}
+
+/** The capability an agent needs to prepare a draft of this kind (the tools that create it); none → no agent may. */
+const ACTION_CAPABILITY: Partial<Record<PendingActionKind, Capability>> = {
+  send_mail: "mail.draft",
+  forward_mail: "mail.forward",
+  create_event: "calendar.write",
+  update_event: "calendar.write",
+  delete_event: "calendar.write",
+};
+
+export function capabilityOfAction(kind: PendingActionKind): Capability | null {
+  return ACTION_CAPABILITY[kind] ?? null;
 }
 
 /**

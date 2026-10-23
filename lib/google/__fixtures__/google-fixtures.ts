@@ -65,6 +65,32 @@ export interface RawFixtureEvent {
   transparency?: string;
   organizer: { email: string; displayName?: string; self?: boolean };
   attendees?: { email: string; displayName?: string; responseStatus: string; self?: boolean; organizer?: boolean }[];
+  hangoutLink?: string;
+  conferenceData?: RawFixtureConference;
+}
+
+export interface RawFixtureConference {
+  createRequest?: { requestId: string; conferenceSolutionKey: { type: string }; status: { statusCode: "pending" | "success" | "failure" } };
+  entryPoints?: { entryPointType: string; uri: string; label?: string }[];
+  conferenceSolution?: { key: { type: string }; name: string };
+  conferenceId?: string;
+}
+
+/** The Meet of the fixture's "שיחה עם משפחת אברהם" (hangoutLink + the video entry point, as events.get returns them). */
+export const FIXTURE_MEET_URL = "https://meet.google.com/abc-defg-hij";
+
+/** A Meet conference in the shape Calendar v3 returns once the create request succeeded. */
+export function fixtureMeetConference(code: string, requestId = "fixture-request"): { hangoutLink: string; conferenceData: RawFixtureConference } {
+  const uri = `https://meet.google.com/${code}`;
+  return {
+    hangoutLink: uri,
+    conferenceData: {
+      createRequest: { requestId, conferenceSolutionKey: { type: "hangoutsMeet" }, status: { statusCode: "success" } },
+      entryPoints: [{ entryPointType: "video", uri, label: `meet.google.com/${code}` }],
+      conferenceSolution: { key: { type: "hangoutsMeet" }, name: "Google Meet" },
+      conferenceId: code,
+    },
+  };
 }
 
 export const FIXTURE_GOOGLE_EVENTS: RawFixtureEvent[] = [
@@ -92,6 +118,7 @@ export const FIXTURE_GOOGLE_EVENTS: RawFixtureEvent[] = [
       { email: "dana.levi@gmail.com", responseStatus: "accepted", self: true, organizer: true },
       { email: "avraham@example.co.il", displayName: "יוסי אברהם", responseStatus: "accepted" },
     ],
+    ...fixtureMeetConference("abc-defg-hij"),
   },
   {
     kind: "calendar#event",
@@ -280,6 +307,13 @@ export interface GoogleFixtureState {
   denied: Set<"calendar" | "drive" | "gmail" | "gmail_read" | "tasks">;
   /** Google Tasks lists (the first is "@default") */
   taskLists: FixtureTaskList[];
+  /**
+   * A Meet create request (conferenceData.createRequest with conferenceDataVersion=1): "success" answers with the link,
+   * "pending" answers without it and the next events.get has it, "refuse" answers 400 (Google refused the conference),
+   * "refuse_created" answers the same 400 but an insert still created the event without Meet (reported in the wild),
+   * "failure" accepts the write and answers createRequest.status.statusCode "failure" with no entry points (documented).
+   */
+  conferenceMode: "success" | "pending" | "refuse" | "refuse_created" | "failure";
 }
 
 /** A tiny evaluator for the Gmail search syntax the app uses (in:, is:unread, from:, subject:, newer_than:, category:, has:attachment, words). */
@@ -365,12 +399,29 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
     unauthorizedOnce: false,
     denied: new Set(),
     taskLists: fixtureTaskLists(),
+    conferenceMode: "success",
   };
   let n = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=UTF-8" } });
   const apiError = (status: number, reason: string, message: string, extra: Record<string, unknown> = {}) => json({ error: { code: status, message, errors: [{ domain: "global", reason, message }], status: extra.status ?? "FAILED_PRECONDITION", ...(extra.details ? { details: extra.details } : {}) } }, status);
   const scopeDenied = () =>
     apiError(403, "insufficientPermissions", "Request had insufficient authentication scopes.", { status: "PERMISSION_DENIED", details: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT", domain: "googleapis.com" }] });
+  /** conferenceData is honoured only with conferenceDataVersion=1, like the API (version 0 ignores it). */
+  const conferenceFor = (url: URL, body: unknown): Response | Partial<RawFixtureEvent> | null => {
+    const req = (body as { conferenceData?: { createRequest?: { requestId?: string; conferenceSolutionKey?: { type?: string } } } } | null)?.conferenceData?.createRequest;
+    if (url.searchParams.get("conferenceDataVersion") !== "1" || !req) return null;
+    if (state.conferenceMode === "refuse" || state.conferenceMode === "refuse_created" || req.conferenceSolutionKey?.type !== "hangoutsMeet") return apiError(400, "invalid", "Invalid conference type value.", { status: "INVALID_ARGUMENT" });
+    if (state.conferenceMode === "failure") return { conferenceData: { createRequest: { requestId: req.requestId ?? "", conferenceSolutionKey: { type: "hangoutsMeet" }, status: { statusCode: "failure" } } } };
+    const code = `fix-meet-${++n}`;
+    const done = fixtureMeetConference(code, req.requestId ?? "");
+    if (state.conferenceMode === "success") return done;
+    return { conferenceData: { ...done.conferenceData, createRequest: { ...done.conferenceData.createRequest!, status: { statusCode: "pending" } }, entryPoints: undefined } };
+  };
+  /** a pending conference is ready on the next read */
+  const settle = (e: RawFixtureEvent) => {
+    if (e.conferenceData?.createRequest?.status.statusCode !== "pending") return;
+    Object.assign(e, fixtureMeetConference(e.conferenceData.conferenceId ?? "fix-meet", e.conferenceData.createRequest.requestId));
+  };
   const withOffset = (t: { dateTime?: string; date?: string; timeZone?: string }) => (t.dateTime && !/[zZ]|[+-]\d\d:\d\d$/.test(t.dateTime) ? { ...t, dateTime: `${t.dateTime}+03:00` } : t);
 
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -424,9 +475,13 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       }
       if (!id && method === "POST") {
         const b = body as Record<string, unknown> & { start: RawFixtureEvent["start"]; end: RawFixtureEvent["end"]; attendees?: { email: string }[] };
+        // a client-chosen id (base32hex) is kept; a second insert with it answers 409 like the API
+        if (typeof b.id === "string" && state.events.some((x) => x.id === b.id)) return apiError(409, "duplicate", "The requested identifier already exists.", { status: "ALREADY_EXISTS" });
+        const conference = conferenceFor(url, b);
+        if (conference instanceof Response && state.conferenceMode !== "refuse_created") return conference;
         const e: RawFixtureEvent = {
           kind: "calendar#event",
-          id: `gevnew${++n}`,
+          id: typeof b.id === "string" ? b.id : `gevnew${++n}`,
           status: "confirmed",
           htmlLink: `https://www.google.com/calendar/event?eid=new${n}`,
           summary: String(b.summary ?? ""),
@@ -436,17 +491,25 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
           end: withOffset(b.end),
           organizer: { email: FIXTURE_GOOGLE_ACCOUNT.email, self: true },
           ...(b.attendees ? { attendees: b.attendees.map((a) => ({ email: a.email, responseStatus: "needsAction" })) } : {}),
+          ...(conference instanceof Response ? {} : (conference ?? {})),
         };
         state.events.push(e);
+        if (conference instanceof Response) return conference;
         return json(e);
       }
       if (id) {
         if (state.deletedEvents.has(id)) return apiError(410, "deleted", "Resource has been deleted");
         const e = state.events.find((x) => x.id === id);
         if (!e) return apiError(404, "notFound", "Not Found");
-        if (method === "GET") return json(e);
+        if (method === "GET") {
+          settle(e);
+          return json(e);
+        }
         if (method === "PATCH") {
           const b = body as Partial<RawFixtureEvent> & { attendees?: { email: string }[] };
+          const conference = conferenceFor(url, b);
+          if (conference instanceof Response) return conference;
+          if (conference) Object.assign(e, conference);
           if (b.summary !== undefined) e.summary = b.summary;
           if (b.location !== undefined) e.location = b.location;
           if (b.description !== undefined) e.description = b.description;

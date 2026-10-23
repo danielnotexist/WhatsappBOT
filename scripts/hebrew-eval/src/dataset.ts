@@ -30,6 +30,7 @@ function normalizeMessage(m: Partial<DatasetMessage>, i: number): DatasetMessage
     ...(Array.isArray(m.expected_tools) ? { expected_tools: m.expected_tools.map(String) } : {}),
     ...(typeof m.confirmed === 'boolean' ? { confirmed: m.confirmed } : {}),
     ...(m.small_hours === true ? { small_hours: true } : {}),
+    ...(typeof m.expected_online_meeting === 'boolean' ? { expected_online_meeting: m.expected_online_meeting } : {}),
   };
 }
 

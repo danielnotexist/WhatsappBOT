@@ -1,4 +1,7 @@
+import { copy, onlineService } from "@/lib/copy/bot";
 import type { Db, PendingActionRow } from "@/lib/db/types";
+import { providerForAction } from "@/lib/google/dispatch";
+import type { OnlineMeetingProvider } from "@/lib/online-meeting";
 import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
 import type { ReplyButton } from "@/lib/wa/types";
 import { ACCOUNT_TOOLS } from "./account-tools";
@@ -10,6 +13,13 @@ import type { ToolDefinition } from "./types";
  * upgrade offer (one-tap approval or the pay link) and the agent-creation flow — the same ones "שדרוג" / "סוכן חדש" start.
  */
 export type AssistantFlow = "upgrade" | "new_agent";
+
+/**
+ * Whether the account can create the online meeting a draft would name, asked before the draft exists. Microsoft only
+ * (allowedOnlineMeetingProviders); Google cannot be checked under calendar.events (lib/online-meeting.ts). Null when
+ * unknown: the draft is made as asked and the executor checks again after the press.
+ */
+export type OnlineMeetingCheck = (provider: OnlineMeetingProvider) => Promise<{ available: boolean; personal: boolean } | null>;
 
 /** Runtime handed to every tool. `createPending` is how a tool proposes an outbound action (never executes it). */
 export interface ToolContext {
@@ -30,6 +40,8 @@ export interface ToolContext {
    * an existing event first looks up who that reaches (`current_attendees` in the payload) so the guard can check it.
    */
   checksRecipients?: boolean;
+  /** see OnlineMeetingCheck; absent → no check before the draft */
+  onlineMeetingCheck?: OnlineMeetingCheck;
 }
 
 export interface Tool extends ToolDefinition {
@@ -39,6 +51,39 @@ export interface Tool extends ToolDefinition {
 }
 
 const str = (description: string) => ({ type: "string", description });
+
+/**
+ * `online_meeting` on the tools that create a meeting: the provider adds the join link (Teams on Microsoft 365,
+ * Google Meet on Google) and sends it with the invitation. Shared with gcal_create_event (lib/google/tools.ts).
+ * Set only when the user asks for an online meeting or says plainly that it is remote: a link nobody asked for goes out
+ * to every attendee. A city or a country is not a request (a client from Haifa may come to the office); "שיחה" alone is
+ * a phone call.
+ */
+export const onlineMeetingField = (service: string) => ({
+  type: "boolean",
+  description: `true כשמבקשים פגישה מקוונת (Teams/טימס, Meet/מיט, Zoom/זום, וידאו, "אונליין", "קישור לפגישה"), או כשהמשתמש אומר במפורש שהפגישה מרחוק ("נדבר מרחוק", "לא יגיע פיזית"). הקישור (${service}) נוצר אוטומטית ונשלח בהזמנה. false לפגישה פרונטלית, ל"שיחה" לבדה (בדרך כלל טלפון) וכשלא ברור. משתתף מעיר אחרת או מחו״ל אינו בקשה לקישור: לשאול שאלה קצרה אחת (למשל "להוסיף פגישת Teams?" ביומן Microsoft, "להוסיף פגישת Google Meet?" ביומן Google).`,
+});
+
+/** `online_meeting` on update_event / gcal_update_event: add a link to a meeting that has none (Graph cannot remove one later). */
+export const onlineMeetingUpdateField = (service: string) => ({
+  type: "boolean",
+  description: `true רק כשמבקשים להוסיף קישור ${service} לפגישה שאין לה join_url ושהמשתמש ארגן (organizer_is_me). הזזה או שינוי של פגישה מקוונת קיימת: false.`,
+});
+
+/** Tool results of an update_event / gcal_update_event link request that needs no draft. */
+export const alreadyOnline = (joinUrl: string | null) => ({
+  status: "already_online",
+  ...(joinUrl ? { join_url: joinUrl } : {}),
+  note: "לפגישה כבר יש פגישה מקוונת, ולא נוצרה טיוטה. לומר זאת במשפט קצר; אם יש join_url, להוסיף שורה \"קישור לפגישה: \" ואחריה הקישור כלשונו.",
+});
+export const NOT_ORGANIZER = { status: "error", error: "not_organizer", note: "רק מי שארגן את הפגישה יכול להוסיף לה קישור, ולכן לא נוצרה טיוטה. לומר זאת למשתמש במשפט קצר." } as const;
+/** Tool result of a link request on an account known to lack the service (checked before the draft): no draft. */
+export const onlineUnavailableResult = (provider: OnlineMeetingProvider, personal: boolean) => ({
+  status: "error",
+  error: "online_unavailable",
+  personal,
+  note: `${copy["act.cal.online_unavailable"](provider, personal)} לא נוצרה טיוטה. לומר זאת במשפט קצר; אם ביקשו גם שינוי אחר בפגישה, להציע לבצע אותו בלי קישור.`,
+});
 
 export const draftEmailTool: Tool = {
   name: "draft_email",
@@ -68,7 +113,7 @@ export const draftEmailTool: Tool = {
 
 export const createEventTool: Tool = {
   name: "create_event",
-  description: "מכין פגישה חדשה ביומן ומעביר לאישור המשתמש. לא יוצר בפועל. להשתמש כשמבקשים לקבוע פגישה.",
+  description: "מכין פגישה חדשה ביומן ומעביר לאישור המשתמש. לא יוצר בפועל. להשתמש כשמבקשים לקבוע פגישה, גם פגישה מקוונת (online_meeting).",
   readOnly: false,
   input_schema: {
     type: "object",
@@ -79,20 +124,36 @@ export const createEventTool: Tool = {
       end: str("שעת סיום HH:MM"),
       location: str("מקום, או ריק"),
       attendees: { type: "array", items: { type: "string" }, description: "כתובות מייל של משתתפים (ריק אם אין)" },
+      online_meeting: onlineMeetingField("Teams ב-Microsoft 365, Google Meet ב-Google"),
     },
-    required: ["title", "date", "start", "end", "location", "attendees"],
+    required: ["title", "date", "start", "end", "location", "attendees", "online_meeting"],
     additionalProperties: false,
   },
   async run(input, ctx) {
-    const pending = await ctx.createPending("create_event", {
+    const payload: Record<string, unknown> = {
       title: String(input.title ?? ""),
       date: String(input.date ?? ""),
       start: String(input.start ?? ""),
       end: String(input.end ?? ""),
       location: String(input.location ?? ""),
       attendees: Array.isArray(input.attendees) ? input.attendees.map(String) : [],
-    });
-    return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. לענות במשפט קצר בלבד." };
+    };
+    if (input.online_meeting !== true) {
+      const pending = await ctx.createPending("create_event", payload);
+      return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. לענות במשפט קצר בלבד." };
+    }
+    // the draft names the service ("Teams" / "Google Meet"): pin the calendar now, so the approved meeting is the one shown
+    const provider = await providerForAction(ctx.db, { user_id: ctx.userId, payload });
+    const check = ctx.onlineMeetingCheck ? await ctx.onlineMeetingCheck(provider).catch(() => null) : null;
+    if (check && !check.available) {
+      // known before the press (a personal Microsoft account, a work account without Teams): the same meeting without
+      // a link, saying why, instead of a Teams draft that is certain to fail after the press
+      const pending = await ctx.createPending("create_event", { ...payload, provider, online_fallback: provider, ...(check.personal ? { online_personal: true } : {}) });
+      return { status: "pending_approval", pending_action_id: pending.id, online_meeting: "unavailable", note: `${copy["act.cal.online_unavailable"](provider, check.personal)} הטיוטה מוצגת בלי קישור, עם כפתורי אישור. לומר זאת במשפט קצר בלבד.` };
+    }
+    const pending = await ctx.createPending("create_event", { ...payload, online_meeting: true, provider });
+    const service = onlineService(provider);
+    return { status: "pending_approval", pending_action_id: pending.id, online_service: service, note: `הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. לענות במשפט קצר בלבד, ולציין בו שתיווצר פגישת ${service}.` };
   },
 };
 
