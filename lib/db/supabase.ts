@@ -13,6 +13,7 @@ import type {
   BillingApprovalRow,
   BillingApprovalStatus,
   NewBillingApproval,
+  NewWebCharge,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -824,6 +825,31 @@ export class SupabaseDb implements Db {
     if (error) {
       if (error.code === "23505") return null; // another charge of this user is open (billing_approvals_one_open_charge_per_user)
       this.fail("openRenewalCharge", error);
+    }
+    return SupabaseDb.approval(data);
+  }
+
+  async openWebCharge(row: NewWebCharge): Promise<BillingApprovalRow | null> {
+    const { data, error } = await this.client
+      .from("billing_approvals")
+      .insert({
+        id: row.id,
+        user_id: row.user_id,
+        kind: "upgrade",
+        plan: "pro",
+        amount_ils: row.amount_ils,
+        details: row.details ?? {},
+        phone_e164: null,
+        status: "processing",
+        approved_msg_id: `web:${row.id}`,
+        approved_at: new Date().toISOString(),
+      })
+      .select(SupabaseDb.BA_COLS)
+      .single();
+    if (error) {
+      // the same form again (primary key / approved_msg_id) or another open charge of this user (one_open_charge_per_user)
+      if (error.code === "23505") return null;
+      this.fail("openWebCharge", error);
     }
     return SupabaseDb.approval(data);
   }

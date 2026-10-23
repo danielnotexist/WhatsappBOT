@@ -10,10 +10,12 @@
 | `migrations/0002_rls.sql` | deny-by-default: ביטול הרשאות ל-`anon`/`authenticated`, RLS על כל טבלה, policies "רק השורות שלי" (`auth.uid()`), GRANT ברמת עמודות (בלי טוקנים מוצפנים / raw) |
 | `migrations/0003_functions.sql` | `count_trial_message` (ספירה אטומית, 10/750/3000), `user_plan`, `claim_due_jobs` / `finish_job` / `requeue_stale_jobs` (תור משימות עם SKIP LOCKED ו-backoff), `expire_pending_actions`, `purge_old_messages` (90/365 יום), `purge_old_audit_log` (24 חודש), `purge_expired_tokens`, `dispatch_due_jobs` (pg_cron → pg_net → QStash), תזמוני pg_cron |
 | `migrations/0007_billing_whatsapp.sql` | חיוב מתוך וואטסאפ בלחיצה אחת: `billing_approvals` (תוקף 10 דק' ב-CHECK, חיוב פתוח אחד למשתמש), `claim_billing_approval()` (אטומי: משתמש + המספר הפעיל המקושר + pending + לפני תפוגה), `raise_plan_limit()` (שדרוג באמצע חודש), `payments.approval_id`, `subscriptions.scheduled_plan` — `docs/hyp-setup.md` |
+| `migrations/0012_billing_web_upgrade.sql` | שדרוג בסיסי → פרו מדף התשלום באתר: `billing_approvals` מקבלת `upgrade` בלי טלפון רק כשהוא כבר תפוס (לא `pending`) ו-`approved_msg_id = 'web:' \|\| id` (ה-nonce החד-פעמי של הטופס) — טופס כפול נחסם במפתח הראשי, חיוב פתוח נוסף באינדקס של 0007 — `docs/hyp-setup.md` |
 | `seed.sql` | נתוני דמו (שני משתמשים: דנה — ניסיון עם M365; יוסי — מנוי בסיסי עם Google ותשלום). **לא לפרודקשן.** |
 | `tests/rls_isolation.test.sql` | בידוד: לקוח א' לא רואה/משנה את לקוח ב'; `anon` = אפס; עמודות רגישות חסומות |
 | `tests/functions.test.sql` | בדיקות עשן לכל פונקציה ב-0003 + cascade במחיקת משתמש |
 | `tests/billing_whatsapp.test.sql` | 0007: תוקף 10 דקות, claim (מספר אחר / משתמש אחר / מספר שנותק / לחיצה כפולה / פג תוקף), חיוב פתוח אחד (כולל החיוב החודשי), תשלום מוצלח אחד לאישור, `raise_plan_limit`, הרשאות |
+| `tests/billing_web_upgrade.test.sql` | 0012: שדרוג מהאתר נוצר `processing` בלי טלפון; אותו nonce פעמיים / חיוב פתוח נוסף / `retry` מהאתר / `pending` / nonce אחר נדחים; לא נתפס מוואטסאפ; חוסם לחיצה בוואטסאפ ואת החיוב החודשי; תשלום מוצלח אחד |
 | `tests/local_supabase_stub.sql` | מדמה את התפקידים ו-`auth.uid()` של Supabase ב-Postgres רגיל |
 | `tests/run-local.sh` | מריץ הכול על DB מקומי טרי |
 | `config.toml` | קונפיג Supabase CLI (לוקאלי) |

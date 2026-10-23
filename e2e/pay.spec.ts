@@ -10,6 +10,13 @@ async function signup(ctx: BrowserContext): Promise<string> {
   return email;
 }
 
+/** How many token charges the mock HYP gateway of the dev server has seen (memory mode only). */
+async function chargeCount(ctx: BrowserContext): Promise<number> {
+  const res = await ctx.request.get("/api/dev/hyp");
+  expect(res.ok()).toBe(true);
+  return ((await res.json()) as { charges: number }).charges;
+}
+
 /** The personal payment link, as the personal area hands it out. */
 async function payLinkOf(ctx: BrowserContext): Promise<string> {
   const page = await ctx.newPage();
@@ -47,11 +54,14 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     await expect(page.getByRole("link", { name: "חזרה לוואטסאפ" })).toHaveAttribute("href", /^https:\/\/wa\.me\/\d+$/);
     await phone.close();
 
-    // the owner's browser: the plan is active, and the same link now updates the card (J2, no charge)
+    // the owner's browser: the basic plan is active, the same link now offers the upgrade, and its card link
+    // updates the card (J2, no charge)
     const p2 = await owner.newPage();
     await p2.goto("/account");
     await expect(p2.getByRole("meter", { name: "הודעות החודש" })).toHaveAttribute("aria-valuemax", "750");
     await p2.goto(href);
+    await expect(p2.getByRole("heading", { level: 1 })).toHaveText("שדרוג לפרו");
+    await p2.getByRole("link", { name: "עדכון כרטיס", exact: true }).click();
     await expect(p2.getByRole("heading", { level: 1 })).toHaveText("עדכון כרטיס");
     await expect(p2.getByRole("form", { name: "בסיסי", exact: true })).toHaveCount(0);
     await expect(p2.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toBeVisible();
@@ -59,6 +69,54 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     await expect(p2).toHaveURL(/\/account\?notice=/);
     await expect(p2.getByText("הכרטיס עודכן. אפשר לחזור לוואטסאפ.")).toBeVisible();
     await owner.close();
+  });
+
+  test("basic → pro on the site: the prorated price on the saved card, a decline changes nothing, the retry upgrades once", async ({ browser }) => {
+    const ctx = await newContext(browser);
+    await signup(ctx);
+    const page = await ctx.newPage();
+    await page.goto((await payLinkOf(ctx)));
+    await payWithMock(page, "basic");
+
+    // the personal area: the plan card and the agents section both lead straight to the upgrade face
+    const slip = page.getByRole("region", { name: "המנוי" });
+    await expect(slip.getByRole("link", { name: "עדכון אמצעי תשלום" })).toHaveAttribute("href", /\/pay\/[^?]+\?view=card$/);
+    const agentsCta = page.getByRole("region", { name: "הסוכנים שלי" }).getByRole("link", { name: "לשדרוג לפרו" });
+    await expect(agentsCta).toHaveAttribute("href", (await slip.getByRole("link", { name: "לשדרוג לפרו" }).getAttribute("href"))!);
+    await slip.getByRole("link", { name: "לשדרוג לפרו" }).click();
+
+    // a fresh basic cycle: the whole difference (299 − 99), VAT included, the mock card's last digits
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("שדרוג לפרו");
+    await expect(page.getByText("200", { exact: true })).toBeVisible();
+    await expect(page.getByText("כולל מע״מ 30.51 ₪")).toBeVisible();
+    await expect(page.getByText("מסתיים ב-4580")).toBeVisible();
+    await expect(page.getByText(/^299 ₪ לחודש, מ-\d{1,2}\.\d{1,2}\.\d{4}$/)).toBeVisible();
+    const before = await chargeCount(ctx);
+
+    // the card company declines once (the mock HYP gateway, scripted): nothing changes, a retry is offered
+    expect((await ctx.request.post("/api/dev/hyp", { data: { charge: ["4"] } })).ok()).toBe(true);
+    await page.getByRole("button", { name: "לשדרג עכשיו" }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("השדרוג לא הושלם");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("חברת האשראי לא אישרה את החיוב (קוד 4)");
+    await page.getByRole("button", { name: "לנסות שוב, 200 ₪" }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("המסלול שודרג לפרו");
+    await expect(page.getByRole("main").getByRole("status")).toHaveText("מסלול פרו פעיל");
+    await expect(page.getByText("הקבלה נשלחה למייל")).toBeVisible();
+    expect(await chargeCount(ctx)).toBe(before + 2); // the decline + the upgrade
+    // a refresh of the result never charges again
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("המסלול שודרג לפרו");
+    expect(await chargeCount(ctx)).toBe(before + 2);
+
+    await page.goto("/account");
+    await expect(page.getByRole("meter", { name: "הודעות החודש" })).toHaveAttribute("aria-valuemax", "3000");
+    await expect(page.getByRole("link", { name: "לשדרוג לפרו" })).toHaveCount(0);
+    // the pay link of a pro plan: the card update, with the way to basic in the chat
+    await page.goto((await slip.getByRole("link", { name: "עדכון אמצעי תשלום" }).getAttribute("href"))!.replace("?view=card", ""));
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("עדכון כרטיס");
+    await expect(page.getByText("מעבר למסלול הבסיסי: בשיחה עם עלזה, לכתוב ״מעבר לבסיסי״.")).toBeVisible();
+    await ctx.close();
   });
 
   test("an invalid link and an unknown result say what to do, in Hebrew, without echoing the URL", async ({ browser }) => {

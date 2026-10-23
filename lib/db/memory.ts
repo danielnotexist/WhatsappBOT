@@ -14,6 +14,7 @@ import type {
   BillingApprovalRow,
   BillingApprovalStatus,
   NewBillingApproval,
+  NewWebCharge,
   ConnectionRow,
   ConnectionSecret,
   ConnectionStatus,
@@ -790,6 +791,32 @@ export class MemoryDb implements Db {
       expires_at: iso(new Date(now.getTime() + 10 * 60_000)),
       approved_msg_id: null,
       approved_at: null,
+      hyp_trans_id: null,
+      ccode: null,
+      error: null,
+      created_at: iso(now),
+    };
+    this.billingApprovals.push(full);
+    return { ...full };
+  }
+
+  async openWebCharge(row: NewWebCharge): Promise<BillingApprovalRow | null> {
+    if (!(row.amount_ils > 0)) throw new Error("billing_approvals_charge_amount");
+    // the primary key (a replayed form) and billing_approvals_one_open_charge_per_user
+    if (this.billingApprovals.some((a) => a.id === row.id) || this.hasOpenCharge(row.user_id)) return null;
+    const now = this.now();
+    const full: BillingApprovalRow = {
+      id: row.id,
+      user_id: row.user_id,
+      kind: "upgrade",
+      plan: "pro",
+      amount_ils: row.amount_ils,
+      details: row.details ?? {},
+      phone_e164: null,
+      status: "processing",
+      expires_at: iso(new Date(now.getTime() + 10 * 60_000)),
+      approved_msg_id: `web:${row.id}`,
+      approved_at: iso(now),
       hyp_trans_id: null,
       ccode: null,
       error: null,

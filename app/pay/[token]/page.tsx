@@ -3,17 +3,29 @@ import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { Mascot } from "@/components/brand/mascot";
-import { ctaClass } from "@/components/brand/cta";
 import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { cardLinkFor } from "@/lib/billing/links";
 import { verifyPayLinkToken } from "@/lib/billing/pay-link";
-import { PLANS, VAT_RATE, isPaidPlan, type PaidPlan } from "@/lib/billing/plans";
+import { VAT_RATE, isPaidPlan, type PaidPlan } from "@/lib/billing/plans";
+import { webUpgradeResult, webUpgradeView, type WebUpgradeOffer } from "@/lib/billing/web-upgrade";
 import { BRAND } from "@/lib/brand";
 import { getDb } from "@/lib/db";
 import type { SubscriptionRow, UserRow } from "@/lib/db/types";
 import { zonedParts } from "@/lib/time/zoned";
+import { publicWaNumber } from "@/lib/wa/public-number";
 import { Assurance, PayError, PayHeading, PayPaper, PayStage } from "../_components/pay-ui";
+import { upgradeAction } from "./actions";
 import { PlanCard } from "./plan-card";
+import {
+  CardUpdateFace,
+  UpgradeDoneFace,
+  UpgradeFailedFace,
+  UpgradeOfferFace,
+  UpgradePendingFace,
+  UpgradeUnknownFace,
+  isUpgradeNotice,
+  type OfferFaceData,
+} from "./upgrade-faces";
 
 export const metadata: Metadata = { title: "תשלום", robots: { index: false, follow: false } };
 
@@ -21,9 +33,12 @@ const VAT_PERCENT = Math.round(VAT_RATE * 100);
 
 /**
  * The personal payment page, reached from the WhatsApp link or the personal area (no session needed; the signed
- * token names the account). Three faces:
+ * token names the account). Its faces:
  *  - choose a plan (trial, ended, paused, cancelled): the two plans as papers, pro in honey, then HYP's secure page;
- *  - an active subscription: update the card for the next charges (HYP J2 check, no charge) via /pay/card/<token>;
+ *  - an active basic plan with a saved card: the upgrade to pro — the prorated difference until the end of the cycle,
+ *    charged to the saved card with one press (lib/billing/web-upgrade.ts), and its result (`?upgrade=<approval>`);
+ *  - an active subscription otherwise, or `?view=card`: update the card for the next charges (HYP J2 check, no charge)
+ *    via /pay/card/<token>; on basic it says why the upgrade waits (no card, expired card, an overdue charge…);
  *  - an invalid or expired link: how to get a new one.
  */
 export default function PayPage(props: PageProps<"/pay/[token]">) {
@@ -49,11 +64,68 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
   const error = typeof sp.error === "string" ? sp.error.slice(0, 300) : "";
   const link = verifyPayLinkToken(token);
   await ensureDemoSessionUser();
-  const user = link ? await getDb().getUser(link.userId) : null;
+  const db = getDb();
+  const user = link ? await db.getUser(link.userId) : null;
   if (!link || !user) return <InvalidLink />;
-  const sub = await getDb().getSubscription(user.id);
-  if (sub?.status === "active" && isPaidPlan(sub.plan)) return <CardUpdate user={user} sub={sub} plan={sub.plan} />;
-  return <ChoosePlan user={user} sub={sub} token={token} error={error} now={new Date()} />;
+  const now = new Date();
+  const read = { db, now: () => now };
+  const self = `/pay/${encodeURIComponent(token)}`;
+  const cardHref = `${self}?view=card`;
+  const cardUpdateHref = cardLinkFor(process.env.APP_URL || "http://localhost:3000", user.id);
+  const notice = isUpgradeNotice(sp.r) ? sp.r : null;
+  const sub = await db.getSubscription(user.id);
+  const offerData = (o: WebUpgradeOffer): OfferFaceData => ({ ...o, periodEndDay: dayOf(o.periodEnd.toISOString(), user.timezone) });
+
+  // the result of [לשדרג עכשיו] (the action redirects here; a refresh shows the same result, never a second charge)
+  const upgradeId = typeof sp.upgrade === "string" ? sp.upgrade : null;
+  const result = upgradeId ? await webUpgradeResult({ db }, user.id, upgradeId) : null;
+  if (result?.status === "succeeded") {
+    return <UpgradeDoneFace email={user.email} amountIls={result.amountIls} vatIls={result.vatIls} nextAmountIls={result.nextAmountIls} nextDay={dayOf(result.nextChargeAt.toISOString(), user.timezone)} waHref={waHref()} />;
+  }
+  if (result?.status === "processing") return <UpgradePendingFace href={`${self}?upgrade=${encodeURIComponent(upgradeId!)}`} />;
+  if (result?.status === "unknown") return <UpgradeUnknownFace />;
+  if (result?.status === "failed") {
+    const again = await webUpgradeView(read, user, sub);
+    return (
+      <UpgradeFailedFace
+        token={token}
+        failure={result.failure}
+        ccode={result.ccode}
+        last4={result.last4}
+        retry={again.kind === "offer" ? offerData(again.offer) : null}
+        action={upgradeAction}
+        cardHref={cardHref}
+        cardUpdateHref={cardUpdateHref}
+      />
+    );
+  }
+
+  if (sub?.status === "active" && isPaidPlan(sub.plan)) {
+    const view = sub.plan === "basic" ? await webUpgradeView(read, user, sub) : null;
+    if (view?.kind === "offer" && sp.view !== "card") {
+      return <UpgradeOfferFace name={firstName(user)} token={token} offer={offerData(view.offer)} cardHref={cardHref} action={upgradeAction} notice={notice} error={error} />;
+    }
+    return (
+      <CardUpdateFace
+        plan={sub.plan}
+        nextDay={sub.next_charge_at ? dayOf(sub.next_charge_at, user.timezone) : null}
+        cardUpdateHref={cardUpdateHref}
+        upgradeHref={view?.kind === "offer" ? self : null}
+        block={view?.kind === "blocked" ? { reason: view.reason, last4: view.last4 } : null}
+        notice={notice === "expired" ? "changed" : notice}
+      />
+    );
+  }
+  return <ChoosePlan user={user} sub={sub} token={token} error={error} now={now} />;
+}
+
+/** The way back to the chat (null when no public number is configured: the page still says what happened). */
+function waHref(): string | null {
+  try {
+    return `https://wa.me/${publicWaNumber()}`;
+  } catch {
+    return null;
+  }
 }
 
 const firstName = (user: UserRow) => (user.name ?? "").trim().split(/\s+/)[0] ?? "";
@@ -117,41 +189,6 @@ function ChoosePlan({ user, sub, token, error, now }: { user: UserRow; sub: Subs
           , כולל חיוב חוזר חודשי עד לביטול.
         </p>
       </div>
-    </>
-  );
-}
-
-/* ---------- active subscription: a new card for the next charges ---------- */
-
-function CardUpdate({ user, sub, plan }: { user: UserRow; sub: SubscriptionRow; plan: PaidPlan }) {
-  const appUrl = process.env.APP_URL || "http://localhost:3000";
-  const next = sub.next_charge_at ? dayOf(sub.next_charge_at, user.timezone) : null;
-  return (
-    <>
-      <PayHeading tag="המנוי פעיל." title="עדכון כרטיס">
-        <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">כרטיס חדש לחיובים הבאים. את הפרטים מקלידים בדף המאובטח של HYP, והכרטיס נבדק בלי חיוב.</p>
-      </PayHeading>
-      <PayPaper pose="front">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="font-heading text-[1.5rem] leading-tight font-bold">מסלול {PLANS[plan].nameHe}</h2>
-          <span className="flex-none rounded-full bg-ink px-3 py-1 text-[0.8125rem] font-semibold text-cream">פעיל</span>
-        </div>
-        <p className="mt-1.5 text-[1rem] text-ink-muted">{PLANS[plan].priceIls} ₪ לחודש, כולל מע״מ</p>
-        {next ? (
-          <dl className="mt-6 flex items-baseline justify-between gap-4 border-t border-ink/12 pt-5 text-[0.9375rem]">
-            <dt className="text-ink-muted">החיוב הבא</dt>
-            <dd className="font-semibold">{next}</dd>
-          </dl>
-        ) : null}
-        {/* a plain link, never prefetched: every open of /pay/card/<token> creates a fresh HYP page */}
-        <a href={cardLinkFor(appUrl, user.id)} className={ctaClass({ tone: "ink", block: true, className: "mt-7" })}>
-          לעדכון הכרטיס
-        </a>
-        <p className="mt-3 text-[0.875rem] text-ink-muted">אימות בלבד, בלי חיוב.</p>
-      </PayPaper>
-      <p className="mt-8 max-w-[38rem] text-[0.9375rem] leading-relaxed text-cream-muted">
-        מעבר בין מסלולים ושאר שינויי המנוי: בשיחה עם {BRAND.name}, לכתוב ״שדרוג״ או ״מעבר לבסיסי״.
-      </p>
     </>
   );
 }

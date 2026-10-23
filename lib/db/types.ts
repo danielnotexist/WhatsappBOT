@@ -297,7 +297,7 @@ export interface BillingApprovalRow {
   /** the amount shown to the user, VAT included — charged exactly as shown */
   amount_ils: number;
   details: Record<string, unknown>;
-  /** the linked number the offer was sent to; null only for `renewal` */
+  /** the linked number the offer was sent to; null only for `renewal` and for an upgrade approved on the pay page (approved_msg_id "web:…") */
   phone_e164: string | null;
   status: BillingApprovalStatus;
   expires_at: string;
@@ -316,6 +316,17 @@ export interface NewBillingApproval {
   amount_ils: number;
   details?: Record<string, unknown>;
   phone_e164: string;
+}
+
+/** An upgrade approved on the pay page (/pay/<token>) — see Db.openWebCharge. */
+export interface NewWebCharge {
+  /** the single-use nonce of the form that was submitted (a UUID minted when the page was rendered) */
+  id: string;
+  user_id: string;
+  kind: "upgrade";
+  plan: "pro";
+  amount_ils: number;
+  details?: Record<string, unknown>;
 }
 
 export interface LinkAttemptResult {
@@ -574,6 +585,12 @@ export interface Db {
   getBillingApproval(id: string): Promise<BillingApprovalRow | null>;
   /** the monthly charge's lock: inserts a `renewal` row as processing; null when another charge of the user is open */
   openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null>;
+  /**
+   * The pay page's [לשדרג עכשיו] (migration 0012): an `upgrade` approval inserted already claimed (processing) — the form
+   * post is the press. `id` = the form's single-use nonce, approved_msg_id = "web:<id>", no phone. null when that id
+   * already exists (a replayed / double-submitted form) or another charge of the user is open.
+   */
+  openWebCharge(row: NewWebCharge): Promise<BillingApprovalRow | null>;
   /** SQL claim_billing_approval(): pending + not expired + owner + same number → processing (atomic); else null */
   claimBillingApproval(id: string, claim: { userId: string; phoneE164: string; waMessageId: string }): Promise<BillingApprovalRow | null>;
   /** conditional update: only when the current status is one of `fromStatus` (when given) */
