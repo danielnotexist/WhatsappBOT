@@ -123,8 +123,6 @@ const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.atten
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */
 const byStart = (a: DayEvent, b: DayEvent) => (a.allDay === b.allDay ? (a.allDay ? 0 : a.start.slice(11, 16).localeCompare(b.start.slice(11, 16))) : a.allDay ? -1 : 1);
 const meetingLine = (e: DayEvent) => (e.allDay ? `• כל היום — ${e.title || "(ללא כותרת)"}` : `• ${e.start.slice(11, 16)} ${e.title || "(ללא כותרת)"}`);
-/** The free-text summary adds the join link under an online meeting (the template's 300 characters cannot hold links). */
-const meetingWithLink = (e: DayEvent) => (e.joinUrl ? `${meetingLine(e)}\n${copy["act.cal.join_link"](e.joinUrl)}` : meetingLine(e));
 /**
  * Sender and subject come from outside (any sender, RFC 2047 can encode newlines) and land in the assistant's own
  * message: one sanitized line each, capped — never extra lines that look like a section of the summary.
@@ -140,8 +138,8 @@ export interface MorningSummary {
   dayLabel: string;
   /** one line per meeting (the template) */
   meetings: string[];
-  /** the same meetings with the join link of an online meeting under it (the free-text message) */
-  meetingsWithLinks?: string[];
+  /** the join link of each of `meetings` (same index; null = not an online meeting), for the free-text message only */
+  meetingLinks?: (string | null)[];
   emails: string[];
   reminders: string[];
   closer: string;
@@ -206,7 +204,7 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   }
   const sorted = [...dayEvents].sort(byStart);
   const meetings = capped(sorted.map(meetingLine), MAX_MEETINGS);
-  const meetingsWithLinks = capped(sorted.map(meetingWithLink), MAX_MEETINGS);
+  const meetingLinks = sorted.slice(0, MAX_MEETINGS).map((e) => e.joinUrl);
   // both mailboxes, newest first
   const emails = awaiting
     .sort((a, b) => Date.parse(b.receivedDateTime) - Date.parse(a.receivedDateTime))
@@ -220,11 +218,30 @@ export async function buildMorningSummary(deps: MorningDeps, user: UserRow, day:
   });
 
   const base = { meetings, emails, reminders, connected };
-  return { dayLabel: dayLabelHe(day), ...base, meetingsWithLinks, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
+  return { dayLabel: dayLabelHe(day), ...base, meetingLinks, closer: pickCloser(base), empty: !meetings.length && !emails.length && !reminders.length };
 }
 
+/**
+ * The free-text message keeps well under WhatsApp's 4,096 characters (the sender cuts the rest, which would split a
+ * link and drop the e-mails and the closer). Join links are long (a Teams link is ~300 characters): they are added
+ * under the meetings in order while the whole message stays within this budget; the meetings themselves always stay.
+ */
+export const MORNING_TEXT_BUDGET = 3_500;
+
 export function renderMorningText(s: MorningSummary): string {
-  return s.empty ? copyM5["act.morning.empty"](s.dayLabel) : copyM5["act.morning.summary"]({ ...s, meetings: s.meetingsWithLinks ?? s.meetings });
+  if (s.empty) return copyM5["act.morning.empty"](s.dayLabel);
+  const meetings = [...s.meetings];
+  const render = () => copyM5["act.morning.summary"]({ ...s, meetings });
+  for (const [i, url] of (s.meetingLinks ?? []).entries()) {
+    if (!url || i >= meetings.length) continue;
+    const plain = meetings[i]!;
+    meetings[i] = `${plain}\n${copy["act.cal.join_link"](url)}`;
+    if (render().length > MORNING_TEXT_BUDGET) {
+      meetings[i] = plain;
+      break;
+    }
+  }
+  return render();
 }
 
 // ---------------------------------------------------------------------------------------------

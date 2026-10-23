@@ -32,3 +32,17 @@ export function safeJoinUrl(raw: unknown): string | null {
   const host = url.hostname.toLowerCase();
   return MEETING_HOSTS.some((h) => host === h || host.endsWith(`.${h}`)) ? s : null;
 }
+
+/** The tenant id of personal Microsoft accounts (outlook.com, hotmail.com, live.com) in id tokens. */
+export const MSA_CONSUMER_TENANT = "9188040d-6c67-4c5b-b112-36a304b66dad";
+const CONSUMER_DOMAIN = /@(outlook|hotmail|live|msn)\.[a-z.]+$/i;
+
+/**
+ * A personal Microsoft account: Graph lists no "teamsForBusiness" for it, and Teams meetings need a work or school
+ * account. Anything else that lacks Teams (a work account without a Teams license, a tenant policy) is not explained
+ * as "personal".
+ */
+export function isPersonalMicrosoftAccount(c: { tenant_id?: string | null; account_email?: string | null } | null | undefined): boolean {
+  if (!c) return false;
+  return c.tenant_id === MSA_CONSUMER_TENANT || CONSUMER_DOMAIN.test(c.account_email?.trim() ?? "");
+}

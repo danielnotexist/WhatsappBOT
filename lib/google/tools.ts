@@ -1,4 +1,5 @@
-import { onlineMeetingField, type Tool } from "@/lib/ai/tools";
+import { randomBytes } from "node:crypto";
+import { NOT_ORGANIZER, alreadyOnline, onlineMeetingField, onlineMeetingUpdateField, type Tool } from "@/lib/ai/tools";
 import { copy } from "@/lib/copy/bot";
 import { GOOGLE_LABEL, gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionRow, PendingActionRow } from "@/lib/db/types";
@@ -32,6 +33,9 @@ export interface GoogleToolDeps {
 
 const str = (description: string) => ({ type: "string", description });
 
+/** The attendees a change reaches: everyone on the event but the user, as lower-case addresses. */
+const othersOf = (e: GoogleEvent) => e.attendees.filter((a) => !a.self).map((a) => a.email.trim().toLowerCase()).filter(Boolean);
+
 const compactEvent = (e: GoogleEvent) => ({
   id: e.id,
   title: e.summary,
@@ -64,7 +68,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
   const tools: Tool[] = [];
   /** Who a change or a cancellation of an event reaches (its attendees but the user), for an agent limited to a list. */
   const attendeesOf = async (id: string): Promise<string[] | { error: string }> =>
-    (await guard(async (g) => (await g.getEvent(id, deps.timeZone)).attendees.filter((a) => !a.self).map((a) => a.email.trim().toLowerCase()).filter(Boolean))) as string[] | { error: string };
+    (await guard(async (g) => othersOf(await g.getEvent(id, deps.timeZone)))) as string[] | { error: string };
 
   if (hasScope(granted, GOOGLE_SCOPES.calendarEvents)) {
     tools.push(
@@ -126,17 +130,38 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
             start: str("שעת התחלה חדשה HH:MM או ריק"),
             end: str("שעת סיום חדשה HH:MM או ריק"),
             location: str("מקום חדש או ריק"),
-            online_meeting: { type: "boolean", description: "true כדי להוסיף לפגישה קישור Google Meet (כשמבקשים להפוך אותה לפגישה מקוונת או לשלוח קישור למשתתפים). false = בלי שינוי בקישור." },
+            online_meeting: onlineMeetingUpdateField("Google Meet"),
           },
           required: ["id", "subject", "date", "start", "end", "location", "online_meeting"],
           additionalProperties: false,
         },
         run: async (input, ctx) => {
           const id = String(input.id ?? "");
-          const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
-          if (attendees && !Array.isArray(attendees)) return attendees;
-          const pending = await ctx.createPending("update_event", { provider: "google", id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(input.online_meeting === true ? { online_meeting: true } : {}), ...(attendees ? { current_attendees: attendees } : {}) });
-          return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
+          // the draft names the meeting and who hears about the change, so the event is read first (no event, no draft)
+          const current = (await guard((g) => g.getEvent(id, deps.timeZone))) as GoogleEvent | { error: string };
+          if ("error" in current) return current;
+          const fields = { subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? "") };
+          const changes = Object.values(fields).some((v) => v.trim());
+          const wantsLink = input.online_meeting === true;
+          // a meeting with any conference keeps it: a new Meet request would replace the link the attendees already have
+          if (wantsLink && current.hasConference && !changes) return alreadyOnline(current.joinUrl);
+          if (wantsLink && !current.hasConference && current.organizer?.self === false) return NOT_ORGANIZER;
+          const addLink = wantsLink && !current.hasConference;
+          const others = othersOf(current);
+          const when = current.isAllDay ? { date: current.start.slice(0, 10), time: "" } : wallClock(current.start);
+          const pending = await ctx.createPending("update_event", {
+            provider: "google",
+            id,
+            ...fields,
+            ...(addLink ? { online_meeting: true } : {}),
+            current_subject: current.summary,
+            current_date: when.date,
+            current_start: when.time,
+            current_attendee_count: others.length,
+            ...(current.joinUrl ? { current_join_url: current.joinUrl } : {}),
+            ...(ctx.checksRecipients ? { current_attendees: others } : {}),
+          });
+          return { status: "pending_approval", pending_action_id: pending.id, note: `השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר.${wantsLink && !addLink ? " לפגישה כבר יש קישור, ולא יתווסף קישור חדש." : ""}` };
         },
       },
       {
@@ -295,20 +320,34 @@ async function driveAttachment(g: GoogleClient, fileId: string): Promise<MimeAtt
   return { filename: file.name, contentType: contentType?.split(";")[0] ?? file.mimeType, bytes };
 }
 
-/** Google refused the conference itself (e.g. "Invalid conference type value"), not auth, quota or a vanished event. */
+/**
+ * Google refused the conference itself ("Invalid conference type value." when Meet is off for the account or the
+ * type is not allowed), not auth, quota or a vanished event. Matched on the API's own message only: the full message
+ * also carries the request path, and an event id (base32hex) can spell "meet" or "conference".
+ */
 function isMeetError(e: unknown): boolean {
-  return e instanceof GoogleApiError && e.status === 400 && /conference|hangout|meet/i.test(e.message);
+  return e instanceof GoogleApiError && e.status === 400 && e.reason === "invalid" && /conference/i.test(e.apiMessage);
 }
 
 /**
- * "\nקישור לפגישה: …" after the confirmation. Google creates the Meet asynchronously: a pending request is read once
- * more; still pending → the link will show in the event; failed → said plainly (the event itself was created).
+ * The Meet link of an event after the confirmation. Google creates the Meet asynchronously: a pending request is read
+ * once more; still pending → the link will show in the event; failed → said plainly (the event itself was created).
  */
-async function meetLinkLine(google: GoogleClient, e: GoogleEvent, timeZone: string): Promise<string> {
+async function meetLink(google: GoogleClient, e: GoogleEvent, timeZone: string): Promise<{ url: string } | { later: true } | { missing: true }> {
   let ev = e;
   if (!ev.joinUrl && ev.conferenceStatus === "pending") ev = await google.getEvent(e.id, timeZone).catch(() => e);
-  if (ev.joinUrl) return `\n${copy["act.cal.join_link"](ev.joinUrl)}`;
-  return `\n${ev.conferenceStatus === "pending" ? copy["act.cal.join_link_later"]() : copy["act.cal.online_missing"]("google")}`;
+  if (ev.joinUrl) return { url: ev.joinUrl };
+  return ev.conferenceStatus === "pending" ? { later: true } : { missing: true };
+}
+
+/** The reply of an approved new meeting: the confirmation, the link (or why there is none), the invitations. */
+function createdReply(title: string, date: string, start: string, link: Awaited<ReturnType<typeof meetLink>> | null, invited: boolean): string {
+  const lines = [copy["act.cal.created"](title, dateHe(date), start)];
+  if (link && "url" in link) lines.push(copy["act.cal.join_link"](link.url));
+  if (link && "later" in link) lines.push(copy["act.cal.join_link_later"]());
+  if (link && "missing" in link) lines.push(copy["act.cal.online_missing"]("google", invited));
+  else if (invited) lines.push("ההזמנות יצאו למשתתפים.");
+  return lines.join("\n");
 }
 
 const splitEmails = (s: unknown) =>
@@ -347,22 +386,31 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
       const end = TIME_RE.test(String(p.end ?? "")) && String(p.end) > start ? String(p.end) : addMinutesLocal(date, start, 60).time;
       const attendees = Array.isArray(p.attendees) ? (p.attendees as unknown[]).map(String).filter(isValidEmail) : [];
       const online = p.online_meeting === true;
+      const title = String(p.title ?? "");
+      // our own event id (hex ⊂ base32hex): after an error we can tell whether the event exists anyway
+      const id = randomBytes(16).toString("hex");
       let created: GoogleEvent;
       try {
-        created = await google.createEvent({ summary: String(p.title ?? ""), start: `${date}T${start}:00`, end: `${date}T${end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online });
+        created = await google.createEvent({ id, summary: title, start: `${date}T${start}:00`, end: `${date}T${end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online });
       } catch (e) {
-        if (online && isMeetError(e)) return onlineMeetingUnavailable(action, "google");
-        throw e;
+        if (!(online && isMeetError(e))) throw e;
+        // the Meet was refused; if the event was created without it, the invitations went out: say so, offer nothing new
+        const existing = await google.getEvent(id, timeZone).catch(() => null);
+        if (!existing) return onlineMeetingUnavailable(action, "google");
+        return { ok: true, message: createdReply(title, date, start, { missing: true }, attendees.length > 0) };
       }
-      const link = online ? await meetLinkLine(google, created, timeZone) : "";
-      return `${copy["act.cal.created"](String(p.title ?? ""), dateHe(date), start)}${link}${attendees.length ? "\nההזמנות יצאו למשתתפים." : ""}`;
+      return createdReply(title, date, start, online ? await meetLink(google, created, timeZone) : null, attendees.length > 0);
     }),
     update_event: wrap("update_event", async ({ google, timeZone }, p, action) => {
       const id = String(p.id ?? "");
       const current = await google.getEvent(id, timeZone);
-      // a second create request would replace the Meet the attendees already have
-      const online = p.online_meeting === true;
-      const patch: Parameters<GoogleClient["patchEvent"]>[1] = { timeZone, ...(online && !current.joinUrl ? { onlineMeeting: true } : {}) };
+      const wantsLink = p.online_meeting === true;
+      // any conference already on the event (even one whose link is not on the safe list, or a request still pending)
+      // stays: a new create request would replace the conference the attendees already have
+      const addLink = wantsLink && !current.hasConference;
+      // only the organizer's conference reaches the attendees (an attendee's copy is not theirs to change)
+      if (addLink && current.organizer?.self === false) return { ok: false, message: copy["act.cal.online_organizer_only"]() };
+      const patch: Parameters<GoogleClient["patchEvent"]>[1] = { timeZone, ...(addLink ? { onlineMeeting: true } : {}) };
       if (p.subject) patch.summary = String(p.subject);
       if (p.location) patch.location = String(p.location);
       const newDate = DATE_RE.test(String(p.date ?? "")) ? String(p.date) : "";
@@ -380,26 +428,34 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
         patch.start = `${startPair.date}T${startPair.time}:00`;
         patch.end = `${endPair.date}T${endPair.time}:00`;
       }
-      const changed = Boolean(patch.summary || patch.location || patch.start || patch.end);
+      const moved = Boolean(patch.start || patch.end);
+      const changed = Boolean(patch.summary || patch.location || moved);
       // only the link was asked for and the meeting already has one: nothing to change (and no update e-mail to guests)
-      if (online && current.joinUrl && !changed) return copy["act.cal.join_link"](current.joinUrl);
+      if (wantsLink && !addLink && !changed) return copy["act.cal.online_exists"](current.joinUrl);
       let updated: GoogleEvent;
       try {
         updated = await google.patchEvent(id, patch);
       } catch (e) {
-        if (patch.onlineMeeting && isMeetError(e)) return onlineMeetingUnavailable(action, "google");
+        if (addLink && isMeetError(e)) return onlineMeetingUnavailable(action, "google");
         throw e;
       }
       const others = updated.attendees.filter((a) => !a.self).length;
       const when = wallClock(patch.start ?? current.start);
-      const line =
-        online && !changed
-          ? copy["act.cal.online_added"](updated.summary, "google")
-          : updated.isAllDay
+      const lines = [
+        moved
+          ? updated.isAllDay
             ? gcopy["g.cal.moved_all_day"](updated.summary, dateHe(updated.start))
-            : copy["act.cal.moved"](updated.summary, dateHe(when.date), when.time);
-      const link = online ? (current.joinUrl ? `\n${copy["act.cal.join_link"](current.joinUrl)}` : await meetLinkLine(google, updated, timeZone)) : "";
-      return `${line}${link}${others ? `\nעדכון נשלח ל-${others} משתתפים.` : ""}`;
+            : copy["act.cal.moved"](updated.summary, dateHe(when.date), when.time)
+          : addLink && !changed
+            ? copy["act.cal.online_added"](updated.summary, "google")
+            : copy["act.cal.updated"](updated.summary),
+      ];
+      if (addLink) {
+        const link = await meetLink(google, updated, timeZone);
+        lines.push("url" in link ? copy["act.cal.join_link"](link.url) : "later" in link ? copy["act.cal.join_link_later"]() : copy["act.cal.online_missing"]("google"));
+      } else if (wantsLink) lines.push(copy["act.cal.online_exists"](current.joinUrl));
+      if (others) lines.push(`עדכון נשלח ל-${others} משתתפים.`);
+      return lines.join("\n");
     }),
     delete_event: wrap("delete_event", async ({ google }, p) => {
       await google.deleteEvent(String(p.id ?? ""));

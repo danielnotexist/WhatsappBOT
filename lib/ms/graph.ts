@@ -54,6 +54,10 @@ export interface GraphEvent {
   bodyPreview: string;
   /** the event has online meeting information (Teams / Skype) */
   isOnlineMeeting: boolean;
+  /** "teamsForBusiness", "skypeForBusiness", "skypeForConsumer" or "unknown"; null when Graph did not say */
+  onlineMeetingProvider: string | null;
+  /** the user organizes the event (only the organizer's changes reach the attendees); null when Graph did not say */
+  isOrganizer: boolean | null;
   /** `onlineMeeting.joinUrl` when it is a safe meeting link (lib/online-meeting.ts), else null */
   joinUrl: string | null;
 }
@@ -117,7 +121,7 @@ export function htmlToText(html: string): string {
 }
 
 const MSG_SELECT = "id,subject,from,toRecipients,receivedDateTime,isRead,hasAttachments,bodyPreview,webLink,conversationId";
-const EVENT_SELECT = "id,subject,start,end,isAllDay,location,attendees,organizer,webLink,bodyPreview,isOnlineMeeting,onlineMeeting";
+const EVENT_SELECT = "id,subject,start,end,isAllDay,location,attendees,organizer,isOrganizer,webLink,bodyPreview,isOnlineMeeting,onlineMeetingProvider,onlineMeeting";
 
 export class GraphClient {
   private readonly fetchImpl: typeof fetch;
@@ -270,6 +274,8 @@ export class GraphClient {
       webLink: e.webLink ?? null,
       bodyPreview: e.bodyPreview ?? "",
       isOnlineMeeting: Boolean(e.isOnlineMeeting),
+      onlineMeetingProvider: typeof e.onlineMeetingProvider === "string" ? e.onlineMeetingProvider : null,
+      isOrganizer: typeof e.isOrganizer === "boolean" ? e.isOrganizer : null,
       joinUrl: safeJoinUrl(e.onlineMeeting?.joinUrl),
     };
   }
@@ -299,13 +305,15 @@ export class GraphClient {
 
   /**
    * The online meeting providers the default calendar allows (GET /me/calendar, covered by Calendars.ReadWrite).
-   * A work or school account with Teams lists "teamsForBusiness"; a personal Microsoft account does not. Null when
-   * the answer is unknown (the caller then tries and handles the error); an expired connection still throws.
+   * A work or school account with Teams lists "teamsForBusiness"; a personal Microsoft account lists
+   * "skypeForConsumer" (and Graph then creates the event without a meeting: 201 with onlineMeeting null). A successful
+   * answer without the list counts as none allowed. Null only when the request itself failed; an expired connection
+   * still throws.
    */
   async onlineMeetingProviders(): Promise<string[] | null> {
     try {
-      const c = await this.request<{ allowedOnlineMeetingProviders?: string[] }>("GET", "/me/calendar?$select=allowedOnlineMeetingProviders,defaultOnlineMeetingProvider");
-      return Array.isArray(c?.allowedOnlineMeetingProviders) ? c.allowedOnlineMeetingProviders : null;
+      const c = await this.request<{ allowedOnlineMeetingProviders?: unknown }>("GET", "/me/calendar?$select=allowedOnlineMeetingProviders,defaultOnlineMeetingProvider");
+      return Array.isArray(c?.allowedOnlineMeetingProviders) ? c.allowedOnlineMeetingProviders.filter((p): p is string => typeof p === "string") : [];
     } catch (e) {
       if (e instanceof GraphError && e.unauthorized) throw e;
       return null;
@@ -406,6 +414,8 @@ interface RawEvent {
   webLink?: string;
   bodyPreview?: string;
   isOnlineMeeting?: boolean;
+  onlineMeetingProvider?: string;
+  isOrganizer?: boolean;
   onlineMeeting?: { joinUrl?: string } | null;
 }
 interface RawDriveItem {

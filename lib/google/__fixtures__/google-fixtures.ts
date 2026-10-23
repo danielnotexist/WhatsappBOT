@@ -269,9 +269,10 @@ export interface GoogleFixtureState {
   denied: Set<"calendar" | "drive" | "gmail" | "gmail_read">;
   /**
    * A Meet create request (conferenceData.createRequest with conferenceDataVersion=1): "success" answers with the link,
-   * "pending" answers without it and the next events.get has it, "refuse" answers 400 (Google refused the conference).
+   * "pending" answers without it and the next events.get has it, "refuse" answers 400 (Google refused the conference),
+   * "refuse_created" answers the same 400 but an insert still created the event without Meet (reported in the wild).
    */
-  conferenceMode: "success" | "pending" | "refuse";
+  conferenceMode: "success" | "pending" | "refuse" | "refuse_created";
 }
 
 /** A tiny evaluator for the Gmail search syntax the app uses (in:, is:unread, from:, subject:, newer_than:, category:, has:attachment, words). */
@@ -367,7 +368,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
   const conferenceFor = (url: URL, body: unknown): Response | Partial<RawFixtureEvent> | null => {
     const req = (body as { conferenceData?: { createRequest?: { requestId?: string; conferenceSolutionKey?: { type?: string } } } } | null)?.conferenceData?.createRequest;
     if (url.searchParams.get("conferenceDataVersion") !== "1" || !req) return null;
-    if (state.conferenceMode === "refuse" || req.conferenceSolutionKey?.type !== "hangoutsMeet") return apiError(400, "invalid", "Invalid conference type value.", { status: "INVALID_ARGUMENT" });
+    if (state.conferenceMode === "refuse" || state.conferenceMode === "refuse_created" || req.conferenceSolutionKey?.type !== "hangoutsMeet") return apiError(400, "invalid", "Invalid conference type value.", { status: "INVALID_ARGUMENT" });
     const code = `fix-meet-${++n}`;
     const done = fixtureMeetConference(code, req.requestId ?? "");
     if (state.conferenceMode === "success") return done;
@@ -431,11 +432,13 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       }
       if (!id && method === "POST") {
         const b = body as Record<string, unknown> & { start: RawFixtureEvent["start"]; end: RawFixtureEvent["end"]; attendees?: { email: string }[] };
+        // a client-chosen id (base32hex) is kept; a second insert with it answers 409 like the API
+        if (typeof b.id === "string" && state.events.some((x) => x.id === b.id)) return apiError(409, "duplicate", "The requested identifier already exists.", { status: "ALREADY_EXISTS" });
         const conference = conferenceFor(url, b);
-        if (conference instanceof Response) return conference;
+        if (conference instanceof Response && state.conferenceMode !== "refuse_created") return conference;
         const e: RawFixtureEvent = {
           kind: "calendar#event",
-          id: `gevnew${++n}`,
+          id: typeof b.id === "string" ? b.id : `gevnew${++n}`,
           status: "confirmed",
           htmlLink: `https://www.google.com/calendar/event?eid=new${n}`,
           summary: String(b.summary ?? ""),
@@ -445,9 +448,10 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
           end: withOffset(b.end),
           organizer: { email: FIXTURE_GOOGLE_ACCOUNT.email, self: true },
           ...(b.attendees ? { attendees: b.attendees.map((a) => ({ email: a.email, responseStatus: "needsAction" })) } : {}),
-          ...(conference ?? {}),
+          ...(conference instanceof Response ? {} : (conference ?? {})),
         };
         state.events.push(e);
+        if (conference instanceof Response) return conference;
         return json(e);
       }
       if (id) {

@@ -50,6 +50,7 @@ export interface FixtureGraphEvent {
   organizer: { emailAddress: { name: string; address: string } };
   webLink: string | null;
   bodyPreview: string;
+  isOrganizer?: boolean;
   isOnlineMeeting?: boolean;
   onlineMeetingProvider?: string;
   onlineMeeting?: { joinUrl: string } | null;
@@ -65,6 +66,7 @@ export const FIXTURE_EVENTS: FixtureGraphEvent[] = [
     location: { displayName: "בית משפט השלום, ויצמן 1" },
     attendees: [],
     organizer: { emailAddress: { name: "דנה לוי", address: "dana@levi-law.co.il" } },
+    isOrganizer: true,
     webLink: null,
     bodyPreview: "",
   },
@@ -77,6 +79,7 @@ export const FIXTURE_EVENTS: FixtureGraphEvent[] = [
     location: { displayName: "" },
     attendees: [{ emailAddress: { name: "ברק", address: "barak@cpa-barak.co.il" }, status: { response: "accepted" } }],
     organizer: { emailAddress: { name: "דנה לוי", address: "dana@levi-law.co.il" } },
+    isOrganizer: true,
     webLink: null,
     bodyPreview: "תיק המע״מ",
     isOnlineMeeting: true,
@@ -104,7 +107,8 @@ export interface FixtureState {
   unauthorizedOnce: boolean;
   /**
    * GET /me/calendar allowedOnlineMeetingProviders. A work account lists teamsForBusiness; a personal Microsoft
-   * account does not (e.g. ["skypeForConsumer"]), and a create / update asking for Teams then answers 400.
+   * account does not (["skypeForConsumer"]). Graph does not refuse a Teams request on such a calendar: the event is
+   * created (201) without a meeting (isOnlineMeeting false, onlineMeeting null), as Microsoft Q&A 1689057 reports.
    */
   onlineMeetingProviders: string[];
 }
@@ -113,9 +117,10 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
   const state: FixtureState = { calls: [], sent: [], events: FIXTURE_EVENTS.map((e) => ({ ...e })), subscriptions: [], unauthorizedOnce: false, onlineMeetingProviders: ["teamsForBusiness", "skypeForBusiness"] };
   let n = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-  // Graph's exact wording for an unsupported provider is not documented; the fixture names the provider in the message
-  const onlineRejected = (provider: string) => json({ error: { code: "ErrorInvalidArgument", message: `The online meeting provider '${provider}' is not supported for this calendar.` } }, 400);
   const teamsMeeting = (id: string) => ({ isOnlineMeeting: true, onlineMeetingProvider: "teamsForBusiness", onlineMeeting: { joinUrl: `https://teams.microsoft.com/l/meetup-join/19%3ameeting_${id}%40thread.v2/0?context=%7b%22Tid%22%3a%22fixture-tenant%22%7d` } });
+  /** what a Teams request gets: the meeting when the calendar allows the provider, else the event without one */
+  const onlineFor = (id: string, body: { isOnlineMeeting?: boolean; onlineMeetingProvider?: string }) =>
+    !body.isOnlineMeeting ? {} : state.onlineMeetingProviders.includes(body.onlineMeetingProvider ?? "") ? teamsMeeting(id) : { isOnlineMeeting: false, onlineMeetingProvider: "unknown", onlineMeeting: null };
   const listShape = (m: (typeof FIXTURE_MESSAGES)[number]) => {
     const copy: Record<string, unknown> = { ...m };
     delete copy.body;
@@ -166,9 +171,8 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
     if (p === "/me/calendar") return json({ id: "AQMkCAL", name: "Calendar", allowedOnlineMeetingProviders: state.onlineMeetingProviders, defaultOnlineMeetingProvider: state.onlineMeetingProviders[0] ?? "unknown" });
     if (p === "/me/calendarView") return json({ value: state.events });
     if (p === "/me/events" && method === "POST") {
-      if (body.isOnlineMeeting && !state.onlineMeetingProviders.includes(body.onlineMeetingProvider)) return onlineRejected(body.onlineMeetingProvider);
       const id = `AAMkNEW${++n}`;
-      const e: FixtureGraphEvent = { id, subject: body.subject, start: body.start, end: body.end, isAllDay: Boolean(body.isAllDay), location: body.location ?? { displayName: "" }, attendees: (body.attendees ?? []).map((a: { emailAddress: { address: string } }) => ({ emailAddress: a.emailAddress, status: { response: "none" } })), organizer: FIXTURE_EVENTS[0]!.organizer, webLink: null, bodyPreview: body.body?.content ?? "", ...(body.isOnlineMeeting ? teamsMeeting(id) : {}) };
+      const e: FixtureGraphEvent = { id, subject: body.subject, start: body.start, end: body.end, isAllDay: Boolean(body.isAllDay), location: body.location ?? { displayName: "" }, attendees: (body.attendees ?? []).map((a: { emailAddress: { address: string } }) => ({ emailAddress: a.emailAddress, status: { response: "none" } })), organizer: FIXTURE_EVENTS[0]!.organizer, isOrganizer: true, webLink: null, bodyPreview: body.body?.content ?? "", ...onlineFor(id, body) };
       state.events.push(e);
       return json(e, 201);
     }
@@ -183,8 +187,8 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
       }
       if (method === "GET") return json(e);
       if (method === "PATCH") {
-        if (body.isOnlineMeeting && !state.onlineMeetingProviders.includes(body.onlineMeetingProvider)) return onlineRejected(body.onlineMeetingProvider);
-        Object.assign(e, { ...(body.subject !== undefined ? { subject: body.subject } : {}), ...(body.start ? { start: body.start } : {}), ...(body.end ? { end: body.end } : {}), ...(body.location ? { location: body.location } : {}), ...(body.isOnlineMeeting && !e.isOnlineMeeting ? teamsMeeting(e.id) : {}) });
+        // Graph ignores a Teams request on an event that already has an online meeting
+        Object.assign(e, { ...(body.subject !== undefined ? { subject: body.subject } : {}), ...(body.start ? { start: body.start } : {}), ...(body.end ? { end: body.end } : {}), ...(body.location ? { location: body.location } : {}), ...(body.isOnlineMeeting && !e.isOnlineMeeting ? onlineFor(e.id, body) : {}) });
         return json(e);
       }
       if (method === "DELETE") {

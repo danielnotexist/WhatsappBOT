@@ -141,7 +141,7 @@ describe("Google tools in the assistant", () => {
     expect(await expired.find((t) => t.name === "gcal_list_events")!.run({ from_date: "2026-10-21", to_date: "2026-10-21", query: "" }, ctx)).toEqual({ error: "connection_expired" });
   });
 
-  it("a change or a cancellation looks up who it reaches only when the agent is limited to a list (without the user)", async () => {
+  it("a change reads the meeting its draft names; who it reaches is kept (and a cancellation looks it up) only for an agent limited to a list (without the user)", async () => {
     const db = new MemoryDb();
     const user = await db.createUser("a@b.co");
     const fixture = createGoogleFixture();
@@ -154,7 +154,12 @@ describe("Google tools in the assistant", () => {
 
     await run("gcal_update_event", move, false);
     expect(drafts.at(-1)).not.toHaveProperty("current_attendees");
-    expect(fixture.state.calls).toHaveLength(0); // the main assistant: no extra call
+    // one read: the draft says which meeting changes and whether its attendees hear about it
+    expect(fixture.state.calls.map((c) => c.method)).toEqual(["GET"]);
+    expect(drafts.at(-1)).toMatchObject({ current_subject: "שיחה עם משפחת אברהם", current_date: "2026-10-21", current_start: "13:00", current_attendee_count: 1 });
+    await run("gcal_delete_event", { id: "gev1", subject: "דיון" }, false);
+    expect(drafts.at(-1)).not.toHaveProperty("current_attendees");
+    expect(fixture.state.calls).toHaveLength(1); // a cancellation by the main assistant: no extra call
     await run("gcal_update_event", move, true);
     expect(drafts.at(-1)).toMatchObject({ kind: "update_event", provider: "google", id: "gev2", current_attendees: ["avraham@example.co.il"] });
     await run("gcal_delete_event", { id: "gev1", subject: "דיון" }, true);

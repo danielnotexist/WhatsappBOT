@@ -8,8 +8,19 @@ import type { ListRow, ReplyButton } from "@/lib/wa/types";
 
 /** The online meeting service of each calendar: Teams on Microsoft 365, Google Meet on Google. */
 export const onlineService = (provider: string) => (provider === "google" ? "Google Meet" : "Teams");
-const onlineUnavailable = (provider: string) =>
-  provider === "google" ? "לא הצלחתי ליצור פגישת Google Meet בחשבון הזה." : "בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams (היא זמינה רק בחשבון עבודה או בית ספר).";
+/** `personal`: a personal Microsoft account (lib/online-meeting.ts isPersonalMicrosoftAccount), the only case the reason is known. */
+const onlineUnavailable = (provider: string, personal = false) =>
+  provider === "google" ? "לא הצלחתי ליצור פגישת Google Meet בחשבון הזה." : `בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams${personal ? " (היא זמינה רק בחשבון עבודה או בית ספר)" : ""}.`;
+
+/** How an online meeting that could not be created ends: what did not happen, and the next step. */
+export interface OnlineNotDone {
+  isUpdate: boolean;
+  personal?: boolean;
+  /** an agent prepared the original and may not prepare the follow-up draft: the main assistant can */
+  askMain?: boolean;
+  /** a change that also asked for something besides the link */
+  somethingLeft?: boolean;
+}
 
 export const copy = {
   // ---- 1. account linking ----
@@ -64,15 +75,31 @@ export const copy = {
   "act.mail.edit_prompt": () => "מה לשנות?",
   "act.mail.cancelled": () => "בוטל. הטיוטה נמחקה ולא נשלחה.",
   "act.cal.create_confirm": (e: { title: string; date: string; start: string; end: string; location?: string; attendees?: string; online?: string; withoutLink?: boolean }) =>
-    `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.online ? `${e.online}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}\n${e.withoutLink ? "לקבוע בלי קישור?" : "לקבוע?"}`,
+    `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}${e.online ? `${e.online}\n` : ""}\n${e.withoutLink ? "לקבוע בלי קישור?" : "לקבוע?"}`,
   "act.cal.created": (title: string, date: string, start: string) => `נקבע: ${title}, ${date} ב-${start}.`,
-  "act.cal.online_label": (provider: string) => `פגישת ${onlineService(provider)}`,
+  /** the draft line of a meeting that gets a link; `withInvite` = it has attendees, who get the link in the invitation */
+  "act.cal.online_label": (provider: string, withInvite = false) => `פגישת ${onlineService(provider)}${withInvite ? " (הקישור יישלח בהזמנה)" : ""}`,
+  /** which meeting a change draft is about (title, date, time), above the changes */
+  "act.cal.update_target": (title: string, date: string, start: string) => `פגישה: ${title || "(ללא כותרת)"}, ${date}${start ? ` ב-${start}` : ""}`,
+  /** the change-draft line that adds an online meeting to a meeting without one */
+  "act.cal.add_online": (provider: string) => `הוספת פגישת ${onlineService(provider)}`,
+  "act.cal.attendees_notified": (withLink: boolean) => `המשתתפים יקבלו עדכון${withLink ? " עם הקישור" : ""}.`,
+  "act.cal.updated": (title: string) => `עודכן: ${title}.`,
   "act.cal.join_link": (url: string) => `קישור לפגישה: ${url}`,
   "act.cal.join_link_later": () => "הקישור לפגישה עוד בהכנה ויופיע באירוע ביומן.",
-  "act.cal.online_missing": (provider: string) => `קישור ${onlineService(provider)} לא נוצר לפגישה הזו.`,
-  "act.cal.online_added": (title: string, provider: string) => `נוסף קישור ${onlineService(provider)} לפגישה "${title}".`,
-  "act.cal.online_unavailable": (provider: string) => onlineUnavailable(provider),
-  "act.cal.online_not_done": (provider: string, isUpdate: boolean) => `${onlineUnavailable(provider)}\n${isUpdate ? "הפגישה לא עודכנה." : "הפגישה לא נקבעה. אפשר לבקש לקבוע אותה בלי קישור."}`,
+  /** `invitesSent`: the invitations already went out (without the link) */
+  "act.cal.online_missing": (provider: string, invitesSent = false) =>
+    `קישור ${onlineService(provider)} לא נוצר לפגישה הזו.${invitesSent ? "\nההזמנות יצאו בלי קישור." : ""} אפשר לבקש להוסיף אותו.`,
+  "act.cal.online_added": (title: string, provider: string) => `נוסף קישור ${onlineService(provider)} לפגישה ״${title}״.`,
+  /** the meeting already has an online meeting (any service): nothing added, no update to the attendees */
+  "act.cal.online_exists": (url: string | null) => (url ? `לפגישה כבר יש קישור, ולא נוסף קישור חדש.\nקישור לפגישה: ${url}` : "לפגישה כבר יש קישור לפגישה מקוונת, והוא מופיע באירוע ביומן. לא נוסף קישור חדש."),
+  "act.cal.online_organizer_only": () => "רק מי שארגן את הפגישה יכול להוסיף לה קישור. הפגישה לא עודכנה.",
+  "act.cal.online_unavailable": (provider: string, personal = false) => onlineUnavailable(provider, personal),
+  "act.cal.online_not_done": (provider: string, o: OnlineNotDone) => {
+    const who = o.askMain ? `מ-״@${P}״ ` : "";
+    const next = o.isUpdate ? (o.somethingLeft ? `הפגישה לא עודכנה. אפשר לבקש ${who}לעדכן אותה בלי קישור.` : "הפגישה לא עודכנה.") : `הפגישה לא נקבעה. אפשר לבקש ${who}לקבוע אותה בלי קישור.`;
+    return `${onlineUnavailable(provider, o.personal)}\n${next}`;
+  },
   "act.cal.move_confirm": (e: { title: string; oldDate: string; oldStart: string; newDate: string; newStart: string; newEnd: string }) => `*הזזת פגישה*\n${e.title}\nמ: ${e.oldDate}, ${e.oldStart}\nאל: ${e.newDate}, ${e.newStart}–${e.newEnd}\nלהזיז?`,
   "act.cal.moved": (title: string, newDate: string, newStart: string) => `הוזז. ${title} עכשיו ב-${newDate}, ${newStart}.`,
   "act.cal.cancel_confirm": (title: string, date: string, start: string) => `*ביטול פגישה*\n${title}\n${date}, ${start}\nלבטל? המשתתפים יקבלו הודעת ביטול.`,

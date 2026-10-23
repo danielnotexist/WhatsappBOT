@@ -23,6 +23,8 @@ export class GoogleApiError extends Error {
     /** errors[0].reason (e.g. insufficientPermissions, rateLimitExceeded, notFound) or ErrorInfo.reason */
     readonly reason: string | null,
     readonly retryAfterMs: number | null = null,
+    /** error.message from the API body alone (`message` also carries the status and the request path) */
+    readonly apiMessage: string = "",
   ) {
     super(message);
     this.name = "GoogleApiError";
@@ -62,6 +64,12 @@ export interface GoogleEvent {
   transparency: "opaque" | "transparent";
   /** Meet (`hangoutLink`) or the conference's video entry point, when it is a safe meeting link (lib/online-meeting.ts) */
   joinUrl: string | null;
+  /**
+   * The event has a conference of any kind (Meet, an add-on such as GoTo or Jitsi, a link off the safe list) or a
+   * create request still in progress, read from the raw event, not from `joinUrl`. A new create request on such an
+   * event would replace the conference the attendees already have.
+   */
+  hasConference: boolean;
   /** status of a conference create request: "pending" right after the request, then "success" or "failure" */
   conferenceStatus: "pending" | "success" | "failure" | null;
 }
@@ -78,6 +86,11 @@ export interface NewGoogleEvent {
   isAllDay?: boolean;
   /** true → a Google Meet (conferenceData.createRequest, sent with conferenceDataVersion=1) */
   onlineMeeting?: boolean;
+  /**
+   * Client-chosen event id (base32hex: a-v and 0-9, 5-1024 characters; hex fits). Lets the caller check whether an
+   * insert that answered with an error created the event anyway; a second insert with the same id answers 409.
+   */
+  id?: string;
 }
 
 export type SendUpdates = "all" | "externalOnly" | "none";
@@ -308,7 +321,7 @@ async function toError(res: Response, url: string): Promise<GoogleApiError> {
   const finalReason = info === "ACCESS_TOKEN_SCOPE_INSUFFICIENT" ? info : reason;
   const retryAfter = Number(res.headers.get("retry-after"));
   const path = new URL(url).pathname;
-  return new GoogleApiError(`Google ${res.status}${finalReason ? ` ${finalReason}` : ""} (${path}): ${err?.message ?? text.slice(0, 200)}`, res.status, finalReason, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null);
+  return new GoogleApiError(`Google ${res.status}${finalReason ? ` ${finalReason}` : ""} (${path}): ${err?.message ?? text.slice(0, 200)}`, res.status, finalReason, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : null, err?.message ?? "");
 }
 
 function mapEvent(e: RawEvent, calendarTz: string | null): GoogleEvent {
@@ -328,8 +341,15 @@ function mapEvent(e: RawEvent, calendarTz: string | null): GoogleEvent {
     status: e.status ?? "confirmed",
     transparency: e.transparency === "transparent" ? "transparent" : "opaque",
     joinUrl: safeJoinUrl(e.hangoutLink) ?? safeJoinUrl(e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri),
+    hasConference: hasConference(e),
     conferenceStatus: conferenceStatusOf(e.conferenceData?.createRequest?.status?.statusCode),
   };
+}
+
+/** Any conference, or a create request that has not failed (a failed one left nothing to replace). */
+function hasConference(e: RawEvent): boolean {
+  const c = e.conferenceData;
+  return Boolean(e.hangoutLink || c?.conferenceId || c?.entryPoints?.length || (c?.createRequest && c.createRequest.status?.statusCode !== "failure"));
 }
 
 const conferenceStatusOf = (code: unknown): GoogleEvent["conferenceStatus"] => (code === "pending" || code === "success" || code === "failure" ? code : null);
@@ -340,6 +360,7 @@ const conferenceParam = (e: Partial<NewGoogleEvent>): Record<string, string> => 
 function eventBody(e: Partial<NewGoogleEvent> & { timeZone: string }): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   const when = (v: string) => (e.isAllDay ? { date: v.slice(0, 10) } : { dateTime: v, timeZone: e.timeZone });
+  if (e.id !== undefined) body.id = e.id;
   if (e.summary !== undefined) body.summary = e.summary;
   if (e.start !== undefined) body.start = when(e.start);
   if (e.end !== undefined) body.end = when(e.end);
@@ -377,7 +398,7 @@ interface RawEvent {
   attendees?: { email?: string; displayName?: string; responseStatus?: string; self?: boolean; resource?: boolean }[];
   organizer?: { email?: string; displayName?: string; self?: boolean };
   hangoutLink?: string;
-  conferenceData?: { createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] };
+  conferenceData?: { conferenceId?: string; createRequest?: { status?: { statusCode?: string } }; entryPoints?: { entryPointType?: string; uri?: string }[] };
 }
 interface RawDriveFile {
   id: string;

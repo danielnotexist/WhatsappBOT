@@ -9,7 +9,7 @@ import { FIXTURE_TEAMS_JOIN_URL, createGraphFixture } from "@/lib/ms/__fixtures_
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
 import { zonedToUtc } from "@/lib/time/zoned";
-import { emailsAwaitingReply, morningDedupeKey, nextMorningRun, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
+import { MORNING_TEXT_BUDGET, emailsAwaitingReply, morningDedupeKey, nextMorningRun, renderMorningText, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
 
 const il = (y: number, mo: number, d: number, h: number, mi = 0) => zonedToUtc({ year: y, month: mo, day: d, hour: h, minute: mi }, "Asia/Jerusalem");
 
@@ -211,6 +211,23 @@ describe("morning summary — the job", () => {
     await processInbound(h.ctx, h.inbound("תודה"));
     await runMorningSummaryJob(quiet, job);
     expect(h.wa.texts.at(-1)).toBe("*בוקר טוב. יום ד׳ 21.10*\nהיומן ריק, אין מיילים שמחכים לתשובה ואין תזכורות. יום שקט.");
+  });
+
+  it("join links go under their meetings while the free-text message stays within its budget; meetings, e-mails and the closer always stay", () => {
+    const longLink = (i: number) => `${FIXTURE_TEAMS_JOIN_URL}&m=${String(i).repeat(420)}`;
+    const meetings = Array.from({ length: 8 }, (_, i) => `• ${String(9 + i).padStart(2, "0")}:00 פגישה ${i + 1}`);
+    const summary = { dayLabel: "יום ד׳ 21.10", meetings, meetingLinks: meetings.map((_, i) => (i === 1 ? null : longLink(i))), emails: ["• עו״ד שפירא — הצעת פשרה"], reminders: [], closer: "רוצה שאנסח תשובה למישהו מהם?", connected: true, empty: false };
+    const text = renderMorningText(summary);
+    expect(text.length).toBeLessThanOrEqual(MORNING_TEXT_BUDGET);
+    for (const m of meetings) expect(text).toContain(`${m}\n`);
+    expect(text).toContain("*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה");
+    expect(text.endsWith("רוצה שאנסח תשובה למישהו מהם?")).toBe(true);
+    // links in meeting order, each whole, up to the first one that does not fit
+    expect(text).toContain(`• 09:00 פגישה 1\nקישור לפגישה: ${longLink(0)}\n• 10:00 פגישה 2\n• 11:00 פגישה 3\nקישור לפגישה: ${longLink(2)}\n`);
+    expect(text).not.toContain(longLink(6));
+    expect(text).not.toContain(longLink(7));
+    // a short day keeps every link
+    expect(renderMorningText({ ...summary, meetings: meetings.slice(0, 2), meetingLinks: [FIXTURE_TEAMS_JOIN_URL, FIXTURE_MEET_URL] })).toContain(`• 09:00 פגישה 1\n${TEAMS_LINE}\n• 10:00 פגישה 2\n${MEET_LINE}\n`);
   });
 });
 

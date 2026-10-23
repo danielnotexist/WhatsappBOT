@@ -31,7 +31,7 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
       const user = await base.getUser(userId);
       if (!user) return null;
       const g = await graphForUser(base, user);
-      return g ? { graph: g.graph, timeZone: g.timeZone } : null;
+      return g ? { graph: g.graph, timeZone: g.timeZone, connection: g.connection } : null;
     });
     const google = googleExecutors(async (userId) => {
       const user = await base.getUser(userId);
