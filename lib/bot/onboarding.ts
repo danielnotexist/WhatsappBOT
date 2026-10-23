@@ -1,8 +1,10 @@
+import { PRODUCT_NAME } from "@/lib/brand";
 import { copy, buttons, lists } from "@/lib/copy/bot";
 import type { Db, UserRow } from "@/lib/db/types";
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
 import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
 import type { InboundMessage } from "@/lib/wa/types";
+import { connectRequestProvider } from "./connect-intent";
 import { connectLinkFor, type BotContext } from "./context";
 
 /**
@@ -69,33 +71,67 @@ export function awaitingAnswer(user: UserRow): boolean {
   return state !== null && ASKING.includes(state.step);
 }
 
-/** Stems of requests in the second person ("תזכירי", "תנסח"…) — never the start of a name. */
-const REQUEST_STEMS = ["תזכיר", "תנסח", "תכתוב", "תכתב", "תשלח", "תבדוק", "תבדק", "תקבע", "תמצא", "תמצי", "תעש", "תגיד", "תראה", "תראי", "תסכם", "תעדכן", "תבטל", "תוסיף", "תזיז", "תחפש", "תכין", "תכינ", "תעזור", "תעזר", "תפתח", "תקרא", "תקרי", "תענה", "תעני", "תזמן"];
-/** First words of a question or a request. */
-const REQUEST_WORDS = new Set(["מה", "מתי", "איפה", "איך", "למה", "כמה", "האם", "מי", "יש", "אין", "אפשר", "צריך", "צריכה", "רוצה", "בבקשה", "שלחי", "כתבי", "נסחי", "קבעי", "הזכירי", "סכמי", "בדקי", "שלח", "כתוב", "נסח", "קבע", "הזכר", "סכם", "בדוק", "מחר", "היום"]);
+/**
+ * Stems of requests in the second person ("תזכירי", "תנסח", "תביא"…) — never the start of a name or a business name.
+ * Matched with startsWith, so one stem covers the masculine, feminine and plural forms.
+ */
+const REQUEST_STEMS = [
+  "תזכיר", "תנסח", "תכתוב", "תכתב", "תשלח", "תבדוק", "תבדק", "תקבע", "תמצא", "תמצי", "תעש", "תגיד", "תראה", "תראי", "תסכם", "תעדכן", "תבטל",
+  "תוסיף", "תזיז", "תחפש", "תכין", "תכינ", "תעזור", "תעזר", "תפתח", "תקרא", "תקרי", "תענה", "תעני", "תזמן", "תביא", "תסדר", "תתאם", "תחבר",
+  "תשדרג", "תיצור", "תיצר", "תצור", "תצרי", "תסביר", "תספר", "תעביר", "תמחק", "תשמור", "תרשום", "תרשמ", "תדחה", "תדחי", "תחזיר", "תוריד", "תציג",
+];
+/** Infinitives that open a request ("לחבר את המייל", "לשדרג למנוי פרו") — whole first words, so "לוי" or "לאה" pass. */
+const REQUEST_INFINITIVES = new Set([
+  "לחבר", "לשדרג", "ליצור", "לבטל", "לקבוע", "לשלוח", "לבדוק", "לנסח", "לכתוב", "להזכיר", "לסכם", "להביא", "להראות", "לחפש", "למצוא", "לעדכן",
+  "להוסיף", "להזיז", "לתאם", "לפתוח", "לקרוא", "לענות", "לתזמן", "להעביר", "למחוק", "להציג", "לסדר",
+]);
+/** First words of a question or a request (imperatives included: "שלח", "בדקי", "תן"). */
+const REQUEST_WORDS = new Set([
+  "מה", "מתי", "איפה", "איך", "למה", "כמה", "האם", "מי", "איזה", "איזו", "אילו", "יש", "אין", "אפשר", "צריך", "צריכה", "רוצה", "בבקשה", "אשמח",
+  "תוכל", "תוכלי", "נא", "בוא", "בואי", "תן", "תני", "שלחי", "כתבי", "נסחי", "קבעי", "הזכירי", "סכמי", "בדקי", "חפשי", "מצאי", "הביאי", "הראי",
+  "שלח", "כתוב", "נסח", "קבע", "הזכר", "סכם", "בדוק", "חפש", "מצא", "הבא", "הראה", "מחר", "היום",
+]);
+/** "אני צריכה…", "אתה יכול…": a pronoun followed by a wish or an ability is a request (unlike "אני דנה"). */
+const PRONOUNS = new Set(["אני", "אתה", "את", "אנחנו", "אתם"]);
+const WISH_WORDS = new Set(["צריך", "צריכה", "צריכים", "רוצה", "רוצים", "מבקש", "מבקשת", "מחפש", "מחפשת", "יכול", "יכולה", "יכולים", "תוכל", "תוכלי", "חייב", "חייבת"]);
+/** What follows a second-person verb in a request: "תעבירי לי…", "תסדר את…". */
+const REQUEST_OBJECTS = new Set(["לי", "לנו", "את", "אותי", "אותו", "אותה"]);
+/** Greetings and the assistant's name before the request ("היי, תביאי לי…") are skipped. */
+const LEADING_GREETING = new RegExp(`^(?:(?:היי|הי|שלום|אהלן|בוקר טוב|ערב טוב|צהריים טובים|${PRODUCT_NAME})[\\s,.!:-]+)+`);
 
 /**
- * An answer to "איך לקרוא לך?" / "מה שם העסק?" that is really a request for the assistant (the first thing many people
- * do is ask for something): a question, a request word first, digits in a name, or too many words. Such an answer is
- * never stored as a name; the assistant answers it and the question is asked again.
+ * An answer to an onboarding question that is really a request for the assistant (the first thing many people do is
+ * ask for something): a question, a request word or an imperative first, a second-person verb followed by "לי"/"את",
+ * a pronoun with "צריך"/"יכול", digits in a name, or too many words. Such an answer is never stored; the assistant
+ * answers it and the question is asked again (afterFirstTask). `list`: free text while a WhatsApp list is open (the
+ * answer is a tap), where three words or more are a request as well.
  */
-export function looksLikeRequest(text: string, field: "name" | "business"): boolean {
-  const t = text.trim();
+export function looksLikeRequest(text: string, field: "name" | "business" | "list"): boolean {
+  const t = text.trim().replace(LEADING_GREETING, "").trim();
   if (!t) return false;
   if (/[?？]/.test(t)) return true;
-  const words = t.split(/\s+/);
-  const first = words[0]!.replace(/^[״"'׳(]+/, "");
-  if (REQUEST_WORDS.has(first) || REQUEST_STEMS.some((stem) => first.startsWith(stem))) return true;
+  const words = t.split(/\s+/).map((w) => w.replace(/^[״"'׳(]+|[,.!:;״"'׳)]+$/g, ""));
+  const [first = "", second = ""] = words;
+  if (REQUEST_WORDS.has(first) || REQUEST_INFINITIVES.has(first) || REQUEST_STEMS.some((stem) => first.startsWith(stem))) return true;
+  if (PRONOUNS.has(first) && WISH_WORDS.has(second)) return true;
+  if (first.length >= 3 && first.startsWith("ת") && REQUEST_OBJECTS.has(second)) return true;
   if (field === "name") return /\d/.test(t) || words.length > 4 || t.length > 40;
+  if (field === "list") return words.length >= 3 || t.length > 40;
   return words.length > 8 || t.length > 80;
 }
 
 /** Replies that are not a name (a thank-you, an OK): the name question is simply asked again. */
 const NOT_A_NAME = /^(?:תודה(?: רבה)?|אוקי+|אוקיי+|סבבה|בסדר|היי|הי|שלום|כן|לא|יופי|מעולה|ok|okay|thanks)[.!]*$/i;
 
-/** "קוראים לי דנה" / "שמי דנה" → "דנה". */
+/** "אין לי עסק" / "לא רלוונטי": the business question is passed without storing anything. */
+const NO_BUSINESS = /^(?:לא|אין|אין לי(?: עסק| משרד)?|אין עסק|לא רלוונטי|דלג|לדלג)[.!]*$/;
+
+/** A button / list reply of onboarding's own questions; any other reply (an agent list, …) is not an answer here. */
+const ONBOARDING_REPLY = /^(?:onb:|pain_|mt_)/;
+
+/** "קוראים לי דנה" / "שמי דנה" / "אני דנה" → "דנה". */
 function nameFrom(text: string): string {
-  return text.replace(/^(?:קוראים לי|שמי|השם שלי(?: הוא| זה)?)\s+/, "").trim();
+  return text.replace(/^(?:קוראים לי|שמי|השם שלי(?: הוא| זה)?|אני)\s+/, "").trim();
 }
 
 /**
@@ -108,6 +144,10 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
   const to = msg.fromE164;
   const reply = msg.reply?.id ?? null;
   const text = (msg.text ?? "").trim();
+  // a reply to someone else's buttons or list (an agent's template list, …) is not an answer to the open question
+  if (reply && ASKING.includes(state.step) && !ONBOARDING_REPLY.test(reply)) return false;
+  // "הג׳ימייל" / "לחבר את גוגל" while a question is open: a connect request (connect-intent), never a name
+  if (!reply && text && ASKING.includes(state.step) && connectRequestProvider(text, await ctx.db.listConnections(user.id))) return false;
 
   switch (state.step) {
     case "welcome": {
@@ -135,7 +175,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
         await ctx.wa.sendText(to, copy["onb.ask_name"]());
         return true;
       }
-      // a request instead of a name: the assistant answers it, then the question comes again (afterAssistantReply)
+      // a request instead of a name: the assistant answers it, then the question comes again (afterFirstTask)
       if (looksLikeRequest(text, "name")) return false;
       const name = (nameFrom(text) || text).slice(0, 60);
       await ctx.db.updateUserProfile(user.id, { name });
@@ -144,8 +184,15 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       return true;
     }
     case "ask_business": {
-      if (text && msg.type === "text" && looksLikeRequest(text, "business")) return false;
-      if (text) await ctx.db.updateUserProfile(user.id, { business_name: text.slice(0, 120) });
+      const typed = msg.type === "text" ? text : "";
+      const skipped = NO_BUSINESS.test(typed);
+      // a request instead of the business name ("תביא לי את המייל האחרון"): answered first, then the question again
+      if (typed && !skipped && looksLikeRequest(typed, "business")) return false;
+      if (typed && !skipped && NOT_A_NAME.test(typed)) {
+        await ctx.wa.sendText(to, copy["onb.ask_business_again"]());
+        return true;
+      }
+      if (typed && !skipped) await ctx.db.updateUserProfile(user.id, { business_name: typed.slice(0, 120) });
       await sendPainList(ctx, to, []);
       await setStep(ctx.db, user.id, { step: "ask_pain" });
       return true;
@@ -154,7 +201,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       // WhatsApp lists are single-choice, so the question repeats with what is left until "זהו" (or nothing is left)
       const chosen = painPointsOf(user);
       const pain = reply && reply.startsWith("pain_") && reply !== PAIN_DONE ? reply : null;
-      if (!pain && reply !== PAIN_DONE && !reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
+      if (!reply && looksLikeRequest(text, "list")) return false; // a request: answered, then the list again
       if (!pain && reply !== PAIN_DONE) {
         await sendPainList(ctx, to, chosen);
         return true;
@@ -174,7 +221,7 @@ export async function handleOnboarding(ctx: BotContext, user: UserRow, msg: Inbo
       return true;
     }
     case "ask_morning_time": {
-      if (!reply && looksLikeRequest(text, "business")) return false; // a request: answered, then the list again
+      if (!reply && looksLikeRequest(text, "list")) return false; // a request: answered, then the list again
       if (!reply || !(reply in MORNING)) {
         await ctx.wa.sendList(to, copy["onb.ask_morning_time"](), lists.morningTime.button, [{ title: lists.morningTime.title, rows: lists.morningTime.rows }]);
         return true;

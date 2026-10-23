@@ -91,7 +91,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           from: info.m.from ? `${info.m.from.name || info.m.from.address} (${info.m.from.address})` : "",
           attachments: info.attachments.map((a) => a.name).filter(Boolean).slice(0, 10),
         });
-        return { status: "pending_approval", pending_action_id: pending.id, note: "ההעברה מוצגת למשתמש עם כפתורי העבר/ערוך/בטל. ענה במשפט קצר בלבד." };
+        return { status: "pending_approval", pending_action_id: pending.id, note: "ההעברה מוצגת למשתמש עם כפתורי העבר/ערוך/בטל. לענות במשפט קצר בלבד." };
       },
     },
     {
@@ -117,7 +117,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
         const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
         if (attendees && !Array.isArray(attendees)) return attendees;
         const pending = await ctx.createPending("update_event", { id, subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
-        return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
+        return { status: "pending_approval", pending_action_id: pending.id, note: "השינוי מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
       },
     },
     {
@@ -130,7 +130,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
         const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
         if (attendees && !Array.isArray(attendees)) return attendees;
         const pending = await ctx.createPending("delete_event", { id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
-        return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר." };
+        return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
       },
     },
     {

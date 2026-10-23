@@ -12,11 +12,12 @@
  *     morning has already passed today (ב-9 at 10:15 → 21:00); 12 is noon; "09:00" / 13–23 are exact.
  *   - a day without a time → 9:00 (בבוקר 9:00, בצהריים 12:00, אחה״צ 16:00, בערב 20:00, בלילה 22:00).
  *   - "ביום ראשון" = the nearest Sunday (today if the time is still ahead); "ביום ראשון הבא" skips today.
- *   - "מחר" between 00:00 and 04:00 means the coming morning (the same calendar date).
+ *   - "מחר" between 00:00 and 04:59 means the coming morning (the same calendar date); the next date is returned as
+ *     `nextDay`, and the reply names the date and offers it in one tap.
  *   - nonexistent DST times move forward (27.3.2026 02:30 → 03:30); repeated ones take the first occurrence.
  */
 import type { RecurrenceRule } from "@/lib/db/types";
-import { DEFAULT_TZ, addDays, addMonths, compareDates, daysInMonth, localDateOf, weekdayOf, zonedParts, zonedToUtc, type LocalDate } from "@/lib/time/zoned";
+import { DEFAULT_TZ, SMALL_HOURS_END, addDays, addMonths, compareDates, daysInMonth, localDateOf, weekdayOf, zonedParts, zonedToUtc, type LocalDate } from "@/lib/time/zoned";
 import { WORKDAYS, nextOccurrence } from "./recurrence";
 
 export interface ParseOptions {
@@ -36,6 +37,8 @@ export type ParsedWhen =
       matched: string;
       /** the input without the time phrases and the "תזכיר לי" opener — the reminder text */
       rest: string;
+      /** "מחר" said in the small hours was read as the coming morning: the same time on the next date, the other reading */
+      nextDay?: Date;
     }
   | { kind: "recurring"; rule: RecurrenceRule; first: Date; matched: string; rest: string };
 
@@ -241,7 +244,8 @@ class Scanner {
   }
 }
 
-const REMINDER_OPENER = /^\s*(?:אנא\s+|בבקשה\s+)?(?:תזכיר(?:י|ו)?|להזכיר|הזכר|תזכורת|תזכרו)(?:\s+(?:לי|לנו))?(?:\s+(?:ש|ל)(?=\s))?[\s:,-]*/u;
+/** "תזכיר לי ש…", "תזכירי אותי על…" (a voice note's wording) — dropped from the reminder text */
+const REMINDER_OPENER = /^\s*(?:אנא\s+|בבקשה\s+)?(?:תזכיר(?:י|ו)?|להזכיר|הזכר|תזכורת|תזכרו)(?:\s+(?:לי|לנו|אותי|אותנו))?(?:\s+(?:ש|ל|על)(?=\s))?[\s:,-]*/u;
 
 function restOf(input: string, spans: [number, number][]): string {
   let out = "";
@@ -434,10 +438,11 @@ export function parseHebrewWhen(input: string, opts: ParseOptions): ParsedWhen |
       return once(firstFuture(today, mins) ?? instant(today, mins.at(-1)!));
     case "tomorrow": {
       const m = mins?.[0] ?? DEFAULT_MINUTES;
-      // after midnight, "מחר" still means the coming morning
-      if (nowLocal.hour < 4) {
+      // in the small hours "מחר" usually means the coming morning (the same calendar date); the next date is kept as
+      // `nextDay`, so the reply can name the date and offer it in one tap
+      if (nowLocal.hour < SMALL_HOURS_END) {
         const sameDate = instant(today, m);
-        if (sameDate.getTime() > now.getTime()) return once(sameDate);
+        if (sameDate.getTime() > now.getTime()) return finish({ kind: "once" as const, at: sameDate, inPast: false, hasTime, nextDay: instant(addDays(today, 1), m) });
       }
       return once(instant(addDays(today, 1), m));
     }

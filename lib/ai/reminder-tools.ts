@@ -1,3 +1,4 @@
+import { reminderButtons } from "@/lib/copy/bot-m5";
 import { cancelReminder, createReminder, listOpenReminders } from "@/lib/reminders/service";
 import type { Tool } from "./tools";
 
@@ -7,7 +8,7 @@ import type { Tool } from "./tools";
  * parser (lib/reminders/parse.ts) computes the instant, and `reply` carries the absolute-time echo.
  */
 const str = (description: string) => ({ type: "string", description });
-const REPLY_NOTE = "לענות למשתמש בדיוק בנוסח שב-reply, בלי להוסיף או לשנות את הזמן.";
+const REPLY_NOTE = "לענות למשתמש בדיוק בנוסח שב-reply, בלי להוסיף או לשנות את הזמן, ובלי לספר על ניסיונות קודמים.";
 
 export const createReminderTool: Tool = {
   name: "create_reminder",
@@ -27,6 +28,11 @@ export const createReminderTool: Tool = {
     const user = await ctx.db.getUser(ctx.userId);
     if (!user) return { status: "error", error: "user not found" };
     const r = await createReminder(ctx.db, user, { text: String(input.text ?? ""), when: String(input.when ?? "") }, ctx.now);
+    if (r.status === "created" && r.nextDay) {
+      // "מחר" after midnight: set for the coming morning; the next date rides on the reply as one button
+      ctx.addReplyButtons?.(reminderButtons.nextDay(r.reminder.id, r.nextDay.label));
+      return { status: "done", reminder_id: r.reminder.id, when: r.whenAbs, reply: r.reply, note: `${REPLY_NOTE} התזכורת נקבעה לבוקר הקרוב בכוונה, ומצורף כפתור להעברה ל${r.nextDay.label}. לא לשנות, לבטל או לקבוע אותה מחדש.` };
+    }
     if (r.status === "created") return { status: "done", reminder_id: r.reminder.id, when: r.whenAbs, recurring: r.recurring, reply: r.reply, note: REPLY_NOTE };
     return { status: r.status, reply: r.reply, note: "התזכורת לא נקבעה. לענות למשתמש בנוסח שב-reply." };
   },

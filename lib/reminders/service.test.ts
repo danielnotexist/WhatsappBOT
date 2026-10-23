@@ -209,3 +209,37 @@ describe("reminders — in the conversation", () => {
     expect((await h.db.getCurrentUsage(user.id))?.counted_messages ?? 0).toBe(0);
   });
 });
+
+describe("reminders — 'מחר' after midnight (Daniel's 03:43 voice note, 23.10.2026)", () => {
+  it("sets the coming morning, names the date, and offers the next date as one button — no silent guess, no retry", async () => {
+    const { h } = await setup(il(2026, 10, 23, 3, 43));
+    // the voice note's transcript goes on as text; the mock model passes the phrase to create_reminder
+    expect((await processInbound(h.ctx, h.inbound("תזכירי אותי מחר בשעה תשע על לאכול"))).note).toBe("replied");
+    const reply = h.wa.sent.filter((s) => s.kind === "buttons").at(-1)!;
+    expect(reply.body).toBe('אזכיר: לאכול\nהיום, יום ו׳ 23.10, 9:00\n\nאחרי חצות "מחר" הוא בדרך כלל הבוקר הקרוב. אם הכוונה ליום ש׳ 24.10 — אפשר להעביר בלחיצה.');
+    const r = h.db.reminders[0]!;
+    expect(reply.buttons).toEqual([{ id: `rem:next:${r.id}`, title: "ליום ש׳ 24.10" }]);
+    expect(h.db.reminders).toHaveLength(1); // set once — nothing cancelled and re-created
+    expect(r).toMatchObject({ text: "לאכול", status: "scheduled", due_at: "2026-10-23T06:00:00.000Z" });
+    // the model was told the reading is deliberate and to quote the reply as it is
+    const toolMsg = h.ai.calls.at(-1)!.messages.find((m) => m.role === "tool");
+    expect(toolMsg?.role === "tool" && (toolMsg.results[0]!.output as { note: string }).note).toContain("לא לשנות, לבטל או לקבוע אותה מחדש");
+    expect(h.ai.calls.find((c) => c.tier === "strong")!.system).toContain("עכשיו אחרי חצות");
+
+    // one tap: the same time on the next date; a second tap does not move it again
+    expect((await processInbound(h.ctx, h.button(`rem:next:${r.id}`, "ליום ש׳ 24.10"))).note).toBe("reminder button");
+    expect(h.wa.texts.at(-1)).toBe("הועבר. אזכיר מחר, יום ש׳ 24.10, 9:00.");
+    expect((await h.db.getReminder(r.id))!.due_at).toBe("2026-10-24T06:00:00.000Z");
+    expect(jobFor(h, r.id)).toMatchObject({ status: "queued", run_at: "2026-10-24T06:00:00.000Z" });
+    await processInbound(h.ctx, h.button(`rem:next:${r.id}`, "ליום ש׳ 24.10"));
+    expect(h.wa.texts.at(-1)).toBe("הועבר. אזכיר מחר, יום ש׳ 24.10, 9:00.");
+    expect((await h.db.getReminder(r.id))!.due_at).toBe("2026-10-24T06:00:00.000Z");
+  });
+
+  it("during the day 'מחר' is the next date, with no button", async () => {
+    const { h, user } = await setup(il(2026, 10, 23, 10, 0));
+    const r = await createReminder(h.db, user, { text: "לאכול", when: "מחר בשעה תשע" }, h.ctx.now());
+    expect(r).toMatchObject({ status: "created", reply: "אזכיר: לאכול\nמחר, 9:00" });
+    expect(r).not.toHaveProperty("nextDay");
+  });
+});

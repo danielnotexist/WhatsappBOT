@@ -44,6 +44,29 @@ describe("billing commands typed in the chat", () => {
     ["מה מצב המנוי?", "status"],
     ["כמה הודעות נשארו לי החודש", "status"],
     ["החזר כספי", "refund"],
+    // Daniel's live test (23.10.2026): natural wordings reach the real flows, never the model
+    ["אני רוצה לשדרג למנוי פרו", "upgrade"],
+    ["מנוי פרו", "upgrade"],
+    ["מסלול פרו", "upgrade"],
+    ["פרו", "upgrade"],
+    ["לשדרג לפרו", "upgrade"],
+    ["אני רוצה לשדרג", "upgrade"],
+    ["אני רוצה לשדרוג", "upgrade"],
+    ["לשדרג את המנוי שלי בבקשה", "upgrade"],
+    ["אפשר לשדרג?", "upgrade"],
+    ["איך משדרגים?", "upgrade"],
+    ["איך אפשר לשדרג את המנוי?", "upgrade"],
+    ["איך עוברים לפרו?", "upgrade"],
+    ["לעבור למנוי פרו", "upgrade"],
+    ["תשדרגי אותי לפרו", "upgrade"],
+    ["שדרוג לפרו אחי", "upgrade"],
+    ["איזה מנוי אני", "status"],
+    ["איזה מנוי אני?", "status"],
+    ["באיזה מסלול אני?", "status"],
+    ["איזה סוג מנוי יש לי?", "status"],
+    ["מה המסלול שלי?", "status"],
+    ["מה המנוי שלי", "status"],
+    ["כמה הודעות יש לי בניסיון?", "status"],
   ])("%s → %s", (text, cmd) => {
     expect(billingCommandOf(text)).toBe(cmd);
   });
@@ -61,6 +84,10 @@ describe("billing commands typed in the chat", () => {
     "תשדרגי את המצגת",
     "שדרוג המטבח עולה כמה?",
     "לבטל את הפגישה",
+    "תזכירי לי לשדרג את המחשב",
+    "איך עוברים לשם?",
+    "איזה מייל קיבלתי מכהן?",
+    "פרופורציה",
   ])("leaves %s to the assistant", (text) => {
     expect(billingCommandOf(text)).toBeNull();
   });

@@ -50,6 +50,37 @@ describe("runAssistant", () => {
     expect(out.text).toContain("לא הצלחתי");
   });
 
+  it("tells the model only the active connections, the newest per provider — no half-active second account (Daniel's test)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const old = db.seedConnection(user.id, "microsoft", "old@levi-law.co.il");
+    const expired = db.seedConnection(user.id, "google", "expired@gmail.com");
+    await db.setConnectionStatus(expired.id, "expired");
+    db.seedConnection(user.id, "microsoft", "dana@levi-law.co.il");
+    await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { state: "s", verifier: "v", started_at: "2026-10-23T00:40:00Z" } } });
+    const ai = new MockProvider().enqueue({ text: '{"intent":"meta","complexity":"simple","needs_tools":false,"reply":"יש חיבור אחד."}' });
+    await runAssistant({ db, ai, user: (await db.getUser(user.id))!, connections: await db.listConnections(user.id), text: "כמה חיבורים יש לי?" });
+    const system = ai.calls[0]!.system;
+    expect(system).toContain("- Microsoft 365 מחובר (dana@levi-law.co.il):");
+    expect(system).not.toContain(old.account_email!);
+    expect(system).not.toContain("expired@gmail.com");
+    expect(system).toContain("- Google לא מחובר.");
+    expect(system).not.toContain("oauth_pending");
+  });
+
+  it("collects the flows the account tools request, and suppresses nothing else", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const ai = new MockProvider().enqueue(
+      { text: '{"intent":"account","complexity":"tool","needs_tools":true,"reply":null}' },
+      { toolCalls: [{ id: "c1", name: "start_upgrade", input: {} }, { id: "c2", name: "start_upgrade", input: {} }], stopReason: "tool_use" },
+      { text: "" },
+    );
+    const out = await runAssistant({ db, ai, user, connections: [], text: "רוצה לעבור לגרסה הגדולה" });
+    expect(out.flows).toEqual(["upgrade"]);
+    expect(out.text).toBe(""); // no "לא הצלחתי" filler: the flow is the answer
+  });
+
   it("parses router verdicts leniently", () => {
     expect(parseRouterVerdict('בטח: {"intent":"smalltalk","complexity":"simple","needs_tools":false,"reply":"היי"}')).toEqual({ intent: "smalltalk", complexity: "simple", needs_tools: false, reply: "היי", agent: null });
     expect(parseRouterVerdict("not json")).toBeNull();

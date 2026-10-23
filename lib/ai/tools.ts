@@ -1,7 +1,15 @@
 import type { Db, PendingActionRow } from "@/lib/db/types";
 import { rescheduleMorningSummary } from "@/lib/jobs/morning-summary";
+import type { ReplyButton } from "@/lib/wa/types";
+import { ACCOUNT_TOOLS } from "./account-tools";
 import { REMINDER_TOOLS } from "./reminder-tools";
 import type { ToolDefinition } from "./types";
+
+/**
+ * A deterministic flow the pipeline runs after the turn, on the assistant's request (lib/ai/account-tools.ts): the real
+ * upgrade offer (one-tap approval or the pay link) and the agent-creation flow — the same ones "שדרוג" / "סוכן חדש" start.
+ */
+export type AssistantFlow = "upgrade" | "new_agent";
 
 /** Runtime handed to every tool. `createPending` is how a tool proposes an outbound action (never executes it). */
 export interface ToolContext {
@@ -10,6 +18,10 @@ export interface ToolContext {
   now: Date;
   /** records a pending action and returns it; the pipeline renders it with approval buttons */
   createPending(kind: PendingActionRow["kind"], payload: Record<string, unknown>): Promise<PendingActionRow>;
+  /** asks the pipeline to run a flow after the reply (absent outside the WhatsApp pipeline → the tool says so) */
+  requestFlow?(flow: AssistantFlow): void;
+  /** quick-reply buttons for the turn's reply (at most 3 in all; e.g. "move the reminder to the next date") */
+  addReplyButtons?(buttons: ReplyButton[]): void;
   /**
    * The turn's agent may only reach a list of addresses (docs/design/agents.md §7.2): a tool that changes or cancels
    * an existing event first looks up who that reaches (`current_attendees` in the payload) so the guard can check it.
@@ -47,7 +59,7 @@ export const draftEmailTool: Tool = {
       subject: String(input.subject ?? ""),
       body: String(input.body ?? ""),
     });
-    return { status: "pending_approval", pending_action_id: pending.id, note: "הטיוטה מוצגת למשתמש עם כפתורי שלח/ערוך/בטל. ענה במשפט קצר בלבד." };
+    return { status: "pending_approval", pending_action_id: pending.id, note: "הטיוטה מוצגת למשתמש עם כפתורי שלח/ערוך/בטל. לענות במשפט קצר בלבד." };
   },
 };
 
@@ -77,7 +89,7 @@ export const createEventTool: Tool = {
       location: String(input.location ?? ""),
       attendees: Array.isArray(input.attendees) ? input.attendees.map(String) : [],
     });
-    return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. ענה במשפט קצר בלבד." };
+    return { status: "pending_approval", pending_action_id: pending.id, note: "הפרטים מוצגים למשתמש עם כפתורי קבע/ערוך/בטל. לענות במשפט קצר בלבד." };
   },
 };
 
@@ -127,7 +139,7 @@ export const rememberFactTool: Tool = {
 };
 
 /** Tools available before any Microsoft/Google connection exists. Graph/Google tools register in Milestone 4/6. */
-export const BASE_TOOLS: Tool[] = [draftEmailTool, createEventTool, setMorningTimeTool, rememberFactTool, ...REMINDER_TOOLS];
+export const BASE_TOOLS: Tool[] = [draftEmailTool, createEventTool, setMorningTimeTool, rememberFactTool, ...REMINDER_TOOLS, ...ACCOUNT_TOOLS];
 
 export function toolDefinitions(tools: Tool[]): ToolDefinition[] {
   return tools.map(({ name, description, input_schema }) => ({ name, description, input_schema }));

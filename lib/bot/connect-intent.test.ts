@@ -24,6 +24,23 @@ describe("connect intents", () => {
     expect(connectRequestProvider("לחבר בין שני הלקוחות", [])).toBeNull();
   });
 
+  it("accepts every spelling of Gmail — geresh, apostrophe, curly quote, none — with or without the verb (Daniel's test)", () => {
+    for (const t of ["לחבר את הג׳ימייל", "לחבר את הג'ימייל", "לחבר את הג’ימייל", "לחבר את הגימייל", "לחבר gmail", "לחבר את הגוגל", "תחברי לי את הג׳ימייל", "אני רוצה לחבר את הג׳ימייל", "אפשר לחבר את גוגל?"]) {
+      expect(connectRequestProvider(t, []), t).toBe("google");
+    }
+    // a bare provider name: the answer to "which account?" or a correction right after the other provider's link
+    for (const t of ["הג׳ימייל", "ג׳ימייל", "ג'ימייל", "הגימייל", "גימייל", "ג׳י מייל", "Gmail", "gmail.", "גוגל", "Google", "את הג׳ימייל שלי", "גוגל דרייב"]) {
+      expect(connectRequestProvider(t, [conn("microsoft", "active")]), t).toBe("google");
+    }
+    for (const t of ["אאוטלוק", "Outlook", "מיקרוסופט", "Microsoft 365", "אופיס 365"]) expect(connectRequestProvider(t, []), t).toBe("microsoft");
+    // already connected: the bare name is a question for the assistant, not a new link
+    expect(connectRequestProvider("הג׳ימייל", [conn("google", "active")])).toBeNull();
+    expect(connectRequestProvider("אאוטלוק", [conn("microsoft", "active")])).toBeNull();
+    // an expired connection is not active: the bare name brings the link
+    expect(connectRequestProvider("גוגל", [conn("google", "expired")])).toBe("google");
+    for (const t of ["מה חדש בג׳ימייל?", "דרייב", "גוגל אמר שהפגישה בוטלה"]) expect(connectRequestProvider(t, []), t).toBeNull();
+  });
+
   it("offers a reconnect only when no live connection can answer", () => {
     expect(reconnectProviderFor("מה יש לי ביומן?", [conn("google", "expired")])).toBe("google");
     expect(reconnectProviderFor("מה יש לי ביומן?", [conn("microsoft", "expired")])).toBe("microsoft");
@@ -47,5 +64,17 @@ describe("connect intents", () => {
     expect(h.wa.texts.at(-1)).toContain("החיבור ל-Google פג תוקף");
     expect(h.wa.texts.at(-1)).toContain("/api/auth/google/start?t=");
     expect(h.ai.calls).toHaveLength(0); // no model call for any of these
+  });
+
+  it("'הג׳ימייל' right after a Microsoft link brings the Google link, without the model", async () => {
+    const h = makeHarness();
+    const user = await h.db.createUser("dana@example.com");
+    await h.db.mergeUserProfile(user.id, { onboarding: { step: "done", startedAt: "x" } });
+    h.db.seedWaIdentity(user.id, "+972501234567");
+    await processInbound(h.ctx, h.inbound("לחבר את המייל"));
+    expect(h.wa.texts.at(-1)).toContain("/api/auth/microsoft/start?t=");
+    expect((await processInbound(h.ctx, h.inbound("הג׳ימייל"))).note).toBe("connect link");
+    expect(h.wa.texts.at(-1)).toMatch(/^הנה הקישור לחיבור Google:\nhttps:\/\/app\.example\.co\.il\/api\/auth\/google\/start\?t=/);
+    expect(h.ai.calls).toHaveLength(0);
   });
 });

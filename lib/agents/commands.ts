@@ -1,5 +1,6 @@
 import type { BotContext } from "@/lib/bot/context";
 import { payLinkFor } from "@/lib/billing/pay-link";
+import { PRODUCT_NAME } from "@/lib/brand";
 import { acopy, agentButtons, agentLists, type AgentListLine } from "@/lib/copy/bot-agents";
 import type { AgentKey, BuiltinRole, SubscriptionRow, UserRow } from "@/lib/db/types";
 import type { InboundMessage, ListRow } from "@/lib/wa/types";
@@ -58,6 +59,17 @@ export type AgentCommand = { kind: "list" } | { kind: "new"; template: BuiltinRo
 
 const LIST_RE = /^(סוכנים|הסוכנים|הסוכנים שלי|רשימת (ה)?סוכנים|מה הסוכנים יודעים לעשות|אילו סוכנים יש לי)$/;
 const NEW_RE = /^(סוכן חדש|ליצור סוכן( חדש)?|יצירת סוכן( חדש)?)(\s+(.+))?$/;
+/**
+ * Natural ways to ask for a new agent — "אפשר ליצור סוכן?", "תיצרי לי סוכן", "אתה יכול ליצור לי סוכן", "איך יוצרים
+ * סוכן?" — whole messages only, so "תזכירי לי לדבר עם סוכן הביטוח" still goes to the assistant.
+ */
+const NEW_NATURAL_RE = new RegExp(
+  `^(?:(?:היי|הי|שלום|${PRODUCT_NAME})[, ]+)?` +
+    "(?:(?:אני )?(?:רוצה|צריך|צריכה|רוצים|אשמח) |(?:אפשר|בבקשה) |(?:אתה|את) (?:יכול|יכולה) (?:בבקשה )?|(?:תוכל|תוכלי) |איך (?:אפשר |אני )?)?" +
+    // the verb — or none after a wish ("רוצה סוכן חדש")
+    "(?:(?:ליצור|תיצור|תיצרי|תצור|תצרי|צור|צרי|לבנות|תבנה|תבני|להוסיף|תוסיף|תוסיפי|להקים|יוצרים|בונים|מוסיפים|מקימים|יצירת)(?: לי| לנו)? |(?<=(?:רוצה|צריך|צריכה|רוצים) ))" +
+    "(?:עוד )?(?:סוכן|סוכנת|סוכנים)(?: חדש| חדשה| חדשים| משלי| משלך| נוסף| נוספת)?(?: בבקשה)?$",
+);
 const NAMED: [AgentCommand["kind"], RegExp][] = [
   ["edit", /^(עריכת (ה)?סוכן|לערוך (את )?(ה)?סוכן)\s+(.+)$/],
   ["disable", /^(השבתת (ה)?סוכן|להשבית (את )?(ה)?סוכן|כיבוי (ה)?סוכן|לכבות (את )?(ה)?סוכן)\s+(.+)$/],
@@ -71,6 +83,7 @@ export function parseAgentCommand(raw: string): AgentCommand | null {
   if (LIST_RE.test(text)) return { kind: "list" };
   const n = text.match(NEW_RE);
   if (n) return { kind: "new", template: n[5] ? templateFromText(n[5]) : null };
+  if (NEW_NATURAL_RE.test(text)) return { kind: "new", template: null };
   for (const [kind, re] of NAMED) {
     const m = text.match(re);
     if (m) return { kind, name: sanitizeName(m[m.length - 1]!) } as AgentCommand;
@@ -158,6 +171,15 @@ export async function handleAgentMessage(ctx: BotContext, user: UserRow, msg: In
   }
   const activeKey = sticky && choices.some((a) => a.key === sticky.key) ? sticky.key : null;
   return { handled: false, text, agent: null, choices, activeKey, clearSticky: false };
+}
+
+/**
+ * The create flow started by the assistant's `start_agent_creation` tool (lib/ai/account-tools.ts) — the same first
+ * step as "סוכן חדש": the plan's quota check, then the template list.
+ */
+export async function startAgentCreation(ctx: BotContext, user: UserRow, to: string, sub: SubscriptionRow | null): Promise<void> {
+  const state = await loadAgents(ctx.db, user.id, ctx.now(), sub);
+  await new Turn(ctx, user, to, state).command({ kind: "new", template: null });
 }
 
 /** After an assistant turn: the agent that answered stays sticky for 10 minutes; a main-assistant turn clears it. */

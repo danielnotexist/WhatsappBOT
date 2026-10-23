@@ -3,6 +3,7 @@
  * A test checks that each id here exists in the document. Placeholders are filled by the functions;
  * The product name comes from lib/brand.ts (עלזה). The assistant speaks about herself in the feminine (docs/copy/style-guide.md).
  */
+import { PLANS, TRIAL_MESSAGES } from "@/lib/billing/plans";
 import { PRODUCT_NAME as P } from "@/lib/brand";
 import type { ListRow, ReplyButton } from "@/lib/wa/types";
 
@@ -99,6 +100,8 @@ export const copy = {
   "bill.plan_limit_reached": (resetDate: string, upgradeLink: string) => `הגעת ל-750 ההודעות של המסלול הבסיסי החודש. המכסה מתחדשת ב-${resetDate}.\n\nכדי להמשיך כבר עכשיו — מסלול פרו (299 ₪): עד 3,000 הודעות, שלושת הסוכנים המובנים ועד 3 סוכנים משלך, ואוטומציות:\n${upgradeLink}\n\nתזכורות וסיכום הבוקר ממשיכים לעבוד כרגיל.`,
   "bill.upgraded": () => `עברת למסלול פרו. המכסה החודשית עודכנה ל-3,000 הודעות. שלושת הסוכנים המובנים זמינים, ואפשר ליצור עד 3 סוכנים משלך — "מה הסוכנים יודעים לעשות?" יסביר.`,
   "bill.status": (s: { planName: string; used: number; limit: number; nextCharge: string; amount: string }) => `*המנוי שלך*\nמסלול: ${s.planName}\nהודעות החודש: ${s.used} מתוך ${s.limit}\nחיוב הבא: ${s.nextCharge}, ${s.amount} ₪\n\nלשנות מסלול או לבטל — פשוט לכתוב.`,
+  "bill.status_trial": (left: number, payLink: string) =>
+    `*המנוי שלך*\nמסלול: תקופת ניסיון — ${Number(left) > 0 ? `נשארו ${left} מתוך ${TRIAL_MESSAGES} הודעות.` : `כל ${TRIAL_MESSAGES} ההודעות נוצלו.`}\n\nלהפעלת מנוי — ${PLANS.basic.nameHe} ${PLANS.basic.priceIls} ₪ (עד ${PLANS.basic.messages} הודעות בחודש) או ${PLANS.pro.nameHe} ${PLANS.pro.priceIls} ₪ (עד ${PLANS.pro.messages.toLocaleString("en-US")} הודעות, עם הסוכנים המובנים), כולל מע״מ:\n${payLink}`,
 
   // ---- 7. meta ----
   "meta.capabilities": (connected: string) =>

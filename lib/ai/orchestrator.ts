@@ -4,9 +4,11 @@ import { maxOutboundPerDay, type ResolvedAgent } from "@/lib/agents/policy";
 import { agentChoices, buildAgentSection, buildRouterAgentBlock } from "@/lib/agents/prompt";
 import { AgentDailyCapError } from "@/lib/db/errors";
 import type { AgentKey, ConnectionRow, Db, PendingActionRow, UserRow } from "@/lib/db/types";
+import type { ReplyButton } from "@/lib/wa/types";
+import type { AccountContext } from "./account-context";
 import { loadMemory } from "./memory";
 import { ROUTER_INSTRUCTIONS, buildSystemPrompt } from "./system-prompt";
-import { BASE_TOOLS, toolDefinitions, type Tool, type ToolContext } from "./tools";
+import { BASE_TOOLS, toolDefinitions, type AssistantFlow, type Tool, type ToolContext } from "./tools";
 import type { AiProvider, ChatMessage, CompletionResponse, ToolCall, Usage } from "./types";
 
 /** How an agent turn was chosen: an explicit address (§5.2), the sticky agent, or the router's pick (§5.4). */
@@ -30,12 +32,18 @@ export interface AssistantInput {
   agentChoices?: ResolvedAgent[];
   /** the last agent that answered, while still sticky (10 minutes) — a hint for the router */
   activeAgentKey?: string | null;
+  /** the plan in force and what is left of it (lib/ai/account-context.ts) — the facts behind "איזה מנוי אני?" */
+  account?: AccountContext | null;
 }
 
 export interface AssistantOutput {
   text: string;
   /** actions created during this turn, to render with approval buttons */
   pendingActions: PendingActionRow[];
+  /** flows the pipeline runs after the turn (start_upgrade / start_agent_creation); their messages are the answer */
+  flows: AssistantFlow[];
+  /** quick-reply buttons for the reply (a reminder set after midnight: "move it to the next date") */
+  replyButtons: ReplyButton[];
   model: string;
   usage: Usage;
   costUsd: number | null;
@@ -84,17 +92,23 @@ const addUsage = (a: Usage, b: Usage): Usage => ({ input: a.input + b.input, out
 export async function runAssistant(input: AssistantInput): Promise<AssistantOutput> {
   const now = input.now ?? new Date();
   const memory = await loadMemory(input.db, input.user.id);
+  // only active connections, the newest per provider — the one the tools use (lib/ms, lib/google active*Connection)
+  const active = input.connections.filter((c) => c.status === "active");
+  const inUse = (["microsoft", "google"] as const).map((p) => active.findLast((c) => c.provider === p)).filter((c): c is ConnectionRow => Boolean(c));
   const system = buildSystemPrompt({
     name: input.user.name,
     businessName: input.user.business_name,
     businessType: input.user.business_type,
     timezone: input.user.timezone,
     morningTime: input.user.morning_time,
-    connections: input.connections.filter((c) => c.status === "active").map((c) => ({ provider: c.provider, accountEmail: c.account_email })),
+    connections: inUse.map((c) => ({ provider: c.provider, accountEmail: c.account_email, scopes: c.scopes })),
     profile: input.user.profile,
     summary: memory.summary,
     facts: memory.facts,
     now,
+    account: input.account ?? null,
+    agentNames: (input.agentChoices ?? []).filter((a) => a.status === "active").map((a) => a.name),
+    gmailRead: (input.tools ?? []).some((t) => t.name === "gmail_search_emails"),
   });
   const history: ChatMessage[] = [...memory.history, { role: "user", content: input.text }];
   let usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -121,7 +135,7 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
       agent = picked;
       via = picked.key === input.activeAgentKey ? "sticky" : "router";
     } else if (verdict && verdict.complexity === "simple" && verdict.reply) {
-      return { text: verdict.reply, pendingActions: [], model: routed.model, usage, costUsd: cost, route: "router", intent: verdict.intent, agent: null, agentVia: null };
+      return { text: verdict.reply, pendingActions: [], flows: [], replyButtons: [], model: routed.model, usage, costUsd: cost, route: "router", intent: verdict.intent, agent: null, agentVia: null };
     }
   }
 
@@ -131,6 +145,8 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
   const strongSystem = agent ? `${system}\n\n${buildAgentSection(agent)}` : system;
   const byName = new Map(tools.map((t) => [t.name, t]));
   const pendingActions: PendingActionRow[] = [];
+  const flows: AssistantFlow[] = [];
+  const replyButtons: ReplyButton[] = [];
   const turnAgent = agent;
   // The tool calls of one model response run in parallel (Promise.all below), but drafts are created one at a time:
   // the guard counts the agent's drafts and the insert lands before the next draft is checked, so parallel calls
@@ -146,6 +162,12 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
     userId: input.user.id,
     now,
     checksRecipients: Boolean(turnAgent?.permissions.recipients?.length),
+    requestFlow: (flow) => {
+      if (!flows.includes(flow)) flows.push(flow);
+    },
+    addReplyButtons: (buttons) => {
+      for (const b of buttons) if (replyButtons.length < 3 && !replyButtons.some((x) => x.id === b.id)) replyButtons.push(b);
+    },
     createPending: (kind, payload) =>
       oneAtATime(async () => {
         if (turnAgent) {
@@ -178,10 +200,12 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
     addCost(last);
     text = last.text || text;
   }
-  if (!text.trim()) text = pendingActions.length ? "" : "לא הצלחתי להשלים את זה. אפשר לנסח את הבקשה אחרת?";
+  if (!text.trim()) text = pendingActions.length || flows.length ? "" : "לא הצלחתי להשלים את זה. אפשר לנסח את הבקשה אחרת?";
   return {
     text,
     pendingActions,
+    flows,
+    replyButtons,
     model: last.model,
     usage,
     costUsd: cost,

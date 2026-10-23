@@ -1,6 +1,6 @@
 import type { BillingContext } from "@/lib/billing/context";
 import { LazyHypGateway } from "@/lib/hyp/client";
-import { handleBillingButton, handleBillingCommand, handlePaused, handlePlanLimit } from "@/lib/billing/whatsapp";
+import { handleBillingButton, handleBillingCommand, handlePaused, handlePlanLimit, presentOffer } from "@/lib/billing/whatsapp";
 import { copy } from "@/lib/copy/bot";
 import type { UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -36,6 +36,19 @@ export async function handleBillingPress(ctx: BotContext, user: UserRow, msg: In
 export async function handleBillingText(ctx: BotContext, user: UserRow, msg: InboundMessage): Promise<boolean> {
   if (msg.type !== "text" && !(msg.type === "template_button" && msg.text)) return false;
   return handleBillingCommand(billingCtxOf(ctx), user, msg.fromE164, msg.text ?? "");
+}
+
+/**
+ * The assistant's `start_upgrade` tool: the very offer "שדרוג" presents — one-tap approval with a saved card, the pay
+ * link on the trial or without a card, or why there is nothing to upgrade (already pro, a charge to settle first).
+ */
+export async function upgradeOffer(ctx: BotContext, user: UserRow, to: string): Promise<void> {
+  try {
+    await presentOffer(billingCtxOf(ctx), user, to, "upgrade");
+  } catch (e) {
+    console.error("[bot] upgrade offer failed:", (e as Error).message);
+    await ctx.wa.sendText(to, copy["err.generic"]());
+  }
 }
 
 /** Basic plan at 750: the one-tap upgrade offer (falls back to the link message without a saved card). */
