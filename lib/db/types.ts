@@ -461,6 +461,41 @@ export interface MeetingSummaryRow {
 
 export type NewMeetingSummary = Omit<MeetingSummaryRow, "id" | "done" | "created_at">;
 
+// ---- proactive alerts (migration 0013, lib/proactive) ----
+
+/** What an item is about: a mail, a calendar clash, a meeting to prepare for. */
+export type ProactiveKind = "urgent_mail" | "conflict" | "back_to_back" | "awaiting_reply" | "deadline" | "external_meeting" | "phishing";
+/** `urgent`: an alert of its own (at most 2 a day); `summary`: a line of the morning summary's section. */
+export type ProactiveChannel = "urgent" | "summary";
+/** urgent: sent / deferred (the window was closed or the day's cap reached) / folded (shown in a morning summary); summary: listed */
+export type ProactiveStatus = "sent" | "deferred" | "folded" | "listed";
+
+export interface ProactiveAlertRow {
+  id: string;
+  user_id: string;
+  /** the thing itself ("mail:microsoft:<id>", "conflict:<a>|<b>") — urgent: once ever; summary: once per day */
+  item_key: string;
+  kind: ProactiveKind;
+  channel: ProactiveChannel;
+  status: ProactiveStatus;
+  /** the user's local day, YYYY-MM-DD */
+  local_day: string;
+  /** what the buttons need (provider, message id, sender, subject, event titles) — mail metadata only, no bodies */
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface NewProactiveItem {
+  user_id: string;
+  item_key: string;
+  kind: ProactiveKind;
+  local_day: string;
+  payload: Record<string, unknown>;
+}
+
+/** claimed = send it now; cap / deferred = recorded as deferred (folded into the next morning summary); duplicate = known */
+export type ProactiveClaimResult = "claimed" | "cap" | "deferred" | "duplicate";
+
 export interface SupportTicketRow {
   id: string;
   created_at: string;
@@ -639,6 +674,22 @@ export interface Db {
 
   // support tickets (migration 0011) — from the website's support chat
   createSupportTicket(row: NewSupportTicket): Promise<SupportTicketRow>;
+
+  // proactive alerts (migration 0013) — lib/proactive
+  /**
+   * SQL proactive_alert_claim(): an urgent alert, atomically per user (the user row is locked). `duplicate` when the
+   * item was already alerted (any day) or listed in today's summary; otherwise a row is inserted — `sent` when
+   * `deliver` and fewer than `cap` alerts were sent that day (→ "claimed"), else `deferred` (→ "cap" / "deferred").
+   */
+  claimProactiveAlert(item: NewProactiveItem, opts: { cap: number; deliver: boolean }): Promise<{ result: ProactiveClaimResult; alert: ProactiveAlertRow | null }>;
+  /** a line of the morning summary's section: one row per (item, day) — an existing one is returned with the new payload */
+  addProactiveSummaryItem(item: NewProactiveItem): Promise<ProactiveAlertRow>;
+  /** the user's own row (any other user's id → null) */
+  getProactiveAlert(userId: string, id: string): Promise<ProactiveAlertRow | null>;
+  /** urgent alerts deferred since `since` → folded (atomic), returned oldest first — the morning summary shows them */
+  foldDeferredProactiveAlerts(userId: string, since: Date): Promise<ProactiveAlertRow[]>;
+  /** sets an urgent alert's status (e.g. back to deferred when its send failed after the claim) */
+  setProactiveAlertStatus(userId: string, id: string, status: ProactiveStatus): Promise<void>;
 
   // proactive alerts (migration 0013) — lib/proactive
   /**

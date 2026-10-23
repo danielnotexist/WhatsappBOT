@@ -19,6 +19,8 @@ const eslintConfig = defineConfig([
     "scripts/**",
     "design/**",
     "supabase/**",
+    // self-contained media projects (own package.json, e.g. media/brand-film)
+    "media/**",
     ".claude/**",
   ]),
 ]);

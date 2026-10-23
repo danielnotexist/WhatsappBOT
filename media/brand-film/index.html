@@ -1,0 +1,1181 @@
+<!doctype html>
+<!--
+  עלזה (Alze) - 20 s UI-motion brand film. 120 BPM, 10 bars, 40 beats.
+
+  One HTML file. Everything on screen is a pure function of time: `seek(t)` sets every style from t alone
+  (no CSS transitions, no timers, no state carried between frames). Springs are closed-form step responses; a value
+  that changes target many times is the sum of one spring per change, summed over the previous cycle too, so
+  seek(t) === seek(t + 20) and the film loops.
+
+  HyperFrames: the root carries the composition attributes and the page answers `hf-seek` (seek protocol).
+  Formats: index.html (1440x1440) and index.html?format=wide (1920x1080, same timeline, its own camera fit).
+-->
+<html lang="he">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>עלזה - סרט מותג</title>
+    <style>
+      /* Varela Round (lib/fonts.ts) and Geist, downloaded from Google Fonts into assets/fonts (OFL). */
+      @font-face {
+        font-family: "Varela Round";
+        src: url("assets/fonts/varela-round-hebrew.woff2") format("woff2");
+        unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+        font-display: block;
+      }
+      @font-face {
+        font-family: "Varela Round";
+        src: url("assets/fonts/varela-round-latin.woff2") format("woff2");
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC,
+          U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        font-display: block;
+      }
+      @font-face {
+        font-family: "Geist";
+        src: url("assets/fonts/geist-latin.woff2") format("woff2");
+        font-weight: 100 900;
+        unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+20AC,
+          U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        font-display: block;
+      }
+
+      /* the system's colour emoji (the reaction), named so the renderer resolves it */
+      @font-face {
+        font-family: "Alze Emoji";
+        src: local("Noto Color Emoji");
+      }
+
+      :root {
+        --bg: #e9e6e1;
+        --ink: #121212;
+        --paper: #ffffff;
+        --muted: #8b867e;
+        --line: #eeebe6;
+        --stroke: #dedad3;
+        --honey: #e7b65c;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        overflow: hidden;
+      }
+      #root {
+        position: relative;
+        overflow: hidden;
+        background: var(--bg);
+        font-family: "Varela Round", sans-serif;
+        color: var(--ink);
+        font-synthesis: none;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* Geometry containers are LTR on purpose: positions are world coordinates set from seek(t). Content is RTL. */
+      #world,
+      .w-abs,
+      #shape,
+      .layer,
+      #knob,
+      #cursor,
+      #captions {
+        position: absolute;
+        left: 0;
+        top: 0;
+      }
+      #shape {
+        overflow: hidden;
+        box-shadow:
+          0 1px 2px rgb(20 18 15 / 0.06),
+          0 18px 40px -16px rgb(20 18 15 / 0.22);
+      }
+      .rtl {
+        direction: rtl;
+      }
+      .num {
+        font-family: "Geist", sans-serif;
+        font-weight: 500;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+      }
+      .grow {
+        flex: 1;
+      }
+      svg.i {
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .pill-honey {
+        display: inline-block;
+        background: var(--honey);
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 4px 16px 6px;
+        font-size: 26px;
+        line-height: 1.2;
+      }
+      .btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        transform-origin: 50% 50%;
+      }
+      .btn-ink {
+        background: var(--ink);
+        color: #fff;
+      }
+      .btn-line {
+        background: #fff;
+        color: var(--ink);
+        box-shadow: inset 0 0 0 2px var(--stroke);
+      }
+
+      /* lock screen */
+      #clock {
+        width: 760px;
+        text-align: center;
+      }
+      #clock .t {
+        font-family: "Geist", sans-serif;
+        font-weight: 400;
+        font-size: 168px;
+        line-height: 1;
+        letter-spacing: -0.04em;
+      }
+      #clock .d {
+        margin-top: 18px;
+        font-size: 32px;
+        color: var(--muted);
+      }
+
+      /* notification */
+      #L-notif .tile {
+        width: 84px;
+        height: 84px;
+        border-radius: 24px;
+        background: var(--ink);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+      }
+      .slot {
+        position: relative;
+        display: inline-block;
+      }
+      .slot > .ghost {
+        visibility: hidden;
+      }
+      .slot > span:not(.ghost) {
+        position: absolute;
+        inset: 0;
+        text-align: end;
+      }
+
+      /* chat */
+      #reaction {
+        width: 84px;
+        height: 62px;
+        border-radius: 31px;
+        background: #fff;
+        box-shadow:
+          0 0 0 4px var(--bg),
+          0 6px 16px -6px rgb(20 18 15 / 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: "Alze Emoji", sans-serif;
+        font-size: 34px;
+        line-height: 1;
+        transform-origin: 50% 50%;
+      }
+      .dot {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #9d978e;
+      }
+
+      /* summary + draft cards */
+      .avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: #f0ede8;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        flex: none;
+      }
+      .mrow {
+        height: 104px;
+        gap: 22px;
+        border-top: 2px solid var(--line);
+      }
+      #sel {
+        position: absolute;
+        z-index: -1;
+        left: 0;
+        top: 0;
+        background: #ddd7cd;
+        border-radius: 8px;
+      }
+      .wslot {
+        position: relative;
+        display: inline-block;
+      }
+      .wslot > .ghost {
+        visibility: hidden;
+      }
+      .wslot > span:not(.ghost) {
+        position: absolute;
+        top: 0;
+        right: 0;
+      }
+
+      /* toggle + tabs */
+      #track {
+        width: 120px;
+        height: 72px;
+        border-radius: 36px;
+        flex: none;
+        transform-origin: 50% 50%;
+      }
+      #knob {
+        background: #fff;
+        box-shadow: 0 2px 6px -1px rgb(20 18 15 / 0.28);
+      }
+      .tabs {
+        display: flex;
+        padding: 8px;
+        height: 128px;
+      }
+      .tab {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        font-size: 33px;
+      }
+
+      /* pro */
+      .pline {
+        height: 98px;
+        gap: 22px;
+        font-size: 41px;
+        border-top: 2px solid rgb(18 18 18 / 0.12);
+      }
+      .pcheck {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--honey);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: none;
+      }
+
+      /* captions (screen space) */
+      #captions {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      .cap {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0.3em;
+        white-space: nowrap;
+      }
+      .cap > span {
+        display: inline-block;
+      }
+
+      #cursor {
+        transform-origin: 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="20" data-width="1440" data-height="1440" data-no-timeline>
+      <div id="world">
+        <!-- lock-screen clock above the opening notification -->
+        <div id="clock" class="w-abs rtl" data-in="40" data-out="7">
+          <div class="t" dir="ltr">09:41</div>
+          <div class="d">יום שלישי, <span class="num">13</span> באוקטובר</div>
+        </div>
+
+        <!-- the sender pill above Alze's typing bubble -->
+        <div id="sender" class="w-abs rtl" data-in="12.25" data-out="13"><span class="pill-honey">עלזה</span></div>
+
+        <!-- THE shape: every state is this element -->
+        <div id="shape">
+          <!-- 1. email notification on the lock screen -->
+          <div class="layer" id="L-notif" data-in="39.15" data-out="7" data-w="700" data-h="150">
+            <div class="row rtl" style="height: 150px; padding: 0 33px; gap: 24px">
+              <div class="tile"><svg class="i" data-icon="mail" data-size="44"></svg></div>
+              <div class="col grow" style="gap: 6px">
+                <div class="row muted" style="font-size: 25px">
+                  <span class="grow">דואר</span><span>עכשיו</span>
+                </div>
+                <div style="font-size: 38px; line-height: 1.2">
+                  <span class="slot num" id="count"
+                    ><span class="ghost">27</span><span data-in="39.15" data-out="2" data-roll>3</span
+                    ><span data-in="2" data-out="3" data-roll>12</span
+                    ><span data-in="3" data-out="7" data-roll>27</span></span
+                  >
+                  מיילים חדשים
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. snooze button -->
+          <div class="layer" id="L-snooze" data-in="7.15" data-out="9" data-w="600" data-h="132">
+            <div class="row rtl" style="height: 132px; justify-content: center; gap: 18px; color: #fff; font-size: 42px">
+              <svg class="i" data-icon="clock" data-size="40"></svg><span>תזכיר לי אחר כך</span>
+            </div>
+          </div>
+
+          <!-- 3. WhatsApp composer -->
+          <div class="layer" id="L-composer" data-in="9.15" data-out="10" data-w="680" data-h="116">
+            <div class="row rtl" style="height: 116px; padding-inline: 44px 16px; gap: 16px">
+              <div class="grow" style="font-size: 40px">
+                <span data-in="9.2" data-out="10">תביאי</span> <span data-in="9.3" data-out="10">לי</span>
+                <span data-in="9.4" data-out="10">מה</span> <span data-in="9.5" data-out="10">חשוב</span>
+              </div>
+              <div class="btn btn-ink" id="send" style="width: 84px; height: 84px" data-press="10">
+                <svg class="i" data-icon="up" data-size="40"></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- 4. sent bubble -->
+          <div class="layer" id="L-sent" data-in="10.12" data-out="12" data-w="600" data-h="128">
+            <div class="col rtl" style="height: 128px; padding: 22px 36px 0; color: #fff">
+              <div style="font-size: 40px; line-height: 1.2">תביאי לי מה חשוב</div>
+              <div class="row" style="justify-content: flex-end; gap: 8px; color: #9c9890; margin-top: 2px">
+                <span class="num" style="font-size: 22px">09:42</span><svg class="i" data-icon="checks" data-size="26"></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5. typing -->
+          <div class="layer" id="L-typing" data-in="12.15" data-out="13" data-w="190" data-h="100">
+            <div class="row" style="height: 100px; justify-content: center; gap: 14px">
+              <div class="dot"></div>
+              <div class="dot"></div>
+              <div class="dot"></div>
+            </div>
+          </div>
+
+          <!-- 6. summary: 3 mails waiting for a reply -->
+          <div class="layer" id="L-summary" data-in="13.15" data-out="16" data-w="720" data-h="660">
+            <div class="col rtl" style="height: 660px; padding: 40px 48px 44px">
+              <div class="row">
+                <span class="pill-honey">עלזה</span><span class="grow"></span
+                ><span class="num muted" style="font-size: 24px">09:42</span>
+              </div>
+              <div style="font-size: 46px; margin: 22px 0 18px; line-height: 1.2">
+                <span class="num">3</span> מיילים מחכים לתשובה
+              </div>
+              <div class="row mrow" data-in="14" data-out="16">
+                <div class="avatar">ר</div>
+                <div class="col grow" style="gap: 4px">
+                  <div style="font-size: 31px">רונית לוי</div>
+                  <div class="muted" style="font-size: 26px">הצעת מחיר לאירוע</div>
+                </div>
+                <span class="num muted" style="font-size: 24px">08:12</span>
+              </div>
+              <div class="row mrow" data-in="14.16" data-out="16">
+                <div class="avatar">ג</div>
+                <div class="col grow" style="gap: 4px">
+                  <div style="font-size: 31px">משרד רו״ח גבאי</div>
+                  <div class="muted" style="font-size: 26px">דוח מע״מ לחתימה</div>
+                </div>
+                <span class="num muted" style="font-size: 24px">07:55</span>
+              </div>
+              <div class="row mrow" data-in="14.32" data-out="16">
+                <div class="avatar">נ</div>
+                <div class="col grow" style="gap: 4px">
+                  <div style="font-size: 31px">נוי פרחים</div>
+                  <div class="muted" style="font-size: 26px">שינוי במועד המשלוח</div>
+                </div>
+                <span class="num muted" style="font-size: 24px">07:30</span>
+              </div>
+              <div class="grow"></div>
+              <div class="btn btn-ink" id="btn-draft" style="height: 96px; font-size: 34px" data-in="14.48" data-out="16" data-press="15">
+                לנסח תשובה
+              </div>
+            </div>
+          </div>
+
+          <!-- 7. draft with שלח / ערוך / בטל -->
+          <div class="layer" id="L-draft" data-in="16.15" data-out="19.2" data-w="720" data-h="540">
+            <div class="col rtl" style="height: 540px; padding: 40px 48px 44px">
+              <div class="row" style="gap: 16px">
+                <span class="pill-honey">עלזה</span><span class="muted" style="font-size: 26px">טיוטה לרונית לוי</span>
+              </div>
+              <div id="draft-body" style="position: relative; z-index: 0; isolation: isolate; font-size: 40px; line-height: 1.5; margin-top: 26px">
+                <div id="sel"></div>
+                <span
+                  >היי רונית, תודה על ההצעה. נשמח להיפגש ביום
+                  <span class="wslot" id="wslot"
+                    ><span class="ghost">שלישי</span><span id="w-old" data-in="16" data-out="18">שלישי</span
+                    ><span id="w-new" data-in="18.1" data-out="19.2">רביעי</span></span
+                  >
+                  ולסגור את כל הפרטים.</span
+                >
+              </div>
+              <div class="grow"></div>
+              <div class="row" style="gap: 14px">
+                <div class="btn btn-ink grow" id="btn-send" style="height: 92px; font-size: 34px" data-press="19">שלח</div>
+                <div class="btn btn-line grow" style="height: 92px; font-size: 34px">ערוך</div>
+                <div class="btn btn-line grow" style="height: 92px; font-size: 34px">בטל</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 8. loader -> done (also the short loader before the toast) -->
+          <div class="layer" id="L-spin1" data-in="19.3" data-out="20" data-w="136" data-h="136">
+            <svg class="spin" width="136" height="136" viewBox="0 0 136 136">
+              <circle cx="68" cy="68" r="24" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="layer" id="L-done" data-in="20" data-out="21" data-w="136" data-h="136">
+            <svg id="done-check" width="136" height="136" viewBox="0 0 136 136">
+              <path
+                d="M47 69.5 L61.5 84 L90 54"
+                fill="none"
+                stroke="#fff"
+                stroke-width="7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+
+          <!-- 9. calendar event -->
+          <div class="layer" id="L-event" data-in="21.15" data-out="23" data-w="800" data-h="212">
+            <div class="row rtl" style="height: 212px; padding: 0 36px; gap: 28px">
+              <div class="col" style="width: 136px; height: 136px; border-radius: 34px; background: var(--ink); color: #fff; align-items: center; justify-content: center; flex: none">
+                <span class="num" style="font-size: 56px; line-height: 1">14</span>
+                <span style="font-size: 22px; opacity: 0.7; margin-top: 6px">אוק׳</span>
+              </div>
+              <div class="col grow" style="gap: 8px">
+                <div style="font-size: 40px; line-height: 1.2">פגישה עם כהן, <span class="num">10:00</span></div>
+                <div class="muted" style="font-size: 27px">יום רביעי · <span class="num">45</span> דק׳</div>
+              </div>
+              <div class="btn btn-line" style="height: 66px; padding: 0 24px; gap: 10px; flex: none" data-in="22" data-out="23" data-pop>
+                <span class="num" style="font-size: 28px">Meet</span><svg class="i" data-icon="video" data-size="30"></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- 10. toggle row "סיכום בוקר" -->
+          <div class="layer" id="L-toggle" data-in="23.15" data-out="25" data-w="640" data-h="136">
+            <div class="row rtl" style="height: 136px; padding: 0 44px 0 34px; gap: 20px">
+              <div class="col grow" style="gap: 6px">
+                <div style="font-size: 40px; line-height: 1.2">סיכום בוקר</div>
+                <div class="muted" style="font-size: 26px">כל יום ב-<span class="num">07:30</span></div>
+              </div>
+              <div id="track"></div>
+            </div>
+          </div>
+
+          <!-- the toggle knob, which becomes the tab indicator -->
+          <div id="knob" data-in="23.15" data-out="29"></div>
+
+          <!-- 11. tabs: white labels, and black labels clipped to the indicator -->
+          <div class="layer" id="L-tabs-w" data-in="25.1" data-out="29" data-w="820" data-h="128">
+            <div class="tabs rtl" style="color: #fff">
+              <div class="tab"><svg class="i" data-icon="mail" data-size="32"></svg>מייל</div>
+              <div class="tab"><svg class="i" data-icon="calendar" data-size="32"></svg>יומן</div>
+              <div class="tab"><svg class="i" data-icon="file" data-size="32"></svg>קבצים</div>
+              <div class="tab"><svg class="i" data-icon="tasks" data-size="32"></svg>משימות</div>
+            </div>
+          </div>
+          <div class="layer" id="L-tabs-b" data-in="25.1" data-out="29" data-w="820" data-h="128">
+            <div class="tabs rtl" style="color: var(--ink)">
+              <div class="tab"><svg class="i" data-icon="mail" data-size="32"></svg>מייל</div>
+              <div class="tab"><svg class="i" data-icon="calendar" data-size="32"></svg>יומן</div>
+              <div class="tab"><svg class="i" data-icon="file" data-size="32"></svg>קבצים</div>
+              <div class="tab"><svg class="i" data-icon="tasks" data-size="32"></svg>משימות</div>
+            </div>
+          </div>
+
+          <!-- 12. pro card (the only honey surface) -->
+          <div class="layer" id="L-pro" data-in="29.15" data-out="35.2" data-w="700" data-h="760">
+            <div class="col rtl" style="height: 760px; padding: 50px 56px 56px">
+              <div style="font-size: 112px; line-height: 1; margin-bottom: 30px" data-in="29.2" data-out="35.2">פרו</div>
+              <div class="row pline" data-in="30" data-out="35.2">
+                <div class="pcheck"><svg class="i" data-icon="check" data-size="28"></svg></div>
+                סיכומי פגישות
+              </div>
+              <div class="row pline" data-in="31" data-out="35.2">
+                <div class="pcheck"><svg class="i" data-icon="check" data-size="28"></svg></div>
+                התראות יזומות
+              </div>
+              <div class="row pline" data-in="32" data-out="35.2">
+                <div class="pcheck"><svg class="i" data-icon="check" data-size="28"></svg></div>
+                <span>Google + Microsoft יחד</span>
+              </div>
+              <div class="row pline" data-in="33" data-out="35.2">
+                <div class="pcheck"><svg class="i" data-icon="check" data-size="28"></svg></div>
+                <span><span class="num">3</span> סוכנים</span>
+              </div>
+              <div class="grow"></div>
+              <div class="btn btn-ink" id="btn-pro" style="height: 108px; font-size: 38px" data-in="34" data-out="35.2" data-press="35">
+                לשדרג לפרו
+              </div>
+            </div>
+          </div>
+
+          <div class="layer" id="L-spin2" data-in="35.3" data-out="36" data-w="136" data-h="136">
+            <svg class="spin" width="136" height="136" viewBox="0 0 136 136">
+              <circle cx="68" cy="68" r="24" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" />
+            </svg>
+          </div>
+
+          <!-- 13. toast -->
+          <div class="layer" id="L-toast" data-in="36.12" data-out="39" data-w="560" data-h="136">
+            <div class="row rtl" style="height: 136px; justify-content: center; gap: 20px; font-size: 50px; color: #fff">
+              <span style="color: var(--honey)" data-in="36.15" data-out="39">עלזה</span>
+              <span data-in="37" data-out="39">על זה.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 👀 reaction on the sent bubble -->
+        <div id="reaction" class="w-abs" data-in="11" data-out="12" data-pop>👀</div>
+      </div>
+
+      <!-- captions, screen space -->
+      <div id="captions" class="rtl">
+        <div class="cap">
+          <span data-in="4" data-out="7">בדרכים.</span><span data-in="5" data-out="7.06">בשיחות.</span
+          ><span data-in="6" data-out="7.12">כל היום.</span>
+        </div>
+        <div class="cap"><span data-in="8.06" data-out="9.7">ומיילים</span><span data-in="8.2" data-out="9.76">מחכים.</span></div>
+        <div class="cap"><span data-in="20.1" data-out="22.5">עונים</span><span data-in="20.24" data-out="22.56">מהוואטסאפ.</span></div>
+      </div>
+
+      <div id="cursor">
+        <svg width="44" height="44" viewBox="0 0 44 44" style="display: block; overflow: visible">
+          <path
+            d="M3 2.5 L3 33 L11.2 25.4 L16.6 38.2 L22.4 35.8 L17.1 23.3 L28.4 23 Z"
+            fill="#121212"
+            stroke="#fff"
+            stroke-width="2.6"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </div>
+
+      <audio id="music" src="assets/audio/mix.wav" data-start="0" data-duration="20" data-track-index="0" data-volume="1"></audio>
+    </div>
+
+    <script>
+      (() => {
+        "use strict";
+
+        /* ---------- format ---------- */
+        const params = new URLSearchParams(location.search);
+        const WIDE = params.get("format") === "wide";
+        const W = WIDE ? 1920 : 1440;
+        const H = WIDE ? 1080 : 1440;
+        const FIT = { w: 0.76, h: 0.72, maxScale: 2.2 };
+        const BAND = WIDE ? 230 : 280; // bottom caption band reserved by the camera while a caption shows
+        const CAPTION_PX = WIDE ? 54 : 62;
+        const CURSOR_PX = WIDE ? 40 : 46;
+
+        const root = document.getElementById("root");
+        root.style.width = W + "px";
+        root.style.height = H + "px";
+        root.dataset.width = String(W);
+        root.dataset.height = String(H);
+
+        /* ---------- time ---------- */
+        const T = 20;
+        const BEAT = 0.5;
+        const b = (n) => (n - 1) * BEAT; // time of beat n (1-based, fractional allowed)
+        const wrap = (t) => ((t % T) + T) % T;
+        const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+        const smooth = (x) => {
+          x = clamp01(x);
+          return x * x * (3 - 2 * x);
+        };
+
+        /* ---------- springs (closed form) ---------- */
+        // Step response of a unit spring with natural frequency w (rad/s) and damping ratio z, x seconds after the step.
+        function step(x, w, z) {
+          if (x <= 0) return 0;
+          if (z < 1) {
+            const wd = w * Math.sqrt(1 - z * z);
+            return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + ((z * w) / wd) * Math.sin(wd * x));
+          }
+          return 1 - Math.exp(-w * x) * (1 + w * x);
+        }
+        // Free response: displacement from target x seconds after release with initial displacement x0 and velocity v0.
+        function free(x0, v0, w, z, x) {
+          if (x <= 0) return x0;
+          if (z < 1) {
+            const wd = w * Math.sqrt(1 - z * z);
+            const e = Math.exp(-z * w * x);
+            return e * (x0 * Math.cos(wd * x) + ((v0 + z * w * x0) / wd) * Math.sin(wd * x));
+          }
+          const e = Math.exp(-w * x);
+          return e * (x0 + (v0 + w * x0) * x);
+        }
+
+        // A value that changes target many times = the sum of one spring per change. Keys are [time, value, {w,z}?].
+        // The previous cycle's springs are summed too, so track(t) === track(t + T): the film loops seamlessly.
+        function track(keys, def) {
+          const d0 = def || {};
+          const k = keys
+            .map(([t, v, o]) => ({ t: wrap(t), v, w: (o && o.w) || d0.w || 15, z: (o && o.z) || d0.z || 0.8 }))
+            .sort((a, c) => a.t - c.t);
+          const n = k.length;
+          for (let i = 0; i < n; i++) k[i].d = k[i].v - k[(i - 1 + n) % n].v;
+          const C = k[n - 1].v;
+          const f = (t) => {
+            t = wrap(t);
+            let v = C;
+            for (const e of k) {
+              if (!e.d) continue;
+              v += e.d * (step(t - e.t, e.w, e.z) + step(t - e.t + T, e.w, e.z) - 1);
+            }
+            return v;
+          };
+          f.keys = k;
+          return f;
+        }
+        const colorTrack = (keys, o) => [0, 1, 2].map((c) => track(keys.map(([t, rgb]) => [t, rgb[c]]), o));
+        const rgb = (tr, t) =>
+          `rgb(${tr.map((f) => Math.round(Math.max(0, Math.min(255, f(t))))).join(",")})`;
+
+        // Visibility window [tin, tout) in seconds with blur enter/exit; windows may cross the loop seam.
+        function vis(t, tin, tout, inW = 26, outDur = 0.11) {
+          let best = { o: 0, e: 0, q: 1, x: -1 };
+          for (const off of [-T, 0, T]) {
+            const x = t + off;
+            if (x < tin || x > tout + outDur) continue;
+            const e = step(x - tin, inW, 1);
+            const q = smooth((x - tout) / outDur);
+            const o = e * (1 - q);
+            if (o > best.o) best = { o, e, q, x: x - tin };
+          }
+          return best;
+        }
+
+        /* ---------- palette ---------- */
+        const WHITE = [255, 255, 255];
+        const INK = [18, 18, 18];
+        const HONEY = [231, 182, 92];
+        const OFF = [220, 216, 209];
+
+        /* ---------- icons: one stroke weight on every icon, in world px ---------- */
+        const ICONS = {
+          mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3.8 7.2 12 13l8.2-5.8"/>',
+          clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/>',
+          up: '<path d="M12 19V5.5M6.5 11 12 5.5 17.5 11"/>',
+          checks: '<path d="M2.5 12.5 6.8 17 15 8"/><path d="M11.2 16.4l.6.6L20 8"/>',
+          check: '<path d="M5.5 12.5l4.2 4.2L18.5 7.5"/>',
+          video: '<rect x="2.5" y="6" width="13" height="12" rx="3"/><path d="M15.5 10.2 21 7v10l-5.5-3.2"/>',
+          calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+          file: '<path d="M6.5 3h7l5 5v11.5a1.5 1.5 0 0 1-1.5 1.5H6.5A1.5 1.5 0 0 1 5 19.5v-15A1.5 1.5 0 0 1 6.5 3z"/><path d="M13.5 3v5h5"/>',
+          tasks: '<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.2l2.8 2.8L16 9.5"/>',
+        };
+        const STROKE_PX = 2.6;
+        document.querySelectorAll("svg[data-icon]").forEach((s) => {
+          const size = Number(s.dataset.size);
+          s.setAttribute("viewBox", "0 0 24 24");
+          s.setAttribute("width", size);
+          s.setAttribute("height", size);
+          s.setAttribute("stroke-width", ((STROKE_PX * 24) / size).toFixed(3));
+          s.innerHTML = ICONS[s.dataset.icon];
+        });
+
+        /* ---------- the shape: states ---------- */
+        // [beat, w, h, radius (number or [tl,tr,br,bl]), color, centre y]
+        const PILL = "pill";
+        const STATES = [
+          [39, 700, 150, 40, WHITE, 92], // notification (lock screen)
+          [7, 600, 132, PILL, INK, 0], // תזכיר לי אחר כך
+          [9, 680, 116, PILL, WHITE, 0], // composer
+          [10, 600, 128, [12, 40, 40, 40], INK, 0], // sent bubble (outgoing: tail top-left in RTL)
+          [12, 190, 100, [40, 12, 40, 40], WHITE, 0], // typing (incoming: tail top-right)
+          [13, 720, 660, 44, WHITE, 0], // summary card
+          [16, 720, 540, 44, WHITE, 0], // draft
+          [19.2, 136, 136, PILL, INK, 0], // loader -> done
+          [21, 800, 212, 44, WHITE, 0], // calendar event
+          [23, 640, 136, PILL, WHITE, 0], // toggle row
+          [25, 820, 128, PILL, INK, 0], // tabs
+          [29, 700, 760, 52, HONEY, 0], // pro card
+          [35.2, 136, 136, PILL, INK, 0], // short loader
+          [36, 560, 136, PILL, INK, 0], // toast
+        ];
+        const SPR = { w: 15, z: 0.8 }; // morph: a tiny overshoot at most (~1.5%)
+        // radius: a number or [tl,tr,br,bl] for cards and bubbles, "pill" for fully round states. Pill-ness is its
+        // own spring, so a card shrinking into the loader is already a circle on the way, not a rounded square.
+        const radii = (s) => (s[3] === PILL ? [s[2] / 2, s[2] / 2, s[2] / 2, s[2] / 2] : Array.isArray(s[3]) ? s[3] : [s[3], s[3], s[3], s[3]]);
+        const shp = {
+          w: track(STATES.map((s) => [b(s[0]), s[1]]), SPR),
+          h: track(STATES.map((s) => [b(s[0]), s[2]]), SPR),
+          r: [0, 1, 2, 3].map((c) => track(STATES.map((s) => [b(s[0]), radii(s)[c]]), SPR)),
+          pill: track(STATES.map((s) => [b(s[0]), s[3] === PILL ? 1 : 0]), { w: 40, z: 1 }),
+          col: colorTrack(STATES.map((s) => [b(s[0]), s[4]]), { w: 38, z: 1 }), // colour never bounces, and never lingers in grey
+          y: track(STATES.map((s) => [b(s[0]), s[5]]), { w: 12, z: 0.9 }),
+        };
+        // notification swell: ping on beat 1, then 12 and 27
+        const swell = track(
+          [
+            [b(1), 1.045, { w: 34, z: 0.9 }],
+            [b(1) + 0.1, 1.0, { w: 18, z: 0.8 }],
+            [b(2), 1.07],
+            [b(3), 1.15],
+            [b(7), 1.0],
+          ],
+          { w: 16, z: 0.75 },
+        );
+        // press squash of the snooze button (the shape itself)
+        const squashX = track([[b(8) - 0.03, 1.05, { w: 40, z: 1 }], [b(8) + 0.12, 1.0, { w: 16, z: 0.7 }]]);
+        const squashY = track([[b(8) - 0.03, 0.86, { w: 40, z: 1 }], [b(8) + 0.12, 1.0, { w: 16, z: 0.7 }]]);
+
+        /* ---------- camera: each state fills the frame ---------- */
+        // [beat, box centre x, box centre y, box w, box h, caption band on]
+        const CAM = [
+          [39, 0, -48, 780, 520, 0],
+          [4, 0, -48, 780, 520, 1],
+          [7, 0, 0, 640, 400, 1],
+          [9, 0, 0, 760, 400, 1],
+          [9.8, 0, 0, 760, 400, 0],
+          [10, 0, 14, 680, 400, 0],
+          [12, 0, -26, 520, 340, 0],
+          [13, 0, 0, 780, 720, 0],
+          [16, 0, 0, 780, 600, 0],
+          [19.2, 0, 0, 560, 380, 0],
+          [20, 0, 0, 560, 380, 1],
+          [21, 0, 0, 860, 400, 1],
+          [22.5, 0, 0, 860, 400, 0],
+          [23, 0, 0, 700, 380, 0],
+          [25, 0, 0, 880, 380, 0],
+          [29, 0, 0, 780, 820, 0],
+          [35.2, 0, 0, 560, 380, 0],
+          [36, 0, 0, 640, 380, 0],
+          [38, 0, 0, 720, 440, 0],
+        ];
+        const camTargets = CAM.map(([beat, cx, cy, bw, bh, band]) => {
+          const hav = H - (band ? BAND : 0);
+          const s = Math.min((W * FIT.w) / bw, (hav * FIT.h) / bh, FIT.maxScale);
+          return { t: b(beat), s, x: cx, y: cy + (band ? BAND / 2 / s : 0) };
+        });
+        const CAMSPR = { w: 9.5, z: 1 };
+        const cam = {
+          ls: track(camTargets.map((c) => [c.t, Math.log(c.s)]), CAMSPR),
+          x: track(camTargets.map((c) => [c.t, c.x]), CAMSPR),
+          y: track(camTargets.map((c) => [c.t, c.y]), CAMSPR),
+        };
+
+        /* ---------- DOM ---------- */
+        const $ = (id) => document.getElementById(id);
+        const world = $("world");
+        const shape = $("shape");
+        const cursorEl = $("cursor");
+        const captions = $("captions");
+        const knob = $("knob");
+        const track_ = $("track");
+        const sel = $("sel");
+        const reaction = $("reaction");
+        const sender = $("sender");
+        const clock = $("clock");
+        const doneCheck = $("done-check").querySelector("path");
+        const spins = [...document.querySelectorAll("svg.spin circle")];
+        const dots = [...document.querySelectorAll(".dot")];
+        const tabsB = $("L-tabs-b");
+
+        captions.style.width = W + "px";
+        captions.style.height = BAND + "px";
+        captions.style.top = H - BAND + "px";
+        captions.style.fontSize = CAPTION_PX + "px";
+        cursorEl.firstElementChild.setAttribute("width", CURSOR_PX);
+        cursorEl.firstElementChild.setAttribute("height", CURSOR_PX);
+
+        // windowed elements: data-in / data-out are beats
+        const windowed = [...document.querySelectorAll("[data-in]")].map((el) => {
+          let tin = b(Number(el.dataset.in));
+          // content starts leaving a hair before its container morphs, so text never sits on a changing colour
+          let tout = b(Number(el.dataset.out)) - 0.03;
+          if (tout <= tin) tout += T;
+          return { el, tin, tout, pop: el.hasAttribute("data-pop"), roll: el.hasAttribute("data-roll") };
+        });
+        const layers = [...document.querySelectorAll(".layer")].map((el) => ({
+          el,
+          w: Number(el.dataset.w),
+          h: Number(el.dataset.h),
+        }));
+        for (const L of layers) {
+          L.el.style.width = L.w + "px";
+          L.el.style.height = L.h + "px";
+        }
+
+        // press feedback on buttons inside cards
+        const pressed = [...document.querySelectorAll("[data-press]")].map((el) => {
+          const tc = b(Number(el.dataset.press));
+          return { el, s: track([[tc - 0.03, 0.94, { w: 40, z: 1 }], [tc + 0.1, 1, { w: 16, z: 0.7 }]]) };
+        });
+
+        /* ---------- toggle knob -> liquid tab indicator ---------- */
+        // edges relative to the shape centre. Toggle row is 640 wide: track spans x in [-286, -166].
+        const KOFF = [-232, -172, -30, 30];
+        const KON = [-280, -220, -30, 30];
+        const TAB = (i) => [402 - 201 * (i + 1), 402 - 201 * i, -56, 56];
+        const KNOB_KEYS = [
+          [b(22), KOFF],
+          [b(24), KON],
+          [b(25), TAB(0)],
+          [b(26), TAB(1)],
+          [b(27), TAB(2)],
+          [b(28), TAB(3)],
+        ];
+        // the leading edge rides a fast spring, the trailing edge a slower one, so the knob stretches as it moves
+        const FAST = { w: 30, z: 0.82 };
+        const SLOW = { w: 15, z: 0.85 };
+        const knobEdge = (c) =>
+          track(
+            KNOB_KEYS.map(([t, e], i) => {
+              const prev = KNOB_KEYS[(i - 1 + KNOB_KEYS.length) % KNOB_KEYS.length][1];
+              const dir = (e[0] + e[1]) / 2 - (prev[0] + prev[1]) / 2;
+              let o = { w: 20, z: 0.85 };
+              if (c === 0) o = dir < 0 ? FAST : SLOW; // left edge leads when moving left
+              if (c === 1) o = dir > 0 ? FAST : SLOW; // right edge leads when moving right
+              return [t, e[c], o];
+            }),
+          );
+        const kL = knobEdge(0);
+        const kR = knobEdge(1);
+        const kT = knobEdge(2);
+        const kB = knobEdge(3);
+        const trackCol = colorTrack(
+          [
+            [b(22), OFF],
+            [b(24) - 0.02, INK],
+          ],
+          { w: 26, z: 1 },
+        );
+
+        /* ---------- measuring (static layout, once) ---------- */
+        // position of an element's box inside its layer (offsets are not affected by transforms)
+        function boxIn(el, layerEl) {
+          let x = 0;
+          let y = 0;
+          let n = el;
+          while (n && n !== layerEl) {
+            x += n.offsetLeft;
+            y += n.offsetTop;
+            n = n.offsetParent;
+          }
+          return { x, y, w: el.offsetWidth, h: el.offsetHeight };
+        }
+        // world coordinates of a layer-local point once its state has settled
+        function worldOf(layerId, x, y, stateY = 0) {
+          const L = layers.find((l) => l.el.id === layerId);
+          return [x - L.w / 2, y - L.h / 2 + stateY];
+        }
+        function centreOf(id, layerId) {
+          const r = boxIn($(id), $(layerId));
+          return worldOf(layerId, r.x + r.w / 2, r.y + r.h / 2);
+        }
+
+        let cur = null; // cursor tracks, built after fonts load
+        let drag = null;
+        const clicks = [b(8), b(10), b(15), b(19), b(24), b(26), b(27), b(28), b(35)];
+        const DRAG_DOWN = b(17);
+        const DRAG_UP = b(18);
+
+        function build() {
+          // selection drag over "שלישי" -> "רביעי"
+          const oldB = boxIn($("w-old"), $("L-draft"));
+          const newB = boxIn($("w-new"), $("L-draft"));
+          const bodyB = boxIn($("draft-body"), $("L-draft"));
+          const [wxR, wy] = worldOf("L-draft", oldB.x + oldB.w + 3, oldB.y + oldB.h / 2 + 4);
+          const [wxL] = worldOf("L-draft", oldB.x - 6, 0);
+          drag = { oldB, newB, bodyB, wxR, wxL, wy };
+          // the word slot narrows/widens to the new word, so the rest of the line closes up
+          drag.slotW = track(
+            [
+              [b(21), oldB.w],
+              [DRAG_UP + 0.04, newB.w],
+            ],
+            { w: 18, z: 0.85 },
+          );
+
+          const HOME = [-200, 232];
+          const P = {
+            snooze: [10, 18],
+            send: centreOf("send", "L-composer"),
+            draftBtn: centreOf("btn-draft", "L-summary"),
+            sendDraft: centreOf("btn-send", "L-draft"),
+            toggle: centreOf("track", "L-toggle"),
+            pro: centreOf("btn-pro", "L-pro"),
+          };
+          const tab = (i) => [(TAB(i)[0] + TAB(i)[1]) / 2 + 12, 10];
+          // cursor itinerary: [time the move starts, world target]
+          const plan = [
+            [b(38), HOME],
+            [b(7) + 0.05, [P.snooze[0], P.snooze[1] + 22]],
+            [b(9) + 0.04, [P.send[0] + 4, P.send[1] + 8]],
+            [b(10) + 0.28, [-250, 150]],
+            [b(14) - 0.02, [P.draftBtn[0] - 40, P.draftBtn[1] + 10]],
+            [b(16) + 0.02, [wxR, wy]],
+            [DRAG_DOWN + 0.03, [wxL, wy + 2], { w: 11, z: 1 }],
+            [DRAG_UP + 0.08, [P.sendDraft[0] + 10, P.sendDraft[1] + 12]],
+            [b(19) + 0.3, [-230, 170]],
+            [b(23) + 0.06, [P.toggle[0] + 6, P.toggle[1] + 10]],
+            [b(25) + 0.1, [tab(1)[0], 70]],
+            [b(26) - 0.42, tab(1)],
+            [b(27) - 0.42, tab(2)],
+            [b(28) - 0.42, tab(3)],
+            [b(28) + 0.36, [-440, 230]],
+            [b(34) - 0.1, [P.pro[0] - 30, P.pro[1] + 14]],
+          ];
+          const MOVE = { w: 13, z: 1 };
+          cur = {
+            x: track(plan.map(([t, p, o]) => [t, p[0], o || MOVE])),
+            y: track(plan.map(([t, p, o]) => [t, p[1], o || MOVE])),
+            press: track(
+              [
+                ...clicks.flatMap((tc) => [
+                  [tc - 0.05, 0.84, { w: 46, z: 1 }],
+                  [tc + 0.08, 1, { w: 22, z: 0.75 }],
+                ]),
+                [DRAG_DOWN - 0.05, 0.86, { w: 46, z: 1 }],
+                [DRAG_UP, 1, { w: 22, z: 0.75 }],
+              ].sort((a, c) => a[0] - c[0]),
+            ),
+          };
+          // cursor x velocity at release (numeric derivative of a pure function)
+          const eps = 1 / 2000;
+          drag.vRel = (cur.x(DRAG_UP) - cur.x(DRAG_UP - eps)) / eps;
+          drag.xRel = cur.x(DRAG_UP);
+        }
+
+        /* ---------- seek ---------- */
+        function seek(tIn) {
+          const t = wrap(tIn);
+
+          // camera (never will-change on anything the camera scales)
+          const cs = Math.exp(cam.ls(t));
+          const cx = cam.x(t);
+          const cy = cam.y(t);
+          world.style.transform = `translate(${W / 2}px, ${H / 2}px) scale(${cs}) translate(${-cx}px, ${-cy}px)`;
+          const project = (x, y) => [(x - cx) * cs + W / 2, (y - cy) * cs + H / 2];
+
+          // the shape
+          const sw = swell(t);
+          const w = shp.w(t) * sw;
+          const h = shp.h(t) * sw;
+          const sy = shp.y(t);
+          const rmax = Math.min(w, h) / 2;
+          const pill = shp.pill(t);
+          const r = shp.r.map((f) => Math.max(0, Math.min(rmax, f(t) * sw * (1 - pill) + rmax * pill)));
+          shape.style.width = w + "px";
+          shape.style.height = h + "px";
+          shape.style.borderRadius = r.map((v) => v.toFixed(2) + "px").join(" ");
+          shape.style.background = rgb(shp.col, t);
+          shape.style.transform = `translate(${-w / 2}px, ${sy - h / 2}px) scale(${squashX(t)}, ${squashY(t)})`;
+
+          // windowed elements (layers, words, rows, chips): their own enter/exit with a short blur
+          for (const it of windowed) {
+            const v = vis(t, it.tin, it.tout);
+            const st = it.el.style;
+            st.opacity = v.o.toFixed(4);
+            st.visibility = v.o < 0.002 ? "hidden" : "visible";
+            const blur = 9 * Math.max(1 - v.e, v.q);
+            st.filter = blur > 0.05 && v.o > 0.002 ? `blur(${blur.toFixed(2)}px)` : "none";
+            if (it.pop) {
+              const s = 0.55 + 0.45 * step(v.x, 24, 0.75);
+              it.el.dataset.scale = String(v.o > 0 ? s : 1);
+            }
+            if (it.roll) st.transform = `translateY(${((1 - v.e) * 0.45 - v.q * 0.45).toFixed(3)}em)`;
+          }
+
+          // layers stay centred in the morphing shape
+          for (const L of layers) {
+            const extra = L.el.id === "L-notif" ? ` scale(${sw})` : "";
+            L.el.style.transform = `translate(${(w - L.w) / 2}px, ${(h - L.h) / 2}px)${extra}`;
+          }
+
+          // pops (chip, reaction) scale on enter
+          document.querySelectorAll(".layer [data-pop]").forEach((el) => {
+            el.style.transform = `scale(${el.dataset.scale || 1})`;
+          });
+
+          // button press feedback
+          for (const p of pressed) p.el.style.transform = `scale(${p.s(t)})`;
+
+          // world attachments
+          clock.style.transform = `translate(${-380}px, ${sy - 75 * sw - 330}px)`;
+          const sp = sender.firstElementChild;
+          sender.style.transform = `translate(${w / 2 - sp.offsetWidth}px, ${sy - h / 2 - sp.offsetHeight - 14}px)`;
+          reaction.style.transform = `translate(${w / 2 - 128}px, ${sy + h / 2 - 26}px) scale(${reaction.dataset.scale || 1})`;
+
+          // typing dots: a travelling fade, a pure function of t
+          dots.forEach((d, i) => {
+            const ph = 0.5 + 0.5 * Math.cos(2 * Math.PI * (t * 2 - i / 3));
+            d.style.opacity = (0.28 + 0.72 * ph * ph).toFixed(3);
+          });
+
+          // spinners and the check
+          const C = 2 * Math.PI * 24;
+          for (const s of spins) {
+            s.setAttribute("stroke-dasharray", `${(C * 0.3).toFixed(2)} ${C.toFixed(2)}`);
+            s.setAttribute("transform", `rotate(${((t * 600) % 360).toFixed(2)} 68 68)`);
+          }
+          const LEN = 70;
+          const pChk = step(t - b(20) - 0.02, 18, 1);
+          doneCheck.setAttribute("stroke-dasharray", `${LEN} ${LEN}`);
+          doneCheck.setAttribute("stroke-dashoffset", (LEN * (1 - pChk)).toFixed(2));
+
+          // toggle track colour + knob / indicator
+          track_.style.background = rgb(trackCol, t);
+          const L = kL(t);
+          const R = kR(t);
+          const Tp = kT(t);
+          const B = kB(t);
+          const kw = Math.max(1, R - L);
+          const kh = Math.max(1, B - Tp);
+          knob.style.width = kw + "px";
+          knob.style.height = kh + "px";
+          knob.style.borderRadius = Math.min(kw, kh) / 2 + "px";
+          knob.style.transform = `translate(${w / 2 + L}px, ${h / 2 + Tp}px)`;
+          // black tab labels show only where the indicator is (liquid colour flip)
+          const lx = L + 410;
+          const ly = Tp + 64;
+          tabsB.style.clipPath = `inset(${ly.toFixed(2)}px ${(820 - (R + 410)).toFixed(2)}px ${(128 - (B + 64)).toFixed(2)}px ${lx.toFixed(2)}px round ${(kh / 2).toFixed(2)}px)`;
+
+          // cursor
+          if (cur) {
+            let wx = cur.x(t);
+            const wy = cur.y(t);
+            const [px, py] = project(wx, wy);
+            cursorEl.style.transform = `translate(${px.toFixed(2)}px, ${py.toFixed(2)}px) scale(${cur.press(t).toFixed(4)})`;
+
+            // drag-select: the selection follows the cursor while held, then springs to the new word
+            const L0 = -360; // draft layer left edge in world x
+            let selL;
+            let selR;
+            let so = 0;
+            if (t >= DRAG_DOWN && t < DRAG_UP) {
+              const cxL = wx - L0;
+              selR = drag.oldB.x + drag.oldB.w + 3;
+              selL = Math.min(selR, cxL);
+              so = smooth((t - DRAG_DOWN) / 0.06);
+            } else if (t >= DRAG_UP && t < DRAG_UP + 0.7) {
+              const target = drag.newB.x - 3;
+              const x0 = drag.xRel - L0 - target;
+              selL = target + free(x0, drag.vRel, 20, 0.8, t - DRAG_UP);
+              const rT = drag.newB.x + drag.newB.w + 3;
+              const r0 = drag.oldB.x + drag.oldB.w + 3;
+              selR = rT + free(r0 - rT, 0, 20, 0.8, t - DRAG_UP);
+              so = 1 - smooth((t - DRAG_UP - 0.3) / 0.22);
+            }
+            $("wslot").style.width = drag.slotW(t).toFixed(2) + "px";
+            if (so > 0.001) {
+              const top = drag.oldB.y - drag.bodyB.y - 2;
+              sel.style.visibility = "visible";
+              sel.style.opacity = so.toFixed(3);
+              sel.style.width = Math.max(0, selR - selL) + "px";
+              sel.style.height = drag.oldB.h + 4 + "px";
+              sel.style.transform = `translate(${selL - drag.bodyB.x}px, ${top}px)`;
+            } else {
+              sel.style.visibility = "hidden";
+            }
+          }
+        }
+
+        /* ---------- sounds (placed by the mixer at each sound's measured peak) ---------- */
+        const SOUNDS = [
+          [1, "pop"],
+          [2, "pop"],
+          [3, "pop"],
+          [7, "swish"],
+          [8, "click"],
+          [9, "whoosh"],
+          [10, "click"],
+          [11, "pop"],
+          [13, "whoosh"],
+          [14, "tick"],
+          [15, "click"],
+          [16, "swish"],
+          [17, "click"],
+          [18, "tick"],
+          [19, "click"],
+          [20, "pop"],
+          [21, "whoosh"],
+          [22, "pop"],
+          [24, "click"],
+          [25, "swish"],
+          [26, "click"],
+          [27, "click"],
+          [28, "click"],
+          [29, "whoosh"],
+          [30, "tick"],
+          [31, "tick"],
+          [32, "tick"],
+          [33, "tick"],
+          [35, "click"],
+          [36, "pop"],
+          [39, "whoosh"],
+        ].map(([beat, kind]) => ({ beat, t: b(beat), kind }));
+
+        /* ---------- boot ---------- */
+        const ready = (async () => {
+          await Promise.all([
+            document.fonts.load('40px "Varela Round"', "אבגעלזה abc"),
+            document.fonts.load('500 40px "Geist"', "0123456789:"),
+            document.fonts.load('400 40px "Geist"', "0123456789:"),
+            document.fonts.load('40px "Alze Emoji"', "👀"),
+          ]);
+          await document.fonts.ready;
+          build();
+          seek(0);
+          return true;
+        })();
+
+        window.addEventListener("hf-seek", (e) => {
+          const time = e.detail.time;
+          if (cur) seek(time);
+          else e.detail.waitUntil?.(ready.then(() => seek(time)));
+        });
+        window.FILM = { T, BEAT, W, H, wide: WIDE, seek, ready, sounds: SOUNDS, beatTime: b, states: STATES };
+        seek(0);
+      })();
+    </script>
+  </body>
+</html>
