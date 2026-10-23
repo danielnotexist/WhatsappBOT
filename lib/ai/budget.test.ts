@@ -295,6 +295,26 @@ describe("SpendGuard + the pipeline", () => {
     expect(stt.calls[0]!.opts?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  it("anonymousAi (the website's support chat): the day's budget only, settled to the cost, given back on an error status, no per-user count", async () => {
+    resetUnsettledSpendForTests();
+    const db = new MemoryDb();
+    const guard = new SpendGuard(db, { dailyBudgetUsd: 5, userDailyMessages: 1, demo: true });
+    const req = { tier: "router" as const, system: "", messages: [{ role: "user" as const, content: "כמה זה עולה?" }], maxTokens: 200 };
+    const ai = new MockProvider();
+    ai.enqueue({ text: "תשובה", usage, costUsd: 0.0007 }, { text: "תשובה", usage, costUsd: 0.0007 });
+    await guard.anonymousAi(ai, 15_000).complete(req);
+    await guard.anonymousAi(ai).complete(req); // a per-user cap of 1 does not apply: there is no user
+    expect(await db.getAiSpend(guard.day())).toBeCloseTo(0.0014, 6);
+    expect(ai.calls[0]!.signal).toBeInstanceOf(AbortSignal);
+    expect(ai.calls[1]!.signal).toBeUndefined();
+    const failing = { name: "f", complete: async () => Promise.reject(new AiProviderError("Anthropic 529", true, 529)) };
+    await expect(guard.anonymousAi(failing).complete(req)).rejects.toThrow("529");
+    expect(await db.getAiSpend(guard.day())).toBeCloseTo(0.0014, 6);
+    const spent = new SpendGuard(db, { dailyBudgetUsd: 0, userDailyMessages: null, demo: false });
+    await expect(spent.anonymousAi(ai).complete(req)).rejects.toBeInstanceOf(BudgetExceededError);
+    expect(ai.calls).toHaveLength(2);
+  });
+
   it("outside the demo (AI_DAILY_BUDGET_USD only): the general wording, and no per-user count", async () => {
     const { h, user } = await setup({ dailyBudgetUsd: 0, userDailyMessages: null, demo: false });
     const r = await processInbound(h.ctx, h.inbound("מה יש לי מחר?"));

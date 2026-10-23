@@ -1,5 +1,5 @@
 import { requireEnv } from "@/lib/env";
-import type { Mailer, OperatorAlertMail, OtpMail } from "./types";
+import type { Mailer, OperatorAlertMail, OtpMail, SupportTicketMail } from "./types";
 
 export const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -55,6 +55,11 @@ export class ResendMailer implements Mailer {
   /** Plain text only — an internal alert to the operator, not a customer email. */
   async sendOperatorAlert(mail: OperatorAlertMail): Promise<{ id: string | null }> {
     return this.post({ from: this.opts.from, to: [mail.to], subject: mail.subject, text: mail.text });
+  }
+
+  /** Plain text to the support inbox, with Reply-To set to the person who opened the ticket. */
+  async sendSupportTicket(mail: SupportTicketMail): Promise<{ id: string | null }> {
+    return this.post({ from: this.opts.from, to: [mail.to], reply_to: mail.replyTo, subject: mail.subject, text: mail.text });
   }
 
   private async post(payload: Record<string, unknown>): Promise<{ id: string | null }> {

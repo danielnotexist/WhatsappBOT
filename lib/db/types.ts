@@ -382,6 +382,36 @@ export interface NewAgent {
 /** The only fields that change after insert (user_id / role / template are immutable — SQL enforce_agent_rules). */
 export type AgentPatch = Partial<Pick<AgentRow, "name" | "instructions" | "tools" | "permissions" | "enabled">>;
 
+/** Website support tickets (migration 0011) — server only; `transcript` = the support chat so far, capped. */
+export type SupportTicketStatus = "open" | "in_progress" | "closed";
+
+export interface SupportTicketTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface SupportTicketRow {
+  id: string;
+  created_at: string;
+  /** the signed-in person, if any; null after the account is deleted (on delete set null) */
+  user_id: string | null;
+  name: string;
+  email: string;
+  subject: string | null;
+  body: string;
+  transcript: SupportTicketTurn[] | null;
+  status: SupportTicketStatus;
+}
+
+export interface NewSupportTicket {
+  user_id: string | null;
+  name: string;
+  email: string;
+  subject: string | null;
+  body: string;
+  transcript: SupportTicketTurn[] | null;
+}
+
 export interface Db {
   // users
   findUserByEmail(email: string): Promise<UserRow | null>;
@@ -535,6 +565,9 @@ export interface Db {
 
   // audit
   addAudit(entry: AuditEntry): Promise<void>;
+
+  // support tickets (migration 0011) — from the website's support chat
+  createSupportTicket(row: NewSupportTicket): Promise<SupportTicketRow>;
 
   // billing approvals (migration 0007) — expires_at is always created_at + 10 minutes (DB default + CHECK)
   createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow>;

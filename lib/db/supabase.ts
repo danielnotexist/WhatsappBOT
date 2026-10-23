@@ -35,6 +35,8 @@ import type {
   PendingActionStatus,
   ReminderRow,
   ReminderStatus,
+  NewSupportTicket,
+  SupportTicketRow,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -68,6 +70,7 @@ export class SupabaseDb implements Db {
   private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at,approval_id";
   private static BA_COLS = "id,user_id,kind,plan,amount_ils,details,phone_e164,status,expires_at,approved_msg_id,approved_at,hyp_trans_id,ccode,error,created_at";
   private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
+  private static TICKET_COLS = "id,created_at,user_id,name,email,subject,body,transcript,status";
   private static REM_COLS = "id,user_id,text,due_at,job_id,status,recurrence,last_fired_at,created_at";
 
   private fail(op: string, error: { message: string } | null): never {
@@ -711,6 +714,13 @@ export class SupabaseDb implements Db {
       agent_name: entry.agent_name ?? null,
     });
     if (error) this.fail("addAudit", error);
+  }
+
+  // ---- support_tickets (migration 0011) ----
+  async createSupportTicket(row: NewSupportTicket): Promise<SupportTicketRow> {
+    const { data, error } = await this.client.from("support_tickets").insert(row).select(SupabaseDb.TICKET_COLS).single();
+    if (error) this.fail("createSupportTicket", error);
+    return data as unknown as SupportTicketRow;
   }
 
   // ---- agents (0006). Every query is scoped by user_id, also when the id is known. ----

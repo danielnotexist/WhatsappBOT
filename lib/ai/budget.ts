@@ -243,6 +243,30 @@ export class SpendGuard {
   turn(userId: string): SpendTurn {
     return new SpendTurn(this, userId);
   }
+
+  /**
+   * The model for a call with no user behind it (the website's support chat, app/api/support/chat): the same day's
+   * budget — reserved before the call, settled to its cost after, given back when the provider answered with an error
+   * status — and no per-user count (there is no account to count against). `timeoutMs` aborts a call that runs long.
+   */
+  anonymousAi(inner: AiProvider, timeoutMs?: number): AiProvider {
+    return {
+      name: inner.name,
+      complete: async (req: CompletionRequest) => {
+        const estimate = aiCallEstimateUsd(req);
+        const day = await this.reserve(estimate);
+        let res: CompletionResponse;
+        try {
+          res = await inner.complete(timeoutMs ? { ...req, signal: AbortSignal.timeout(timeoutMs) } : req);
+        } catch (e) {
+          if (answeredWithError(e)) await this.release(day, estimate);
+          throw e;
+        }
+        await this.settle(day, estimate, aiCallCostUsd(res));
+        return res;
+      },
+    };
+  }
 }
 
 export class SpendTurn {
