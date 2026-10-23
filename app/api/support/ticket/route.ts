@@ -2,11 +2,12 @@ import { connection } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/current-user";
 import { getDb } from "@/lib/db";
-import type { UserRow } from "@/lib/db/types";
+import type { NewSupportTicket, UserRow } from "@/lib/db/types";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
 import { sameOrigin } from "@/lib/same-origin";
 import { NO_STORE, readJson, supportFail } from "@/lib/support/http";
 import { notifySupport } from "@/lib/support/notify";
+import { SYSTEM_REQUEST_FIELDS, systemRequestSchema, systemRequestTicket } from "@/lib/support/system-request";
 import { SUPPORT_LIMITS, SUPPORT_RATE, type SupportTicketField, type SupportTicketPrefill, type SupportTicketResponse } from "@/lib/support/types";
 
 const HOUR = 60 * 60_000;
@@ -44,6 +45,17 @@ const ticket = z.object({
 
 const FIELDS: readonly SupportTicketField[] = ["name", "email", "subject", "body"];
 
+/** A Hebrew line per known field that did not pass (empty when the body is not a form at all). */
+function fieldErrors<F extends string>(issues: readonly z.core.$ZodIssue[], known: readonly F[]): Partial<Record<F, string>> {
+  const fields: Partial<Record<F, string>> = {};
+  for (const issue of issues) {
+    const key = issue.path[0] as F;
+    if (known.includes(key) && !fields[key]) fields[key] = issue.message;
+  }
+  return fields;
+}
+
+
 /** The signed-in person (a valid session whose user still exists), or null. */
 async function signedInUser(): Promise<UserRow | null> {
   const session = await getSession();
@@ -68,7 +80,9 @@ export async function GET() {
 
 /**
  * POST /api/support/ticket — a ticket from the support chat's form ("פתיחת פנייה"). No sign-in needed; when signed
- * in, the ticket is linked to the account. Body `{ name, email, subject?, body, transcript?, website }`.
+ * in, the ticket is linked to the account. Body `{ name, email, subject?, body, transcript?, website }`; or a
+ * "בקשת מערכת" (components/brand/system-request.tsx): `{ kind: "system", system, want, email, business?, website }`,
+ * stored as a ticket with the subject "בקשת מערכת: <system>" (lib/support/system-request.ts) - the same limits.
  * Stored in support_tickets (migration 0011), then emailed to the support inbox (lib/support/notify.ts; a mail
  * failure is logged and does not fail the request — the ticket is stored). A filled honeypot gets the same 200 and
  * nothing is stored.
@@ -85,21 +99,25 @@ export async function POST(request: Request) {
 
   const raw = await readJson(request, MAX_BODY_BYTES);
   if (!raw || typeof raw !== "object") return supportFail("bad_request");
-  const parsed = ticket.safeParse(raw);
-  if (!parsed.success) {
-    const fields: Partial<Record<SupportTicketField, string>> = {};
-    for (const issue of parsed.error.issues) {
-      const key = issue.path[0];
-      if (FIELDS.includes(key as SupportTicketField) && !fields[key as SupportTicketField]) fields[key as SupportTicketField] = issue.message;
-    }
-    return Object.keys(fields).length ? supportFail("invalid", "חסרים פרטים בטופס.", { fields }) : supportFail("bad_request");
-  }
-  const form = parsed.data;
-  if (form.website?.trim()) return Response.json({ ok: true } satisfies SupportTicketResponse, { headers: NO_STORE });
 
-  try {
-    const user = await signedInUser().catch(() => null);
-    const row = await getDb().createSupportTicket({
+  let build: (user: UserRow | null) => NewSupportTicket;
+  if ((raw as { kind?: unknown }).kind === "system") {
+    const parsed = systemRequestSchema.safeParse(raw);
+    if (!parsed.success) {
+      const fields = fieldErrors(parsed.error.issues, SYSTEM_REQUEST_FIELDS);
+      return Object.keys(fields).length ? supportFail("invalid", "חסרים פרטים בטופס.", { fields }) : supportFail("bad_request");
+    }
+    if (parsed.data.website?.trim()) return Response.json({ ok: true } satisfies SupportTicketResponse, { headers: NO_STORE });
+    build = (user) => systemRequestTicket(parsed.data, user);
+  } else {
+    const parsed = ticket.safeParse(raw);
+    if (!parsed.success) {
+      const fields = fieldErrors(parsed.error.issues, FIELDS);
+      return Object.keys(fields).length ? supportFail("invalid", "חסרים פרטים בטופס.", { fields }) : supportFail("bad_request");
+    }
+    const form = parsed.data;
+    if (form.website?.trim()) return Response.json({ ok: true } satisfies SupportTicketResponse, { headers: NO_STORE });
+    build = (user) => ({
       user_id: user?.id ?? null,
       name: form.name,
       email: form.email,
@@ -107,6 +125,11 @@ export async function POST(request: Request) {
       body: form.body,
       transcript: form.transcript?.length ? form.transcript : null,
     });
+  }
+
+  try {
+    const user = await signedInUser().catch(() => null);
+    const row = await getDb().createSupportTicket(build(user));
     await notifySupport(row);
     return Response.json({ ok: true } satisfies SupportTicketResponse, { headers: NO_STORE });
   } catch (e) {

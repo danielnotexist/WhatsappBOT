@@ -8,7 +8,8 @@ import { setMailerForTests } from "@/lib/mail";
 import { ConsoleMailer } from "@/lib/mail/console";
 import { MemoryRateLimiter, setRateLimiterForTests } from "@/lib/rate-limit";
 import { supportInbox, ticketMail } from "@/lib/support/notify";
-import type { SupportErrorResponse, SupportTicketPrefill, SupportTicketResponse } from "@/lib/support/types";
+import { ANONYMOUS_NAME } from "@/lib/support/system-request";
+import { SYSTEM_REQUEST_PREFIX, isSystemRequest, type SupportErrorResponse, type SupportTicketPrefill, type SupportTicketResponse } from "@/lib/support/types";
 import { GET, POST } from "./route";
 
 const jar = new Map<string, string>();
@@ -162,6 +163,50 @@ describe("/api/support/ticket — validation and abuse", () => {
     expect(r.status).toBe(429);
     expect(r.body).toMatchObject({ code: "rate_limited", message: "נשלחו כבר כמה פניות מכאן. אפשר לנסות שוב בעוד שעה." });
     expect(db.supportTickets).toHaveLength(5);
+  });
+});
+
+describe("/api/support/ticket — a system request ('בקשת מערכת')", () => {
+  const request = { kind: "system", system: "Salesforce", want: "לבדוק את הסטטוס של לקוח לפני שיחה", email: "ron@example.com", business: "משרד ייעוץ", website: "" };
+
+  it("is stored as a ticket marked by its subject (no migration) and mailed under its own subject", async () => {
+    expect(await send(req(request))).toEqual({ status: 200, body: { ok: true } });
+    const row = db.supportTickets[0]!;
+    expect(row).toMatchObject({ user_id: null, name: ANONYMOUS_NAME, email: "ron@example.com", subject: `${SYSTEM_REQUEST_PREFIX}Salesforce`, transcript: null, status: "open" });
+    expect(isSystemRequest(row.subject)).toBe(true);
+    expect(row.body).toBe(`מערכת: Salesforce\nמה ${BRAND.name} תעשה איתה: לבדוק את הסטטוס של לקוח לפני שיחה\nסוג העסק: משרד ייעוץ`);
+    const mail = mailer.tickets[0]!;
+    expect(mail).toMatchObject({ replyTo: "ron@example.com", subject: "בקשת מערכת: Salesforce" });
+    expect(mail.text.split("\n")[0]).toBe("בקשת מערכת חדשה מהאתר: מערכת שלקוח רוצה לחבר");
+    // the business type is optional
+    expect((await send(req({ ...request, business: "" }))).status).toBe(200);
+    expect(db.supportTickets[1]!.body).toContain("סוג העסק: (לא צוין)");
+  });
+
+  it("signed in: linked to the account, under the person's name", async () => {
+    const user = await db.createUser("noa@example.com");
+    await db.updateUserProfile(user.id, { name: "נועה כהן" });
+    jar.set(SESSION_COOKIE, createSessionToken(user.id));
+    expect((await send(req({ ...request, email: "noa@example.com" }))).status).toBe(200);
+    expect(db.supportTickets[0]).toMatchObject({ user_id: user.id, name: "נועה כהן" });
+  });
+
+  it("a Hebrew line per field of its own form; nothing stored", async () => {
+    const r = await send(req({ kind: "system", system: " ", want: "x", email: "", website: "" }));
+    expect(r).toMatchObject({ status: 400, body: { code: "invalid", fields: { system: "צריך לכתוב את שם המערכת.", want: "צריך לכתוב במשפט אחד מה היא תעשה איתה.", email: "צריך למלא כתובת מייל." } } });
+    const long = await send(req({ ...request, system: "א".repeat(81), want: "ב".repeat(1001), business: "ג".repeat(81) }));
+    expect((long.body as SupportErrorResponse).fields).toEqual({ system: "השם ארוך מדי. אפשר עד 80 תווים.", want: "התיאור ארוך מדי. אפשר עד 1,000 תווים.", business: "אפשר עד 80 תווים." });
+    expect(db.supportTickets).toHaveLength(0);
+  });
+
+  it("the same abuse limits as a ticket: the honeypot, another site's Origin, and one shared budget per IP", async () => {
+    expect(await send(req({ ...request, website: "https://spam.example" }))).toEqual({ status: 200, body: { ok: true } });
+    expect(db.supportTickets).toHaveLength(0);
+    expect((await send(req(request, { origin: "https://evil.example" }))).status).toBe(403);
+    for (let i = 0; i < 3; i++) expect((await POST(req(request, { "x-forwarded-for": "5.5.5.5" }))).status).toBe(200);
+    for (let i = 0; i < 2; i++) expect((await POST(req(valid, { "x-forwarded-for": "5.5.5.5" }))).status).toBe(200);
+    expect((await send(req(request, { "x-forwarded-for": "5.5.5.5" }))).status).toBe(429);
+    expect(mailer.tickets).toHaveLength(5);
   });
 });
 

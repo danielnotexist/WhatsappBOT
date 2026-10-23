@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ConnectionRow } from "@/lib/db/types";
 import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, normalizeScopes } from "@/lib/google/oauth";
 import { MS_SCOPES, MS_SCOPES_V1 } from "@/lib/ms/oauth";
-import { GOOGLE_SERVICES, MICROSOFT_SERVICES, OPEN_GATES, activeServicesFor, activeServicesLine, connectionServices, envReadGates, gateFrom, type ReadGates, type ServiceView } from "./services";
+import { GOOGLE_SERVICES, MICROSOFT_SERVICES, OPEN_GATES, activeServicesFor, activeServicesLine, connectionServices, previewServices, envReadGates, gateFrom, type ReadGates, type ServiceView } from "./services";
 
 const google = (scopes: readonly string[]): Pick<ConnectionRow, "provider" | "scopes"> => ({ provider: "google", scopes: normalizeScopes([...scopes]) });
 const microsoft = (scopes: readonly string[]): Pick<ConnectionRow, "provider" | "scopes"> => ({ provider: "microsoft", scopes: [...scopes] });
@@ -164,5 +164,29 @@ describe("helpers", () => {
     expect(activeServicesFor(microsoft(MS_SCOPES_V1))).toBe("Outlook, יומן Outlook, OneDrive וקבצי Word, Excel ו-PowerPoint");
     expect(activeServicesLine([])).toBe("");
     expect(activeServicesLine(connectionServices(google([GOOGLE_SCOPES.calendarEvents])).filter((v) => v.id === "google_calendar"))).toBe("יומן Google");
+  });
+});
+
+describe("previewServices: an account that is not connected (Daniel, 23.10.2026)", () => {
+  it("every service of the provider, 'preview', named 'Gmail - יתחבר עם Google', no links, not counted as connected", () => {
+    const g = previewServices("google");
+    expect(g.map((v) => v.name)).toEqual(GOOGLE_SERVICES.map((s) => `${s.label} - יתחבר עם Google`));
+    expect(previewServices("microsoft").map((v) => v.name)).toEqual(MICROSOFT_SERVICES.map((s) => `${s.label} - יתחבר עם Microsoft`));
+    for (const v of [...g, ...previewServices("microsoft")]) {
+      expect(v).toMatchObject({ status: "preview", statusLabel: "לא מחובר", href: null, action: null });
+      expect(`${v.name} ${v.note}`).not.toMatch(/[–—]/);
+    }
+    expect(activeServicesLine(g)).toBe("");
+  });
+
+  it("the tooltip says what each would do, on the plan in force: pro-only services say so, a second account says both together are pro", () => {
+    const pro = byId(previewServices("google"));
+    expect(pro.gmail!.note).toBe(GOOGLE_SERVICES[0]!.does);
+    expect(pro.google_tasks!.note).toBe("הצגה והוספה של משימות");
+    const basic = byId(previewServices("google", { plan: "basic" }));
+    expect(basic.google_tasks!.note).toBe("הצגה והוספה של משימות. במסלול פרו");
+    expect(basic.google_drive!.note).toBe("קבצים שנפתחו דרכי. חיפוש בכל ה-Drive ושמירת מסמכים: במסלול פרו");
+    const second = previewServices("microsoft", { plan: "trial", secondAccount: true });
+    expect(new Set(second.map((v) => v.note))).toEqual(new Set(["במסלול הנוכחי עובדים עם חשבון אחד. Google ו-Microsoft יחד: במסלול פרו"]));
   });
 });

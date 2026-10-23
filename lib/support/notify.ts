@@ -5,6 +5,7 @@ import { EnvError, integrationsMocked, liveSupportMailInDemo, requireEnv } from 
 import { getMailer } from "@/lib/mail";
 import { ResendMailer } from "@/lib/mail/resend";
 import type { SupportTicketMail } from "@/lib/mail/types";
+import { isSystemRequest } from "./types";
 
 /**
  * Where website tickets go: SUPPORT_EMAIL. Required when mail is real (outside the demo and DATA_MODE=memory) — a
@@ -25,8 +26,10 @@ const one = (s: string) => s.replace(/\s+/g, " ").trim();
 /** The email to the support inbox: who, what, and the chat with עלזה when it was attached. Plain text, Hebrew-first lines. */
 export function ticketMail(ticket: SupportTicketRow, to: string): SupportTicketMail {
   const topic = one(ticket.subject || ticket.body).slice(0, 60);
+  // "בקשת מערכת" (lib/support/system-request.ts): its subject is the marker and the system's name
+  const request = isSystemRequest(ticket.subject);
   const lines = [
-    "פנייה חדשה מצ'אט התמיכה באתר",
+    request ? "בקשת מערכת חדשה מהאתר: מערכת שלקוח רוצה לחבר" : "פנייה חדשה מצ'אט התמיכה באתר",
     `מספר פנייה: ${ticket.id}`,
     `שם: ${one(ticket.name)}`,
     `מייל: ${ticket.email}`,
@@ -41,7 +44,7 @@ export function ticketMail(ticket: SupportTicketRow, to: string): SupportTicketM
     for (const t of ticket.transcript) lines.push(`- ${t.role === "user" ? "הפונה" : BRAND.name}: ${one(t.text)}`);
   }
   lines.push("", "תשובה למייל הזה תגיע ישירות לפונה.");
-  return { to, replyTo: ticket.email, subject: `פנייה חדשה: ${topic}`, text: lines.join("\n") };
+  return { to, replyTo: ticket.email, subject: request ? topic : `פנייה חדשה: ${topic}`, text: lines.join("\n") };
 }
 
 /**

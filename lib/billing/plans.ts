@@ -88,7 +88,9 @@ export interface Entitlements {
 }
 
 /** The capabilities only pro has (basic and the trial have none of them). */
-type ProFlag = "tasks" | "sharepoint" | "fileCreate" | "driveFullRead" | "meetingSummaries" | "proactive" | "businessSystems";
+export type ProFlag = "tasks" | "sharepoint" | "fileCreate" | "driveFullRead" | "meetingSummaries" | "proactive" | "businessSystems";
+/** The pro capabilities that are not built yet: part of pro, and every place that lists them says "בקרוב". */
+export const COMING_SOON: readonly ProFlag[] = ["meetingSummaries", "businessSystems"];
 const NONE: Record<ProFlag, false> = { tasks: false, sharepoint: false, fileCreate: false, driveFullRead: false, meetingSummaries: false, proactive: false, businessSystems: false };
 const ALL: Record<ProFlag, true> = { tasks: true, sharepoint: true, fileCreate: true, driveFullRead: true, meetingSummaries: true, proactive: true, businessSystems: true };
 
@@ -160,9 +162,9 @@ function proLines(): PlanFeatureLine[] {
     adds("sharepoint") && { id: "sharepoint", text: "חיפוש ב-SharePoint, בספריות המסמכים של הארגון" },
     adds("fileCreate") && { id: "file_create", text: "שמירת מסמכים חדשים ב-Drive" },
     adds("builtinAgents") && { id: "agents", text: `שלושת הסוכנים המובנים, ו${agentsHe(p.customAgents)} משלך` },
-    adds("meetingSummaries") && { id: "meetings", text: "סיכומי פגישות", soon: true },
+    adds("meetingSummaries") && { id: "meetings", text: "סיכומי פגישות", soon: COMING_SOON.includes("meetingSummaries") },
     adds("proactive") && { id: "proactive", text: "התראות יזומות ואזהרות פישינג" },
-    adds("businessSystems") && { id: "business", text: "חיבור למערכות העסק, כמו monday.com", soon: true },
+    adds("businessSystems") && { id: "business", text: "חיבור למערכות העסק, כמו monday.com", soon: COMING_SOON.includes("businessSystems") },
   ];
   return lines.filter((l): l is PlanFeatureLine => Boolean(l));
 }

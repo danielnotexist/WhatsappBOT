@@ -17,6 +17,8 @@ import { ServiceGlyph } from "./service-icons";
  *   - the bubble is out of the flow (no layout shift), kept inside the viewport at 390px, and fades in only when
  *     motion is allowed.
  * A service the plan does not include ("במסלול פרו") is a link to the upgrade, with the same two-tap behaviour on touch.
+ * An account that is not connected shows its services faded ("preview": "Gmail - יתחבר עם Google"), as buttons that
+ * only explain - the row's "חיבור" is the way in.
  * Status is never colour alone: the name says it, the tile shape says it (solid sage / dark with a honey dot / dashed /
  * dark with a small honey ring).
  */
@@ -73,6 +75,7 @@ const TILE: Record<ServiceView["status"], string> = {
   needs_consent: "bg-cream/[0.07] text-cream-muted ring-1 ring-cream/15 ring-inset hover:bg-cream/[0.12] hover:text-cream",
   unavailable: "border border-dashed border-cream-muted/35 text-cream-muted/45 hover:border-cream-muted/60",
   pro_only: "bg-cream/[0.04] text-cream-muted/70 ring-1 ring-honey/35 ring-inset hover:bg-cream/[0.1] hover:text-cream",
+  preview: "bg-cream/[0.03] text-cream-muted/50 ring-1 ring-cream/10 ring-inset hover:text-cream-muted",
 };
 
 /**
@@ -85,6 +88,8 @@ const TILE_PICTURE: Record<ServiceView["status"], string> = {
   needs_consent: "after:ring-cream/15 [&_img]:opacity-60 hover:[&_img]:opacity-90",
   unavailable: "after:border after:border-dashed after:border-cream-muted/50 [&_img]:opacity-30 [&_img]:grayscale",
   pro_only: "after:ring-honey/60 [&_img]:opacity-45 hover:[&_img]:opacity-80",
+  // not connected: a quiet preview of what connecting gives
+  preview: "after:ring-cream/10 [&_img]:opacity-45 [&_img]:saturate-50 hover:[&_img]:opacity-80",
 };
 
 const DOT: Record<ServiceView["status"], string> = {
@@ -92,6 +97,7 @@ const DOT: Record<ServiceView["status"], string> = {
   needs_consent: "bg-honey",
   unavailable: "border-[1.5px] border-ink-muted/60",
   pro_only: "border-[1.5px] border-honey",
+  preview: "border-[1.5px] border-ink-muted/60",
 };
 
 function ServiceIconItem({

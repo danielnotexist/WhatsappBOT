@@ -63,12 +63,55 @@ export interface SupportTicketPrefill {
 
 export type SupportTicketField = "name" | "email" | "subject" | "body";
 
+/**
+ * "בקשת מערכת": a system someone wants her to work with (the "ועוד בהמשך" row of the systems list, and /pricing).
+ * The same route and table as a ticket (POST /api/support/ticket with `kind: "system"`, support_tickets), marked by
+ * its subject - "בקשת מערכת: <name>" - so no migration: the support inbox and a `subject like 'בקשת מערכת:%'` query
+ * tell them apart.
+ */
+export const SYSTEM_REQUEST_PREFIX = "בקשת מערכת: ";
+export const SYSTEM_REQUEST_LIMITS = { system: 80, want: 1000, business: 80 } as const;
+export type SystemRequestField = "system" | "want" | "email" | "business";
+
+/** Whether a stored ticket is a system request (its subject carries the marker). */
+export function isSystemRequest(subject: string | null | undefined): boolean {
+  return Boolean(subject?.startsWith(SYSTEM_REQUEST_PREFIX));
+}
+
+export const SYSTEM_REQUEST_COPY = {
+  trigger: "בקשת מערכת",
+  rowTitle: "ועוד בהמשך",
+  rowLead: "חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה כאן.",
+  title: "בקשת מערכת",
+  lead: `איזו מערכת חסרה, ומה ${BRAND.name} תעשה איתה. כל בקשה נקראת ועוזרת להחליט מה יתחבר בהמשך.`,
+  system: "שם המערכת",
+  systemHint: "למשל: Salesforce, חשבשבת, Notion",
+  want: `מה ${BRAND.name} תעשה איתה?`,
+  wantHint: "למשל: לבדוק מי עוד לא שילם, ולהכין תזכורת ללקוח",
+  email: "אימייל",
+  emailHint: "כדי לחזור אם יהיו שאלות",
+  business: "סוג העסק",
+  businessHint: "למשל: משרד רואי חשבון",
+  optional: "(לא חובה)",
+  submit: "שליחת הבקשה",
+  sending: "שולחים…",
+  cancel: "ביטול",
+  close: "סגירה",
+  done: "הבקשה התקבלה. תודה.",
+  doneLead: "היא נשמרה ונשלחה אלינו. אם יהיו שאלות, נחזור לכתובת המייל שבטופס.",
+  errors: {
+    system: "צריך לכתוב את שם המערכת.",
+    want: "צריך לכתוב במשפט אחד מה היא תעשה איתה.",
+    email: "צריך למלא כתובת מייל.",
+  },
+} as const;
+
 export interface SupportErrorResponse {
   ok: false;
   code: "bad_request" | "too_long" | "invalid" | "forbidden" | "rate_limited" | "server_error";
   message: string;
   /** the ticket form: a Hebrew line per field that did not pass */
-  fields?: Partial<Record<SupportTicketField, string>>;
+  fields?: Partial<Record<SupportTicketField | SystemRequestField, string>>;
 }
 
 /** The topic chips under the greeting — each one is a knowledge-base question (lib/support/knowledge.ts). */

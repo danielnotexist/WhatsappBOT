@@ -10,6 +10,7 @@ import {
   integrationGroups,
 } from "@/lib/integrations/catalogue";
 import { IntegrationChipRow } from "./chip-row";
+import { INTEGRATION_MARK_STYLE, INTEGRATION_TILE } from "@/lib/integrations/tiles";
 import { INTEGRATION_ICONS, OutlookIcon } from "./icons";
 import { IntegrationTile, MoreTile } from "./tile";
 
@@ -67,13 +68,43 @@ describe("tiles", () => {
     }
   });
 
-  it("draws each mark as decorative SVG on a white tile", () => {
+  it("with the switch on 'tiles' (the default): our own icon tile from the surface's set, decorative, no white chip", () => {
+    expect(INTEGRATION_MARK_STYLE).toBe("tiles");
+    for (const tone of ["night", "paper"] as const) {
+      const { container, unmount } = render(
+        <>
+          {INTEGRATIONS.map((i) => (
+            <IntegrationTile key={i.id} integration={i} size="lg" tone={tone} />
+          ))}
+          <MoreTile tone={tone} />
+        </>,
+      );
+      const tiles = container.querySelectorAll("[data-integration-tile]");
+      expect(tiles).toHaveLength(INTEGRATIONS.length);
+      tiles.forEach((t) => {
+        const id = t.getAttribute("data-integration-tile")!;
+        expect(t).toHaveAttribute("aria-hidden", "true");
+        expect(t).toHaveAttribute("data-mark", "tile");
+        expect(t.className).not.toContain("bg-white");
+        expect(t.querySelector("svg")).toBeNull();
+        const img = t.querySelector("img")!;
+        expect(img).toHaveAttribute("alt", "");
+        expect(decodeURIComponent(img.getAttribute("src")!)).toContain(`/brand/integrations/${tone}/${INTEGRATION_TILE[id]}.webp`);
+      });
+      // the "ועוד בהמשך" tile: the "more" picture of the same set
+      const imgs = [...container.querySelectorAll("img")].map((i) => decodeURIComponent(i.getAttribute("src")!));
+      expect(imgs.some((s) => s.includes(`/brand/integrations/${tone}/more.webp`))).toBe(true);
+      unmount();
+    }
+  });
+
+  it("with mark='svg' (the switch back): draws each mark as decorative SVG on a white tile", () => {
     const { container } = render(
       <>
         {INTEGRATIONS.map((i) => (
-          <IntegrationTile key={i.id} integration={i} size="lg" />
+          <IntegrationTile key={i.id} integration={i} size="lg" mark="svg" />
         ))}
-        <MoreTile />
+        <MoreTile mark="svg" />
       </>,
     );
     const tiles = container.querySelectorAll("[data-integration-tile]");
@@ -93,7 +124,7 @@ describe("tiles", () => {
         <OutlookIcon />
         <OutlookIcon />
         {INTEGRATIONS.map((i) => (
-          <IntegrationTile key={i.id} integration={i} />
+          <IntegrationTile key={i.id} integration={i} mark="svg" />
         ))}
       </>,
     );
@@ -190,6 +221,33 @@ describe("the chip row (toolbar + tooltips)", () => {
     expect(screen.getByRole("tooltip")).toBeInTheDocument();
     act(() => screen.getByRole("button", { name: "אחרי" }).focus());
     expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("collapsed (the compact price list): the first N chips and a '+K' button that opens the rest in place and closes them again", () => {
+    const all = integrationGroups();
+    const names = all.flatMap((g) => g.items.map((i) => (i.status === "soon" ? `${i.name}, בקרוב` : i.name)));
+    render(<IntegrationChipRow groups={all} label="חיבורים" tone="paper" size="xs" collapsed={8} />);
+    const bar = screen.getByRole("toolbar", { name: "חיבורים" });
+    const shown = () => within(bar).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(shown()).toEqual(names.slice(0, 8));
+    const more = screen.getByRole("button", { name: `עוד ${names.length - 8} חיבורים` });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    expect(more).toHaveTextContent(`+${names.length - 8}`);
+    // the tab stop moves into the hidden part, then collapsing hands it back to the first chip
+    fireEvent.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    expect(more).toHaveAccessibleName("פחות חיבורים");
+    expect(shown()).toEqual(names);
+    act(() => within(bar).getByRole("button", { name: "Microsoft To Do" }).focus());
+    fireEvent.click(more);
+    expect(shown()).toEqual(names.slice(0, 8));
+    expect(within(bar).getAllByRole("button").filter((b) => b.tabIndex === 0)).toHaveLength(1);
+    expect(within(bar).getAllByRole("button")[0]).toHaveAttribute("tabindex", "0");
+  });
+
+  it("collapsed with no more than N systems: no '+K' button", () => {
+    render(<IntegrationChipRow groups={integrationGroups(availableIntegrations()).slice(0, 1)} label="חיבורים" collapsed={20} />);
+    expect(screen.queryByRole("button", { name: /חיבורים$/ })).toBeNull();
   });
 
   it("says 'בקרוב' in the name of a product that is not connected yet, and in its tooltip", () => {

@@ -1,6 +1,7 @@
 import type { ChatStep } from "@/components/brand/chat-demo";
 import { BRAND } from "@/lib/brand";
 import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
+import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import type { MascotPose } from "./mascot";
 
 /**
@@ -143,6 +144,13 @@ export const TRUST: readonly { term: string; detail: string }[] = [
 
 const vatPercent = Math.round(VAT_RATE * 100);
 
+/** "כולל 16 חיבורים, ועוד 4 בקרוב" - counted from lib/integrations/catalogue.ts integrationsForPlan("pro"). */
+function proConnectionsLabel(): string {
+  const all = integrationsForPlan("pro").flatMap((g) => g.items);
+  const soon = all.filter((i) => i.status === "soon").length;
+  return `כולל ${all.length - soon} חיבורים${soon ? `, ועוד ${soon} בקרוב` : ""}`;
+}
+
 export const PRICING = {
   trial: TRIAL_MESSAGES,
   vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
@@ -170,7 +178,7 @@ export const PRICING = {
       allowance: `עד ${formatNumber(PLANS.pro.messages)} הודעות בחודש, בשימוש הוגן`,
       lead: planFeatures("pro").lead,
       features: planFeatures("pro").lines,
-      connectionsLabel: "כולל חיבור ל:",
+      connectionsLabel: proConnectionsLabel(),
     },
   ],
 } as const;
@@ -203,5 +211,42 @@ export const FAQ: readonly { q: string; a: string }[] = [
   {
     q: "אפשר לבטל?",
     a: "כן, בכל רגע מהאזור האישי. המנוי נשאר פעיל עד סוף התקופה ששולמה.",
+  },
+];
+
+/** "בקרוב" in pro, in words: "סיכומי פגישות וחיבור למערכות העסק, כמו monday.com" (lib/billing/plans.ts COMING_SOON). */
+function soonInPro(): string {
+  const soon = planFeatures("pro").lines.filter((l) => l.soon).map((l) => l.text);
+  return soon.length < 2 ? (soon[0] ?? "") : `${soon.slice(0, -1).join(", ")} ו${soon.at(-1)}`;
+}
+
+/**
+ * /pricing: questions about the plans. Every fact is one the code enforces (lib/billing/plans.ts, the billing flow in
+ * lib/billing/subscription.ts and lib/billing/commands.ts) or one the support chat already says (lib/support/knowledge.ts).
+ */
+export const PRICING_FAQ: readonly { q: string; a: string }[] = [
+  {
+    q: `מה קורה אחרי ${TRIAL_MESSAGES} ההודעות החינמיות?`,
+    a: `${BRAND.name} שולחת בוואטסאפ קישור תשלום אישי. בוחרים מסלול, משלמים בכרטיס אשראי וממשיכים באותה שיחה. נספרות רק הודעות ששולחים אליה ומקבלות תשובה; לחיצות אישור, תזכורות וסיכום הבוקר לא נספרים.`,
+  },
+  {
+    q: "אפשר לעבור בין המסלולים?",
+    a: "כן. שדרוג לפרו נכנס לתוקף מיד, מהאזור האישי או בהודעה ״שדרוג״ בוואטסאפ. מעבר לבסיסי, בהודעה בוואטסאפ, נכנס לתוקף בחיוב החודשי הבא.",
+  },
+  {
+    q: "מה קורה לחשבון השני במעבר לבסיסי?",
+    a: "בבסיסי עובדים עם חשבון אחד. אם מחוברים גם Google וגם Microsoft, ממשיכים עם החשבון שחובר אחרון, והשני נשאר מחובר אבל מושהה: לא מתנתק ולא נמחק. אפשר לנתק אחד מהם באזור האישי, או לחזור לפרו ולעבוד עם שניהם יחד.",
+  },
+  {
+    q: "המחירים כוללים מע״מ?",
+    a: `כן. ${PLANS.basic.priceIls} ₪ ו-${PLANS.pro.priceIls} ₪ לחודש כוללים מע״מ (${vatPercent}%). החיוב חודשי, וקבלה נשלחת במייל אחרי כל חיוב.`,
+  },
+  {
+    q: "מה מסומן ״בקרוב״?",
+    a: `יכולות שעוד בפיתוח ויהיו חלק ממסלול פרו: ${soonInPro()}. חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה בטופס ״בקשת מערכת״ בדף הזה.`,
+  },
+  {
+    q: "אפשר לבטל?",
+    a: "כן, בכל רגע, מהאזור האישי או בהודעה ״ביטול מנוי״ בוואטסאפ. המנוי נשאר פעיל עד סוף התקופה ששולמה ולא מתחדש. בלי התחייבות.",
   },
 ];
