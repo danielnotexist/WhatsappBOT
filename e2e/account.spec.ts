@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { newContext, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
+import { newContext, openArea, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
 
 /** Signs a new user up through the API; the context keeps the session cookie. */
 async function signup(ctx: BrowserContext): Promise<string> {
@@ -32,11 +32,22 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page.getByText(/^(בוקר טוב|צהריים טובים|ערב טוב|לילה טוב)\.$/)).toBeVisible();
     await expect(page.getByRole("main").getByText(email)).toBeVisible();
     await expect(page.getByText("עוד לא קושר מספר וואטסאפ. זה הצעד שחסר כדי להתחיל לעבוד יחד.")).toBeVisible();
+    // the compact overview: one chip per area, each a link to it
+    const chips = page.getByRole("list", { name: "מצב החשבון" });
+    await expect(chips.getByRole("link")).toHaveText(["עוד אין חיבורים", "וואטסאפ לא מקושר", "3 סוכנים פעילים", "ניסיון: 0 מתוך 10 הודעות"]);
+    const nav = page.getByRole("navigation", { name: "ניווט באזור האישי" });
+    await expect(nav.getByRole("link", { name: "סקירה", exact: true })).toHaveAttribute("aria-current", "page");
 
+    await openArea(page, "חיבורים");
+    await expect(page).toHaveURL(/\/account\?tab=connections$/);
     const connections = page.getByRole("region", { name: "חיבורים" });
     await expect(connections.getByText("לא מחובר")).toHaveCount(2);
     await expect(page.getByRole("link", { name: "חיבור Microsoft 365" })).toHaveAttribute("href", "/api/auth/microsoft/start");
     await expect(page.getByRole("link", { name: "חיבור Google" })).toHaveAttribute("href", "/api/auth/google/start");
+    // the browser's back button walks the areas
+    await page.goBack();
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(connections).toHaveCount(0);
 
     const meter = page.getByRole("meter", { name: "הודעות בתקופת הניסיון" });
     await expect(meter).toHaveAttribute("aria-valuetext", "0 מתוך 10");
@@ -78,10 +89,11 @@ test.describe("personal area — same server actions, new design", () => {
 
     // Microsoft from the personal area → back here with a notice
     await approveMicrosoft(ctx);
-    await page.goto("/account");
+    await page.goto("/account?tab=connections");
     await page.getByRole("link", { name: "חיבור Microsoft 365" }).click();
-    await expect(page).toHaveURL(/\/account\?notice=/);
-    await expect(page.getByRole("status").filter({ hasText: "Microsoft 365" })).toBeVisible();
+    // the OAuth return lands on "חיבורים", with its notice there
+    await expect(page).toHaveURL(/\/account\?tab=connections&notice=/);
+    await expect(page.getByRole("region", { name: "חיבורים" }).getByRole("status").filter({ hasText: "Microsoft 365" })).toBeVisible();
     await expect(page.getByText("אני זמינה בוואטסאפ ומחוברת ל-Outlook.")).toBeVisible();
     // the services behind the account: one named icon each, a tooltip on hover; Esc closes it. The trial is basic in
     // what it connects (lib/billing/plans.ts): To Do is pro, a link to the upgrade
@@ -106,18 +118,23 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page.getByRole("link", { name: "חיבור Microsoft 365" })).toBeVisible();
     await expect(page.getByRole("link", { name: "חיבור Google" })).toBeVisible();
 
-    // pay (mock) → basic, 0 of 750; cancel from the fold
-    await page.goto((await page.getByRole("link", { name: "בחירת מסלול" }).getAttribute("href"))!);
+    // pay (mock) → basic, 0 of 750; cancel from the fold in "מנוי"
+    await openArea(page, "מנוי");
+    await page.goto((await page.getByRole("region", { name: "המנוי" }).getByRole("link", { name: "בחירת מסלול" }).getAttribute("href"))!);
     await payWithMock(page);
     await expect(page.getByRole("meter", { name: "הודעות החודש" })).toHaveAttribute("aria-valuemax", "750");
-    await expect(page.getByText("פעיל", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "המנוי" }).getByText("פעיל", { exact: true })).toBeVisible();
+    await openArea(page, "מנוי");
     await page.getByText("ביטול המנוי", { exact: true }).click();
     await page.getByRole("button", { name: "לבטל את המנוי" }).click();
+    await expect(page).toHaveURL(/\/account\?tab=plan&notice=/);
     await expect(page.getByRole("status").filter({ hasText: "המנוי בוטל" })).toBeVisible();
     await expect(page.getByRole("link", { name: "חידוש המנוי" })).toBeVisible();
 
     // unlink the number
+    await openArea(page, "וואטסאפ");
     await page.getByRole("button", { name: /^ניתוק המספר/ }).click();
+    await expect(page).toHaveURL(/\/account\?tab=whatsapp&notice=/);
     await expect(page.getByRole("status").filter({ hasText: "המספר נותק" })).toBeVisible();
     await expect(page.getByText("עוד לא קושר מספר", { exact: true })).toBeVisible();
     await ctx.close();
@@ -129,8 +146,12 @@ test.describe("personal area — same server actions, new design", () => {
     const page = await ctx.newPage();
     await approveMicrosoft(ctx, "google");
     await page.goto("/account");
+    // phones: the areas are one row of six under the overview, all in view
+    const nav = page.getByRole("navigation", { name: "ניווט באזור האישי" });
+    for (const label of ["סקירה", "חיבורים", "וואטסאפ", "סוכנים", "מנוי", "הגדרות"]) await expect(nav.getByRole("link", { name: label, exact: true })).toBeInViewport();
+    await openArea(page, "חיבורים");
     await page.getByRole("link", { name: "חיבור Google" }).click();
-    await expect(page).toHaveURL(/\/account\?notice=/);
+    await expect(page).toHaveURL(/\/account\?tab=connections&notice=/);
     const services = page.getByRole("list", { name: "שירותים ב-Google" });
     await expect(services.getByRole("listitem")).toHaveCount(7);
     // the trial is basic in what it connects (lib/billing/plans.ts): Tasks and the Docs family are pro, links to the upgrade
@@ -151,12 +172,49 @@ test.describe("personal area — same server actions, new design", () => {
     await ctx.close();
   });
 
+  test("areas are addresses: deep links, older links, a notice in its area, the keyboard", async ({ browser }) => {
+    const ctx = await newContext(browser);
+    await signup(ctx);
+    const page = await ctx.newPage();
+    const nav = page.getByRole("navigation", { name: "ניווט באזור האישי" });
+
+    await page.goto("/account?tab=agents");
+    await expect(nav.getByRole("link", { name: "סוכנים", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("region", { name: "הסוכנים שלי" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "סקירה" })).toHaveCount(0);
+
+    // an older link (a bare notice, as chat links and returns used to land): shown on the overview
+    await page.goto(`/account?notice=${encodeURIComponent("הודעה לבדיקה")}`);
+    await expect(page.getByRole("region", { name: "סקירה" }).getByRole("status")).toHaveText(/הודעה לבדיקה/);
+    // the agents' older landing (?at=agents#agents): the agents, with the notice there
+    await page.goto(`/account?notice=${encodeURIComponent("הסוכן נשמר")}&at=agents#agents`);
+    const agentsNotice = page.getByRole("region", { name: "הסוכנים שלי" }).getByRole("status");
+    await expect(agentsNotice).toHaveText(/הסוכן נשמר/);
+    // "סגירה" closes it in place and drops the notice from the address
+    await agentsNotice.getByRole("link", { name: "סגירה" }).click();
+    await expect(agentsNotice).toHaveCount(0);
+    await expect(page).toHaveURL(/\/account\?tab=agents$/);
+
+    // the keyboard: Enter on an area link switches and moves focus to the area's heading
+    await nav.getByRole("link", { name: "מנוי", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/account\?tab=plan$/);
+    await expect(page.getByRole("heading", { name: "המנוי", level: 2 })).toBeFocused();
+    // a status chip leads to its area too
+    await page.getByRole("list", { name: "מצב החשבון" }).getByRole("link", { name: "וואטסאפ לא מקושר" }).click();
+    await expect(page).toHaveURL(/\/account\?tab=whatsapp$/);
+    await expect(page.getByRole("region", { name: "וואטסאפ" })).toBeVisible();
+    await ctx.close();
+  });
+
   test("delete needs the typed word; sign-out leaves the area", async ({ browser }) => {
     const ctx = await newContext(browser);
     await signup(ctx);
     const page = await ctx.newPage();
     await page.goto("/account");
-    await page.getByText("מחיקת החשבון", { exact: true }).click();
+    await openArea(page, "הגדרות");
+    // in its own area the delete form is out in the open, still asleep until the word is typed
+    await expect(page.getByRole("heading", { name: "מחיקת החשבון", exact: true })).toBeVisible();
     const del = page.getByRole("button", { name: "מחיקת החשבון לצמיתות" });
     await expect(del).toBeDisabled();
     await page.getByLabel(/כדי למחוק/).fill("מחיקה");

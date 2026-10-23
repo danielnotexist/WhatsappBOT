@@ -38,7 +38,7 @@ export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage):
   }
   const existing = (await ctx.db.listWaIdentities(user.id)).find((w) => w.status !== "unlinked");
   if (existing && existing.phone_e164 !== phone) {
-    await ctx.wa.sendText(phone, copy["link.second_phone"](maskPhone(existing.phone_e164), siteLink(ctx, "/account")));
+    await ctx.wa.sendText(phone, copy["link.second_phone"](maskPhone(existing.phone_e164), siteLink(ctx, "/account?tab=whatsapp")));
     return { handled: true, note: "account has another phone" };
   }
 

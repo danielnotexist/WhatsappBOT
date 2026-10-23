@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { ServiceId, ServiceView } from "@/lib/connections/services";
+import Image from "next/image";
+import { SERVICE_ICON_STYLE, serviceTileSrc } from "@/lib/connections/service-tiles";
 import { cn } from "@/lib/utils";
 import { ServiceGlyph } from "./service-icons";
 
@@ -73,6 +75,18 @@ const TILE: Record<ServiceView["status"], string> = {
   pro_only: "bg-cream/[0.04] text-cream-muted/70 ring-1 ring-honey/35 ring-inset hover:bg-cream/[0.1] hover:text-cream",
 };
 
+/**
+ * The illustrated tiles (SERVICE_ICON_STYLE "tiles"): the picture carries its own dark tile, so the status is drawn on
+ * top of it — full colour when connected, faded with the honey dot when it needs an approval, faded with a honey ring
+ * in pro, washed out behind a dashed edge when unavailable.
+ */
+const TILE_PICTURE: Record<ServiceView["status"], string> = {
+  connected: "after:ring-sage/55",
+  needs_consent: "after:ring-cream/15 [&_img]:opacity-60 hover:[&_img]:opacity-90",
+  unavailable: "after:border after:border-dashed after:border-cream-muted/50 [&_img]:opacity-30 [&_img]:grayscale",
+  pro_only: "after:ring-honey/60 [&_img]:opacity-45 hover:[&_img]:opacity-80",
+};
+
 const DOT: Record<ServiceView["status"], string> = {
   connected: "bg-sage",
   needs_consent: "bg-honey",
@@ -116,9 +130,12 @@ function ServiceIconItem({
     }
   };
 
+  const pictures = SERVICE_ICON_STYLE === "tiles";
   const tile = cn(
     "relative grid size-9 place-items-center rounded-xl transition-[background-color,color,border-color] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-honey",
-    TILE[view.status],
+    // the status edge sits over the picture (an inset ring under it would be hidden)
+    pictures ? "after:pointer-events-none after:absolute after:inset-0 after:rounded-xl after:ring-1 after:ring-transparent after:ring-inset [&_img]:transition-opacity [&_img]:duration-150" : null,
+    pictures ? TILE_PICTURE[view.status] : TILE[view.status],
   );
   const common = {
     className: tile,
@@ -134,8 +151,14 @@ function ServiceIconItem({
   };
   const glyph = (
     <>
-      <ServiceGlyph icon={view.icon} className="size-5" />
-      {view.status === "needs_consent" ? <span aria-hidden="true" className="absolute -end-0.5 -top-0.5 size-2.5 rounded-full bg-honey ring-2 ring-night" /> : null}
+      {pictures ? (
+        <span className="block size-full overflow-hidden rounded-xl">
+          <Image src={serviceTileSrc(view.id)} alt="" width={36} height={36} sizes="36px" draggable={false} className="block size-full" />
+        </span>
+      ) : (
+        <ServiceGlyph icon={view.icon} className="size-5" />
+      )}
+      {view.status === "needs_consent" ? <span aria-hidden="true" className="absolute -end-0.5 -top-0.5 z-10 size-2.5 rounded-full bg-honey ring-2 ring-night" /> : null}
     </>
   );
 

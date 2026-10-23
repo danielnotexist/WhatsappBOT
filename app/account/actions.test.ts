@@ -6,7 +6,7 @@ import { createAgentAction, deleteAgentAction, toggleAgentAction, updateAgentAct
 
 /**
  * The agent server actions (docs/design/agents.md §10) against MemoryDb: the user id comes only from the session,
- * every key from the form is checked against it, and the result comes back as a notice on /account#agents.
+ * every key from the form is checked against it, and the result comes back as a notice on the agents area (/account?tab=agents).
  */
 const h = vi.hoisted(() => {
   class Redirect extends Error {
@@ -27,7 +27,7 @@ vi.mock("@/lib/auth/current-user", () => ({ getSession: async () => h.session })
 
 const NOW = new Date();
 
-/** Runs an action and returns where it redirected: the path, the notice or the error, and the anchor. */
+/** Runs an action and returns where it redirected: the path, the notice or the error, the area and the anchor. */
 async function submit(action: (fd: FormData) => Promise<void>, fields: Record<string, string | string[]>) {
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) for (const one of Array.isArray(v) ? v : [v]) fd.append(k, one);
@@ -37,7 +37,7 @@ async function submit(action: (fd: FormData) => Promise<void>, fields: Record<st
   );
   if (!(thrown instanceof h.Redirect)) throw new Error(`expected a redirect, got ${String(thrown)}`);
   const url = new URL(thrown.url, "https://app.example");
-  return { path: url.pathname, notice: url.searchParams.get("notice"), error: url.searchParams.get("error"), at: url.searchParams.get("at"), hash: url.hash };
+  return { path: url.pathname, notice: url.searchParams.get("notice"), error: url.searchParams.get("error"), tab: url.searchParams.get("tab"), hash: url.hash };
 }
 
 let db: MemoryDb;
@@ -76,13 +76,13 @@ describe("agent server actions", () => {
       recipients: "Office@Barak-CPA.example",
       max_outbound: "",
     });
-    expect(r).toEqual({ path: "/account", notice: "הסוכן ״חשבוניות״ נשמר.", error: null, at: "agents", hash: "#agents" });
+    expect(r).toEqual({ path: "/account", notice: "הסוכן ״חשבוניות״ נשמר.", error: null, tab: "agents", hash: "" });
     expect(db.agents).toHaveLength(1);
     expect(db.agents[0]).toMatchObject({ user_id: user.id, name: "חשבוניות", role: "custom", template: "bookkeeper", tools: ["mail.read", "mail.forward"], permissions: { recipients: ["office@barak-cpa.example"] } });
     expect(db.audit.find((a) => a.action === "agent.create")).toMatchObject({ user_id: user.id, reason: "account" });
 
     const second = await submit(createAgentAction, { name: "לקוחות", template: "", instructions: "לסכם מיילים.", capabilities: "mail.read" });
-    expect(second).toMatchObject({ notice: null, error: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו - עד שלושה.", at: "agents" });
+    expect(second).toMatchObject({ notice: null, error: "במסלול הבסיסי אפשר סוכן אחד משלך, והוא כבר קיים. במסלול פרו - עד שלושה.", tab: "agents" });
     expect(db.agents).toHaveLength(1);
   });
 
@@ -116,7 +116,7 @@ describe("agent server actions", () => {
     const theirs = await createAgentFor(db, owner.id, { name: "סודי", template: null, instructions: "של הבעלים.", capabilities: ["mail.read"] }, { source: "account", now: NOW });
     if (!theirs.ok) throw new Error(theirs.message);
     await signedIn("pro");
-    const notFound = { notice: null, error: "הסוכן לא נמצא.", at: "agents" };
+    const notFound = { notice: null, error: "הסוכן לא נמצא.", tab: "agents" };
     expect(await submit(updateAgentAction, { key: theirs.agent.key, name: "שלי", instructions: "נפרץ", capabilities: "mail.read" })).toMatchObject(notFound);
     expect(await submit(toggleAgentAction, { key: theirs.agent.key, enabled: "0" })).toMatchObject(notFound);
     expect(await submit(deleteAgentAction, { key: theirs.agent.key })).toMatchObject(notFound);

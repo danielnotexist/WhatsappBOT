@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { newContext, payWithMock, readCode, uniqueEmail } from "./helpers";
+import { newContext, openArea, payWithMock, readCode, uniqueEmail } from "./helpers";
 
 /** Signs a new user up through the API; the context keeps the session cookie. */
 async function signup(ctx: BrowserContext): Promise<string> {
@@ -66,8 +66,10 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     await expect(p2.getByRole("form", { name: "בסיסי", exact: true })).toHaveCount(0);
     await expect(p2.getByRole("banner").getByRole("link", { name: "לאזור האישי" })).toBeVisible();
     await p2.getByRole("link", { name: "לעדכון הכרטיס" }).click();
-    await expect(p2).toHaveURL(/\/account\?notice=/);
-    await expect(p2.getByText("הכרטיס עודכן. אפשר לחזור לוואטסאפ.")).toBeVisible();
+    // back on "מנוי", with the message there
+    await expect(p2).toHaveURL(/\/account\?tab=plan&notice=/);
+    await expect(p2.getByRole("status").filter({ hasText: "הכרטיס עודכן. אפשר לחזור לוואטסאפ." })).toBeVisible();
+    await expect(p2.getByRole("region", { name: "המנוי" }).getByRole("link", { name: "עדכון אמצעי תשלום" })).toBeVisible();
     await owner.close();
   });
 
@@ -78,11 +80,17 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     await page.goto((await payLinkOf(ctx)));
     await payWithMock(page, "basic");
 
-    // the personal area: the plan card and the agents section both lead straight to the upgrade face
+    // the personal area: the plan card (the overview's and the one in "מנוי") and the agents both lead straight to the
+    // upgrade face
     const slip = page.getByRole("region", { name: "המנוי" });
+    const upgrade = (await slip.getByRole("link", { name: "לשדרוג לפרו" }).getAttribute("href"))!;
+    await openArea(page, "מנוי");
     await expect(slip.getByRole("link", { name: "עדכון אמצעי תשלום" })).toHaveAttribute("href", /\/pay\/[^?]+\?view=card$/);
+    await expect(slip.getByRole("link", { name: "לשדרוג לפרו" })).toHaveAttribute("href", upgrade);
+    await openArea(page, "סוכנים");
     const agentsCta = page.getByRole("region", { name: "הסוכנים שלי" }).getByRole("link", { name: "לשדרוג לפרו" });
-    await expect(agentsCta).toHaveAttribute("href", (await slip.getByRole("link", { name: "לשדרוג לפרו" }).getAttribute("href"))!);
+    await expect(agentsCta).toHaveAttribute("href", upgrade);
+    await openArea(page, "מנוי");
     await slip.getByRole("link", { name: "לשדרוג לפרו" }).click();
 
     // a fresh basic cycle: the whole difference (299 − 99), VAT included, the mock card's last digits
@@ -113,6 +121,8 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     await expect(page.getByRole("meter", { name: "הודעות החודש" })).toHaveAttribute("aria-valuemax", "3000");
     await expect(page.getByRole("link", { name: "לשדרוג לפרו" })).toHaveCount(0);
     // the pay link of a pro plan: the card update, with the way to basic in the chat
+    await openArea(page, "מנוי");
+    await expect(page.getByRole("link", { name: "לשדרוג לפרו" })).toHaveCount(0);
     await page.goto((await slip.getByRole("link", { name: "עדכון אמצעי תשלום" }).getAttribute("href"))!.replace("?view=card", ""));
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("עדכון כרטיס");
     await expect(page.getByText("מעבר למסלול הבסיסי: בשיחה עם עלזה, לכתוב ״מעבר לבסיסי״.")).toBeVisible();

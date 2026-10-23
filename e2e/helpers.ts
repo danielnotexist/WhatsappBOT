@@ -94,6 +94,13 @@ export async function submitEmail(page: Page, email: string, opts: { updates?: b
   await expect(page.getByRole("heading", { name: "הזינו את הקוד" })).toBeVisible();
 }
 
+/** The personal area: opens an area from its navigation ("חיבורים", "מנוי", …) and waits until it is the current one. */
+export async function openArea(page: Page, label: "סקירה" | "חיבורים" | "וואטסאפ" | "סוכנים" | "מנוי" | "הגדרות"): Promise<void> {
+  const link = page.getByRole("navigation", { name: "ניווט באזור האישי" }).getByRole("link", { name: label, exact: true });
+  await link.click();
+  await expect(link).toHaveAttribute("aria-current", "page");
+}
+
 /** Types the six digits; the code card submits by itself on the sixth digit. */
 export async function enterCode(page: Page, code: string): Promise<void> {
   const input = page.getByRole("textbox", { name: "קוד בן 6 ספרות" });

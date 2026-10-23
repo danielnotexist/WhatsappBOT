@@ -14,6 +14,7 @@ describe("payment results (where HYP's redirect lands)", () => {
   it("signed in: the personal area with the message; otherwise /pay/done with the code only", () => {
     const acc = payResultUrl("https://alze.example", { signedIn: true, result: "paid", message: "התשלום התקבל" });
     expect(acc.pathname).toBe("/account");
+    expect(acc.searchParams.get("tab")).toBe("plan"); // the personal area opens on "מנוי", where the message is shown
     expect(acc.searchParams.get("notice")).toBe("התשלום התקבל");
     expect(payResultUrl("https://alze.example", { signedIn: true, result: "declined", message: "לא עבר" }).searchParams.get("error")).toBe("לא עבר");
     const done = payResultUrl("https://alze.example", { signedIn: false, result: "card_link", message: "ignored <script>" });

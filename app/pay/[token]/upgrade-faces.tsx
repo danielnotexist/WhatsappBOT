@@ -224,7 +224,7 @@ export function UpgradeDoneFace({ email, amountIls, vatIls, nextAmountIls, nextD
         ) : null}
       </PayPaper>
       <p className="mt-8">
-        <StageLink href="/account">לאזור האישי</StageLink>
+        <StageLink href="/account?tab=plan">לאזור האישי</StageLink>
       </p>
     </>
   );
@@ -302,7 +302,7 @@ export function UpgradeFailedFace({
         )}
       </PayPaper>
       <p className="mt-8">
-        <StageLink href="/account">לאזור האישי</StageLink>
+        <StageLink href="/account?tab=plan">לאזור האישי</StageLink>
       </p>
     </>
   );
@@ -319,7 +319,7 @@ export function UpgradeUnknownFace() {
         </p>
       </PayPaper>
       <p className="mt-8">
-        <StageLink href="/account">לאזור האישי</StageLink>
+        <StageLink href="/account?tab=plan">לאזור האישי</StageLink>
       </p>
     </>
   );

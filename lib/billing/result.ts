@@ -34,7 +34,9 @@ export const PAY_RESULTS: Record<PayResult, { ok: boolean; tag: string; title: s
 /** Signed in → /account with the message (notice or error); otherwise → /pay/done?r=<code>. */
 export function payResultUrl(origin: string, opts: { signedIn: boolean; result: PayResult; message: string }): URL {
   if (opts.signedIn) {
+    // the personal area's "מנוי" (app/account/areas.ts), where the message is shown
     const dest = new URL("/account", origin);
+    dest.searchParams.set("tab", "plan");
     dest.searchParams.set(PAY_RESULTS[opts.result].ok ? "notice" : "error", opts.message);
     return dest;
   }

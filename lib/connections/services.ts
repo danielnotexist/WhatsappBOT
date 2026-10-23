@@ -27,6 +27,9 @@ export type ServiceStatus = "connected" | "needs_consent" | "unavailable" | "pro
 /** Our own solid glyphs (components/brand/service-icons.tsx). */
 export type ServiceIcon = "mail" | "calendar" | "tasks" | "folder" | "doc" | "sheet" | "slides" | "cloud" | "sites" | "files";
 
+/** How the icon row draws a service — the illustrated tiles or our glyphs (one switch: ./service-tiles.ts). */
+export { SERVICE_ICON_STYLE, SERVICE_TILE, serviceTileSrc } from "./service-tiles";
+
 export type ServiceId =
   | "gmail"
   | "google_calendar"

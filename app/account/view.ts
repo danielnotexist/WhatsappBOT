@@ -3,6 +3,7 @@ import type { AgentStatus, ResolvedAgent } from "@/lib/agents/policy";
 import { BUILTIN_AGENTS } from "@/lib/agents/templates";
 import { PLANS, TRIAL_MESSAGES, customAgentLimit, paidPlanOf, type EffectivePlan } from "@/lib/billing/plans";
 import type { AgentRole, BuiltinRole, ConnectionRow, SubscriptionRow, UsageRow, WaIdentityRow } from "@/lib/db/types";
+import type { AccountArea } from "./areas";
 
 /**
  * Pure helpers for the personal area (/account): what to say and show for a given account state.
@@ -117,6 +118,64 @@ export function statusLine(opts: { phoneLinked: boolean; microsoft: ConnectionSt
 /** 3000 → "3,000" */
 export function formatCount(n: number): string {
   return new Intl.NumberFormat("he-IL").format(n);
+}
+
+// ---------------------------------------------------------------- the compact overview at the top of every area
+
+export type ChipTone = "ok" | "warn" | "error" | "off";
+
+export interface StatusChip {
+  area: AccountArea;
+  label: string;
+  tone: ChipTone;
+  /** the plan chip: the messages used, drawn as a small bar */
+  meter?: { used: number; limit: number };
+}
+
+const PLAN_SHORT: Record<PlanKindView, string> = { trial: "ניסיון", basic: "בסיסי", pro: "פרו" };
+
+/**
+ * The quick status chips under the greeting — each one a link to its area: the connected accounts, the WhatsApp number,
+ * the agents at work and the plan with the messages used. Pure — unit-tested.
+ */
+export function statusChips(opts: {
+  microsoft: ConnectionState;
+  google: ConnectionState;
+  phone: "linked" | "blocked" | "none";
+  activeAgents: number;
+  meter: UsageView;
+  subscriptionStatus: SubscriptionRow["status"] | null;
+}): StatusChip[] {
+  const { microsoft, google, phone, activeAgents, meter, subscriptionStatus } = opts;
+  const states = [microsoft, google];
+  const live = states.filter((s) => s === "active").length;
+  const connections: StatusChip = states.some((s) => s === "expired" || s === "error")
+    ? { area: "connections", label: "חיבור צריך חידוש", tone: "warn" }
+    : { area: "connections", label: live === 0 ? "עוד אין חיבורים" : live === 1 ? "חיבור אחד פעיל" : `${live} חיבורים פעילים`, tone: live ? "ok" : "off" };
+  const whatsapp: StatusChip =
+    phone === "linked"
+      ? { area: "whatsapp", label: "וואטסאפ מקושר", tone: "ok" }
+      : phone === "blocked"
+        ? { area: "whatsapp", label: "המספר חסום", tone: "error" }
+        : { area: "whatsapp", label: "וואטסאפ לא מקושר", tone: "warn" };
+  const agents: StatusChip = {
+    area: "agents",
+    label: activeAgents === 0 ? "אין סוכנים פעילים" : activeAgents === 1 ? "סוכן אחד פעיל" : `${activeAgents} סוכנים פעילים`,
+    tone: activeAgents ? "ok" : "off",
+  };
+  const pastDue = meter.plan !== "trial" && subscriptionStatus === "past_due";
+  const plan: StatusChip = {
+    area: "plan",
+    label: pastDue ? `${PLAN_SHORT[meter.plan]}: התשלום נכשל` : `${PLAN_SHORT[meter.plan]}: ${formatCount(meter.used)} מתוך ${formatCount(meter.limit)} הודעות`,
+    tone: pastDue ? "error" : meter.used >= meter.limit ? "warn" : meter.plan !== "trial" && subscriptionStatus === "cancelled" ? "off" : "ok",
+    meter: { used: meter.used, limit: meter.limit },
+  };
+  return [connections, whatsapp, agents, plan];
+}
+
+/** The areas that need the user (a honey dot beside them in the navigation): a warning or an error chip. */
+export function areasNeedingAttention(chips: readonly StatusChip[]): AccountArea[] {
+  return chips.filter((c) => c.tone === "warn" || c.tone === "error").map((c) => c.area);
 }
 
 // ---------------------------------------------------------------- agents (docs/design/agents.md §10)

@@ -3,14 +3,37 @@ import { cn } from "@/lib/utils";
 
 /** The personal area's building blocks ("לילה ירוק"): a titled section, a quiet row on the stage, a square tile, a chevron. */
 
-export function Section({ id, title, description, className, children }: { id: string; title: string; description?: string; className?: string; children: ReactNode }) {
+/**
+ * A titled area. `action`: one control beside the title on wide screens (below it on phones) — e.g. the agents' upgrade.
+ * The h2 is the target the area navigation moves focus to (./area-nav.tsx), so it carries no focus ring of its own.
+ */
+export function Section({
+  id,
+  title,
+  description,
+  action,
+  className,
+  children,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <section aria-labelledby={`${id}-title`} id={id} className={cn("scroll-mt-6", className)}>
-      <h2 id={`${id}-title`} className="font-heading text-[1.625rem] leading-tight font-bold">
-        {title}
-      </h2>
-      {description ? <p className="mt-1.5 max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">{description}</p> : null}
-      <div className="mt-5">{children}</div>
+    <section aria-labelledby={`${id}-title`} id={id} className={cn("scroll-mt-24 lg:scroll-mt-6", className)}>
+      <div className={cn(action && "flex flex-wrap items-end justify-between gap-x-8 gap-y-4")}>
+        <div className="min-w-0">
+          <h2 id={`${id}-title`} className="font-heading text-[1.625rem] leading-tight font-bold focus:outline-none">
+            {title}
+          </h2>
+          {description ? <p className="mt-1.5 max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">{description}</p> : null}
+        </div>
+        {action ? <div className="flex-none">{action}</div> : null}
+      </div>
+      <div className="mt-6">{children}</div>
     </section>
   );
 }
@@ -36,9 +59,9 @@ export function Row({ mark, title, children, action, footer }: { mark: ReactNode
   );
 }
 
-export function Tile({ children, muted = false }: { children: ReactNode; muted?: boolean }) {
+export function Tile({ children, muted = false, className }: { children: ReactNode; muted?: boolean; className?: string }) {
   return (
-    <span aria-hidden="true" className={cn("grid size-12 flex-none place-items-center rounded-2xl", muted ? "bg-cream/8" : "bg-cream")}>
+    <span aria-hidden="true" className={cn("grid size-12 flex-none place-items-center rounded-2xl", muted ? "bg-cream/8" : "bg-cream", className)}>
       {children}
     </span>
   );

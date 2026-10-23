@@ -84,7 +84,7 @@ describe("the result faces", () => {
     expect(text()).toContain("299 ₪, ב-10.11.2026");
     expect(text()).toContain("הקבלה נשלחה למייל");
     expect(screen.getByText("dana@example.com")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account");
+    expect(screen.getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account?tab=plan");
     expect(screen.queryByRole("button")).toBeNull();
     expectShortHyphens();
   });

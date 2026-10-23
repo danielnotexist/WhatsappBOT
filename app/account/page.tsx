@@ -1,58 +1,43 @@
-import type { Metadata, Route } from "next";
-import Link from "next/link";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot } from "@/components/brand/mascot";
-import { ProviderLogo, WhatsappGlyph } from "@/components/brand/provider-logo";
-import { ServiceRow } from "@/components/brand/service-row";
 import { SupportChat } from "@/components/brand/support-chat";
-import { UsageMeter } from "@/components/brand/usage-meter";
 import { Wordmark } from "@/components/brand/wordmark";
-import { DELETE_CONFIRM_WORD } from "@/lib/account/service";
 import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
-import { PLANS, TRIAL_MESSAGES, mayConnect, planFeatures, providerGate, type EffectivePlan } from "@/lib/billing/plans";
-import { PlanFeatureList } from "@/components/brand/plan-features";
+import { mayConnect, providerGate } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
 import { googleReadGates } from "@/lib/connections/gates";
-import { connectionServices, type ServiceView } from "@/lib/connections/services";
+import { connectionServices } from "@/lib/connections/services";
 import { getDb } from "@/lib/db";
-import type { ConnectionRow, SubscriptionRow, WaIdentityRow } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
 import { isBuiltinRole } from "@/lib/agents/constraints";
 import { loadAgents } from "@/lib/agents/service";
-import { isDemoChatPhone } from "@/lib/demo-chat/phone";
 import { isDemo } from "@/lib/demo";
-import { MascotAvatar } from "@/components/brand/mascot";
 import { AgentsSection } from "./_components/agents-section";
-import { DeleteAccountForm } from "./_components/delete-account-form";
-import { Chevron, Row, Section, Tile } from "./_components/parts";
-import { cancelSubscriptionAction, deleteAccountAction, disconnectAction, signOutAction, unlinkPhoneAction } from "./actions";
-import {
-  agentsView,
-  connectionFor,
-  firstName,
-  formatCount,
-  formatDay,
-  formatPhone,
-  greetingFor,
-  linkedPhones,
-  statusLine,
-  usageView,
-  type ConnectionState,
-  type UsageView,
-} from "./view";
+import { AreaLink, AreaNav, AreaPanel } from "./_components/area-nav";
+import { Banner } from "./_components/banner";
+import { OverviewRows } from "./_components/overview";
+import { Section } from "./_components/parts";
+import { PlanIncludes, PlanSlip, ProAdds } from "./_components/plan-slip";
+import { ConnectionItem, NoPhoneItem, ONE_ACCOUNT_LINE, PausedNotice, PhoneItem, DemoChatItem, type ProviderGate } from "./_components/rows";
+import { SettingsArea } from "./_components/settings";
+import { signOutAction } from "./actions";
+import { ACCOUNT_AREAS, areaFrom, type AccountArea } from "./areas";
+import { agentsView, areasNeedingAttention, connectionFor, firstName, formatDay, greetingFor, linkedPhones, statusChips, statusLine, usageView, type StatusChip } from "./view";
 
 export const metadata: Metadata = { title: "האזור האישי", robots: { index: false, follow: false } };
 
 /**
- * The personal area (round plan §3) in "לילה ירוק": a greeting and one line from עלזה about what is set up; the
- * connections and the WhatsApp number as quiet rows on the stage; the subscription as the one paper slip (the same
- * paper as the signup cards) with the usage meter; deleting the account folded away at the bottom.
- * Same server actions as before (./actions.ts).
+ * The personal area (round plan §3) in "לילה ירוק", in areas: a compact overview on top (the greeting, one line from
+ * עלזה, the status chips: accounts, WhatsApp, agents, the plan with the messages used), then the navigation (a column
+ * at the inline start on wide screens, one sticky row on phones) and the area it names — סקירה, חיבורים, וואטסאפ,
+ * סוכנים, מנוי, הגדרות (./areas.ts: `/account?tab=<area>`). Every area is rendered here once, the URL picks the one
+ * shown, and a result (`?notice=` / `?error=`) appears in the area it belongs to. Same server actions (./actions.ts).
  */
 export default function AccountPage(props: PageProps<"/account">) {
   return (
@@ -66,13 +51,7 @@ export default function AccountPage(props: PageProps<"/account">) {
         </form>
       </header>
       <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-8">
-        <Suspense
-          fallback={
-            <p role="status" className="pt-12 text-cream-muted">
-              טוען את האזור האישי…
-            </p>
-          }
-        >
+        <Suspense fallback={<AccountSkeleton />}>
           <Account searchParams={props.searchParams} />
         </Suspense>
       </main>
@@ -97,10 +76,13 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   ]);
   const now = new Date();
   const tz = user.timezone || "Asia/Jerusalem";
+  const area = areaFrom(sp);
   const notice = typeof sp.notice === "string" ? sp.notice.slice(0, 400) : "";
   const error = typeof sp.error === "string" ? sp.error.slice(0, 400) : "";
-  // an agent action lands on #agents — its notice is shown there, not at the top of the page
-  const atAgents = sp.at === "agents";
+  // the result of an action, at the top of the area the address names; a new key per render opens a closed one again
+  const bannerFor = (a: AccountArea): ReactNode =>
+    a === area && (notice || error) ? <Banner key={now.getTime()} kind={error ? "error" : "notice"} text={error || notice} area={a} /> : null;
+
   const { agents, plan } = await loadAgents(db, user.id, now, subscription);
   const newTemplate = typeof sp.new === "string" && (sp.new === "blank" || isBuiltinRole(sp.new)) ? sp.new : null;
   const payHref = `/pay/${createPayLinkToken(user.id)}`;
@@ -120,70 +102,120 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const meter = usageView(subscription, usage, now, tz);
   const name = firstName(user.name);
   const demo = isDemo(); // the website chat exists only in the demo
+  const agentsModel = agentsView(agents, plan);
+  const working = agentsModel.rows.filter((r) => r.status === "active").map((r) => r.name);
+  const chips = statusChips({
+    microsoft: microsoft.state,
+    google: google.state,
+    phone: linked.length ? (linked[0]!.status === "blocked" ? "blocked" : "linked") : "none",
+    activeAgents: working.length,
+    meter,
+    subscriptionStatus: subscription?.status ?? null,
+  });
+  const slip = { subscription, meter, payHref, timeZone: tz };
+  const pausedLabel = (p: "microsoft" | "google") => (paused.includes(p) ? "מושהה" : undefined);
 
   return (
     <>
-      <section aria-labelledby="account-title" className="relative flex items-end justify-between gap-6 pt-8 pb-10 sm:pt-12 sm:pb-14">
-        <div className="min-w-0">
-        <Handwritten tone="sage">
-          {greetingFor(now, tz)}
-          {name ? `, ${name}` : ""}.
-        </Handwritten>
-        <h1 id="account-title" className="mt-2 text-title leading-[1.1] font-bold">
-          האזור האישי
-        </h1>
-        <p className="mt-4 max-w-[40rem] text-lede text-cream-muted">{keepPrefixes(statusLine({ phoneLinked: linked.length > 0, microsoft: microsoft.state, google: google.state }))}</p>
-        <p className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[0.9375rem] text-cream-muted">
+      <section aria-labelledby="account-title" className="relative pt-6 pb-8 sm:pt-10 lg:pb-12">
+        <div className="min-w-0 pe-20 sm:pe-32 lg:pe-0">
+          <Handwritten tone="sage">
+            {greetingFor(now, tz)}
+            {name ? `, ${name}` : ""}.
+          </Handwritten>
+          <h1 id="account-title" className="mt-2 text-title leading-[1.1] font-bold">
+            האזור האישי
+          </h1>
+        </div>
+        <p className="mt-3 max-w-[42rem] text-[1.125rem] leading-relaxed text-cream-muted sm:text-lede">
+          {keepPrefixes(statusLine({ phoneLinked: linked.length > 0, microsoft: microsoft.state, google: google.state }))}
+        </p>
+        <p className="mt-1.5 text-[0.9375rem] text-cream-muted">
           <bdi dir="ltr" className="text-cream">
             {user.email}
           </bdi>
-          <span>חשבון מ-{formatDay(user.created_at, tz)}</span>
         </p>
-        </div>
-        {/* phones: tucked into the top corner beside the short greeting, so the status line keeps the full width */}
-        <Mascot pose="front" eager sizes="(min-width: 640px) 112px, 64px" className="absolute end-0 top-6 w-16 flex-none sm:static sm:w-28 lg:hidden" />
+        {/* phones: two by two, nothing hidden; wider: one row */}
+        <ul aria-label="מצב החשבון" className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          {chips.map((c) => (
+            <li key={c.area} className="flex">
+              <ChipLink chip={c} />
+            </li>
+          ))}
+        </ul>
+        {/* phones and tablets: the hoopoe beside the greeting (wide screens: on the plan slip) */}
+        <Mascot pose="front" eager sizes="(min-width: 640px) 112px, 64px" className="absolute end-0 top-4 w-16 sm:top-6 sm:w-28 lg:hidden" />
       </section>
 
-      {notice && !atAgents ? <Banner kind="notice" text={notice} /> : null}
-      {error && !atAgents ? <Banner kind="error" text={error} /> : null}
+      <div className="lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:gap-12 xl:gap-16">
+        <AreaNav attention={areasNeedingAttention(chips)} />
 
-      <div className="grid gap-x-16 gap-y-14 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_auto_auto_1fr]">
-        <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} עובדת עם המייל, היומן, המשימות והקבצים. ניתוק מוחק את הגישה אצלנו.`} className="lg:col-start-1 lg:row-start-1">
-          {paused.length && inForce[0] ? <PausedNotice inForce={inForce[0]} paused={paused[0]!} plan={plan} payHref={payHref} /> : null}
-          <ul className="divide-y divide-line border-y border-line">
-            <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" services={msServices} gate={gateOf("microsoft")} plan={plan} payHref={payHref} {...microsoft} />
-            <ConnectionItem provider="google" title="Google" product="Gmail" services={googleServices} gate={gateOf("google")} plan={plan} payHref={payHref} {...google} />
-          </ul>
-          {plan !== "pro" && !paused.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">{ONE_ACCOUNT_LINE[plan]}</p> : null}
-        </Section>
+        <div className="pt-8 lg:pt-0">
+          <AreaPanel area="overview">
+            <div className="grid gap-x-12 gap-y-16 lg:grid-cols-[minmax(0,1fr)_19rem] lg:pt-[6.75rem] xl:grid-cols-[minmax(0,1fr)_21rem]">
+              <Section id="overview" title="סקירה" description="מה מחובר לחשבון, ומה אפשר לעשות מכאן." className="lg:-mt-[6.75rem]">
+                {bannerFor("overview")}
+                <OverviewRows
+                  microsoft={{ state: microsoft.state, label: pausedLabel("microsoft") }}
+                  google={{ state: google.state, label: pausedLabel("google") }}
+                  phone={linked[0] ?? null}
+                  timeZone={tz}
+                  activeAgents={working}
+                  agentsLine={agentsModel.quotaLine}
+                  demo={demo}
+                />
+              </Section>
+              <PlanSlip variant="summary" {...slip} className="lg:self-start" />
+            </div>
+          </AreaPanel>
 
-        <Section id="whatsapp" title="וואטסאפ" description={`המספר שממנו מדברים עם ${BRAND.name}.`} className="lg:col-start-1 lg:row-start-2">
-          <ul className="divide-y divide-line border-y border-line">
-            {linked.length ? linked.map((p) => <PhoneItem key={p.id} phone={p} timeZone={tz} />) : <NoPhoneItem />}
-            {demo ? <DemoChatItem /> : null}
-          </ul>
-          {linked.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">מספר אחד לחשבון. להחלפה מנתקים את המספר הנוכחי, ומקשרים חדש מכאן.</p> : null}
-        </Section>
+          <AreaPanel area="connections">
+            <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} עובדת עם המייל, היומן, המשימות והקבצים. ניתוק מוחק את הגישה אצלנו.`}>
+              {bannerFor("connections")}
+              {paused.length && inForce[0] ? <PausedNotice inForce={inForce[0]} paused={paused[0]!} plan={plan} payHref={payHref} /> : null}
+              <ul className="divide-y divide-line border-y border-line">
+                <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" services={msServices} gate={gateOf("microsoft")} plan={plan} payHref={payHref} {...microsoft} />
+                <ConnectionItem provider="google" title="Google" product="Gmail" services={googleServices} gate={gateOf("google")} plan={plan} payHref={payHref} {...google} />
+              </ul>
+              {plan !== "pro" && !paused.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">{ONE_ACCOUNT_LINE[plan]}</p> : null}
+            </Section>
+          </AreaPanel>
 
-        <SubscriptionSlip
-          subscription={subscription}
-          plan={plan}
-          meter={meter}
-          payHref={payHref}
-          timeZone={tz}
-          className="lg:sticky lg:top-6 lg:col-start-2 lg:row-span-4 lg:row-start-1 lg:self-start"
-        />
+          <AreaPanel area="whatsapp">
+            <Section id="whatsapp" title="וואטסאפ" description={`המספר שממנו מדברים עם ${BRAND.name}.`}>
+              {bannerFor("whatsapp")}
+              <ul className="divide-y divide-line border-y border-line">
+                {linked.length ? linked.map((p) => <PhoneItem key={p.id} phone={p} timeZone={tz} />) : <NoPhoneItem />}
+                {demo ? <DemoChatItem /> : null}
+              </ul>
+              {linked.length ? <p className="mt-3 text-[0.875rem] text-cream-muted">מספר אחד לחשבון. להחלפה מנתקים את המספר הנוכחי, ומקשרים חדש מכאן.</p> : null}
+            </Section>
+          </AreaPanel>
 
-        <AgentsSection
-          view={agentsView(agents, plan)}
-          agents={agents}
-          payHref={payHref}
-          newTemplate={newTemplate}
-          banner={atAgents && (notice || error) ? <Banner kind={error ? "error" : "notice"} text={error || notice} inline /> : null}
-          className="lg:col-start-1 lg:row-start-3"
-        />
+          <AreaPanel area="agents">
+            <AgentsSection view={agentsModel} agents={agents} payHref={payHref} newTemplate={newTemplate} banner={bannerFor("agents")} />
+          </AreaPanel>
 
-        <DeleteAccount className="lg:col-start-1 lg:row-start-4" />
+          <AreaPanel area="plan">
+            {bannerFor("plan")}
+            <div className="grid gap-x-12 gap-y-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:pt-[6.75rem]">
+              <PlanSlip variant="full" {...slip} className="lg:self-start" />
+              <PlanIncludes plan={plan} className="lg:pt-2" />
+            </div>
+            <ProAdds plan={plan} className="mt-14" />
+          </AreaPanel>
+
+          <AreaPanel area="settings">
+            <SettingsArea
+              banner={bannerFor("settings")}
+              details={[
+                ...(user.name ? [{ label: "שם", value: user.name }] : []),
+                ...(user.business_name ? [{ label: "העסק", value: user.business_name }] : []),
+                { label: "החשבון נפתח", value: formatDay(user.created_at, tz) },
+              ]}
+            />
+          </AreaPanel>
+        </div>
       </div>
     </>
   );
@@ -204,375 +236,71 @@ function keepPrefixes(text: string): ReactNode[] {
   );
 }
 
-const STATE_STYLE: Record<ConnectionState, { text: string; dot: string; label: string }> = {
-  active: { text: "text-sage", dot: "bg-sage", label: "מחובר" },
-  expired: { text: "text-honey", dot: "bg-honey", label: "פג תוקף, צריך לחבר מחדש" },
-  error: { text: "text-destructive", dot: "bg-destructive", label: "יש תקלה בחיבור" },
-  none: { text: "text-cream-muted", dot: "border-[1.5px] border-cream-muted", label: "לא מחובר" },
+const CHIP_DOT: Record<StatusChip["tone"], string> = {
+  ok: "bg-sage",
+  warn: "bg-honey",
+  error: "bg-destructive",
+  off: "border-[1.5px] border-cream-muted",
 };
 
-function Status({ state, children }: { state: ConnectionState; children?: ReactNode }) {
-  const s = STATE_STYLE[state];
+/** A status chip: a link to its area. The plan chip draws the messages used as a small bar (the words say it too). */
+function ChipLink({ chip }: { chip: StatusChip }) {
+  const pct = chip.meter && chip.meter.limit > 0 ? Math.min(100, (chip.meter.used / chip.meter.limit) * 100) : 0;
   return (
-    <p className={cn("mt-1 flex items-center gap-2 text-[0.9375rem]", s.text)}>
-      <span aria-hidden="true" className={cn("size-2 flex-none rounded-full", s.dot)} />
-      {children ?? s.label}
-    </p>
-  );
-}
-
-const PROVIDER_TITLE: Record<"microsoft" | "google", string> = { microsoft: "Microsoft 365", google: "Google" };
-const WHERE: Record<Exclude<EffectivePlan, "pro">, string> = { trial: "בתקופת הניסיון", basic: "במסלול הבסיסי" };
-const ONE_ACCOUNT_LINE: Record<Exclude<EffectivePlan, "pro">, string> = {
-  trial: "בתקופת הניסיון ובמסלול הבסיסי מחברים חשבון אחד: Google או Microsoft. שניהם יחד: במסלול פרו.",
-  basic: "במסלול הבסיסי מחברים חשבון אחד: Google או Microsoft. שניהם יחד: במסלול פרו.",
-};
-
-/** How the plan treats a provider: connect freely, connected but paused (a second account), or only on pro. */
-type ProviderGate = "open" | "paused" | "pro";
-
-/**
- * A second account connected before the split (or kept after a downgrade): nothing was disconnected or deleted. One
- * line says which account works now and the two ways on: disconnect one of them, or upgrade.
- */
-function PausedNotice({ inForce, paused, plan, payHref }: { inForce: "microsoft" | "google"; paused: "microsoft" | "google"; plan: EffectivePlan; payHref: string }) {
-  return (
-    <div role="status" className="mb-5 rounded-2xl border border-honey/40 bg-honey/10 px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5">
-      <p>
-        {plan === "pro" ? "" : `${WHERE[plan]} `}עובדים עם חשבון אחד. עכשיו פעיל {PROVIDER_TITLE[inForce]}, ו-{PROVIDER_TITLE[paused]} מחובר אבל מושהה. אפשר לנתק את אחד מהם, או לשדרג לפרו ולעבוד עם שניהם יחד.
-      </p>
-      <Link href={payHref as Route} className="mt-2 inline-block rounded-sm font-semibold underline underline-offset-3">
-        לשדרוג לפרו
-      </Link>
-    </div>
-  );
-}
-
-function ConnectionItem({
-  provider,
-  title,
-  product,
-  row,
-  state,
-  services,
-  gate,
-  plan,
-  payHref,
-}: {
-  provider: "microsoft" | "google";
-  title: string;
-  product: string;
-  row: ConnectionRow | null;
-  state: ConnectionState;
-  services: ServiceView[] | null;
-  gate: ProviderGate;
-  plan: EffectivePlan;
-  payHref: string;
-}) {
-  const action =
-    state === "active" && row ? (
-      <form action={disconnectAction}>
-        <input type="hidden" name="id" value={row.id} />
-        <Cta tone="ghost" size="sm" type="submit" aria-label={`ניתוק ${title}`}>
-          ניתוק
-        </Cta>
-      </form>
-    ) : gate === "pro" ? (
-      // a second account on a one-account plan: the way there is pro (the start route refuses it as well)
-      <Cta tone="ghost" size="sm" href={payHref} aria-label={`${title} בנוסף: במסלול פרו`}>
-        במסלול פרו
-      </Cta>
-    ) : (
-      <Cta tone={state === "none" ? "ghost" : "honey"} size="sm" href={`/api/auth/${provider}/start`} aria-label={`${state === "none" ? "חיבור" : "חיבור מחדש"} ${title}`}>
-        {state === "none" ? "חיבור" : "חיבור מחדש"}
-      </Cta>
-    );
-  return (
-    <Row
-      mark={
-        <Tile>
-          <ProviderLogo provider={provider} className="size-[1.375rem]" />
-        </Tile>
-      }
-      title={title}
-      action={action}
-      footer={services?.length ? <ServiceRow services={services} label={`שירותים ב-${title}`} /> : null}
+    <AreaLink
+      area={chip.area}
+      className="flex min-h-11 w-full items-center gap-2.5 rounded-2xl border border-line bg-night-2/70 px-3.5 py-2 text-[0.8125rem] leading-tight text-cream transition-colors duration-150 hover:border-cream-muted/50 hover:bg-night-2 sm:min-h-10 sm:w-auto sm:rounded-full sm:px-4 sm:text-[0.875rem]"
     >
-      {gate === "paused" && state === "active" ? <Status state="expired">מושהה: {plan === "pro" ? "" : `${WHERE[plan]} `}עובדים עם חשבון אחד</Status> : <Status state={state} />}
-      {row?.account_email && state !== "none" ? (
-        <p className="mt-0.5 truncate text-[0.875rem] text-cream-muted">
-          <bdi dir="ltr">{row.account_email}</bdi>
-        </p>
-      ) : state === "none" ? (
-        <p className="mt-0.5 text-[0.875rem] text-cream-muted">{gate === "pro" ? `${product} בנוסף לחשבון המחובר: במסלול פרו` : `מייל ויומן דרך ${product}`}</p>
-      ) : null}
-    </Row>
-  );
-}
-
-/** DEMO_MODE: the website chat — the same conversation as WhatsApp, on the site (app/demo/chat). */
-function DemoChatItem() {
-  return (
-    <Row
-      mark={
-        <Tile>
-          <MascotAvatar sizes="48px" className="size-12 rounded-2xl" />
-        </Tile>
-      }
-      title="הצ'אט באתר"
-      action={
-        <Cta tone="honey" size="sm" href="/demo/chat">
-          לבדוק את {BRAND.name} בצ&apos;אט
-        </Cta>
-      }
-    >
-      <p className="mt-1 text-[0.9375rem] text-cream-muted">כותבים, מקליטים ולוחצים על כפתורים, כמו בוואטסאפ.</p>
-    </Row>
-  );
-}
-
-function PhoneItem({ phone, timeZone }: { phone: WaIdentityRow; timeZone: string }) {
-  // the website chat's virtual number (+999…, lib/demo-chat/phone.ts) is shown by what it is, not as a number
-  const chat = isDemoChatPhone(phone.phone_e164);
-  const formatted = chat ? "הצ'אט באתר" : formatPhone(phone.phone_e164);
-  return (
-    <Row
-      mark={
-        <Tile>
-          <WhatsappGlyph className="size-6 text-[var(--wa-green)]" />
-        </Tile>
-      }
-      title={
-        chat ? (
-          formatted
-        ) : (
-          <bdi dir="ltr" className="tabular">
-            {formatted}
-          </bdi>
-        )
-      }
-      action={
-        <form action={unlinkPhoneAction}>
-          <input type="hidden" name="id" value={phone.id} />
-          <Cta tone="ghost" size="sm" type="submit" aria-label={chat ? `ניתוק ${formatted}` : `ניתוק המספר ${formatted}`}>
-            ניתוק
-          </Cta>
-        </form>
-      }
-    >
-      {phone.status === "blocked" ? <Status state="error">חסום</Status> : <Status state="active">מקושר מ-{formatDay(phone.linked_at, timeZone)}</Status>}
-    </Row>
-  );
-}
-
-function NoPhoneItem() {
-  return (
-    <Row
-      mark={
-        <Tile muted>
-          <WhatsappGlyph className="size-6 text-cream-muted" />
-        </Tile>
-      }
-      title="עוד לא קושר מספר"
-      action={
-        <Cta tone="ghost" size="sm" href="/start/ready">
-          קישור מספר
-        </Cta>
-      }
-    >
-      <p className="mt-1 text-[0.9375rem] text-cream-muted">קוד חד-פעמי, והשיחה נפתחת בטלפון.</p>
-    </Row>
-  );
-}
-
-function Banner({ kind, text, inline = false }: { kind: "notice" | "error"; text: string; inline?: boolean }) {
-  const error = kind === "error";
-  return (
-    <div
-      role={error ? "alert" : "status"}
-      className={cn(
-        // wide screens: only over the start column, so the hoopoe standing on the subscription slip has its own air
-        "flex items-start gap-3 rounded-2xl border px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5",
-        inline ? "mb-5" : "mb-12 lg:me-[28rem]",
-        error ? "border-destructive/45 bg-destructive/10" : "border-sage/35 bg-sage/10",
-      )}
-    >
-      <svg viewBox="0 0 24 24" aria-hidden="true" className={cn("mt-0.5 size-5 flex-none fill-none stroke-current stroke-[2.2]", error ? "text-destructive" : "text-sage")}>
-        {error ? <path d="M12 7.5v5.5M12 16.5v.5M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" strokeLinecap="round" /> : <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />}
-      </svg>
-      <p className="flex-1">{text}</p>
-      <Link href="/account" className="flex-none rounded-sm text-cream-muted underline underline-offset-3 hover:text-cream">
-        סגירה
-      </Link>
-    </div>
-  );
-}
-
-const STATUS_CHIP: Record<string, { label: string; className: string }> = {
-  trial: { label: "ניסיון", className: "bg-ink/8 text-ink" },
-  ended: { label: "הסתיים", className: "bg-ink/8 text-ink" },
-  active: { label: "פעיל", className: "bg-ink text-cream" },
-  past_due: { label: "התשלום נכשל", className: "bg-destructive/12 text-destructive" },
-  cancelled: { label: "בוטל", className: "bg-ink/8 text-ink" },
-};
-
-function SubscriptionSlip({
-  subscription,
-  plan: planInForce,
-  meter,
-  payHref,
-  timeZone,
-  className,
-}: {
-  subscription: SubscriptionRow | null;
-  plan: EffectivePlan;
-  meter: UsageView;
-  payHref: string;
-  timeZone: string;
-  className?: string;
-}) {
-  const onTrial = meter.plan === "trial";
-  const chip = onTrial ? (subscription && subscription.status !== "trial" ? "ended" : "trial") : (subscription?.status ?? "active");
-  const plan = meter.plan === "trial" ? null : PLANS[meter.plan];
-  const left = meter.limit - meter.used;
-  const nextCharge = subscription?.next_charge_at ? formatDay(subscription.next_charge_at, timeZone) : null;
-
-  return (
-    <section aria-labelledby="plan-title" className={cn("surface-light relative rounded-card bg-paper p-6 text-ink shadow-stage sm:p-8", className)}>
-      {/* wide screens: the hoopoe stands on the slip's top edge, as on the signup papers */}
-      <Mascot pose="front" sizes="104px" className="absolute end-8 bottom-full -mb-1 hidden w-[6.5rem] lg:block" />
-      <div className="flex items-center justify-between gap-4">
-        <h2 id="plan-title" className="font-heading text-[1.625rem] leading-tight font-bold">
-          המנוי
-        </h2>
-        <span className={cn("flex-none rounded-full px-3 py-1 text-[0.8125rem] font-semibold", STATUS_CHIP[chip]?.className)}>{STATUS_CHIP[chip]?.label ?? chip}</span>
-      </div>
-      <p className="mt-1.5 text-[1rem] text-ink-muted">
-        {plan ? `מסלול ${plan.nameHe}, ${plan.priceIls} ₪ לחודש` : `תקופת ניסיון: ${TRIAL_MESSAGES} הודעות, בלי כרטיס אשראי`}
-      </p>
-
-      <UsageMeter
-        className="mt-7"
-        used={meter.used}
-        limit={meter.limit}
-        label={onTrial ? "הודעות בתקופת הניסיון" : "הודעות החודש"}
-        caption={
-          onTrial
-            ? left > 0
-              ? `נשארו ${left}. אחר כך המנוי: ${PLANS.basic.priceIls} ₪ לחודש, עד ${formatCount(PLANS.basic.messages)} הודעות.`
-              : `הניסיון הסתיים. אחרי בחירת מסלול ${BRAND.name} ממשיכה מאיפה שעצרתם.`
-            : meter.plan === "pro"
-              ? `שימוש הוגן, עד ${formatCount(meter.limit)} הודעות בחודש. המכסה מתחדשת ב-${meter.resetsOn}.`
-              : `המכסה מתחדשת ב-${meter.resetsOn}.`
-        }
-      />
-
-      <PlanIncludes plan={planInForce} />
-
-      {!onTrial && nextCharge ? (
-        <dl className="mt-6 flex items-baseline justify-between gap-4 border-t border-ink/12 pt-5 text-[0.9375rem]">
-          <dt className="text-ink-muted">{subscription?.status === "cancelled" ? "פעיל עד" : "החיוב הבא"}</dt>
-          <dd className="font-semibold">{nextCharge}</dd>
-        </dl>
-      ) : null}
-
-      {onTrial ? (
-        <Cta tone="ink" href={payHref} block className="mt-7">
-          בחירת מסלול
-        </Cta>
-      ) : subscription?.status === "past_due" ? (
-        <div className="mt-6">
-          <p className="text-[0.9375rem] font-semibold text-destructive">החיוב האחרון לא עבר. כדאי לעדכן את אמצעי התשלום.</p>
-          <Cta tone="ink" href={payHref} block className="mt-4">
-            עדכון אמצעי תשלום
-          </Cta>
-        </div>
-      ) : subscription?.status === "cancelled" ? (
-        <div className="mt-6">
-          <p className="text-[0.9375rem] text-ink-muted">לא יהיה חיוב נוסף.</p>
-          <Cta tone="outline" href={payHref} block className="mt-4">
-            חידוש המנוי
-          </Cta>
-        </div>
+      {chip.meter ? (
+        <span aria-hidden="true" className="relative h-1.5 w-9 flex-none overflow-hidden rounded-full bg-cream/12">
+          <span className={cn("absolute inset-y-0 start-0 rounded-full", chip.tone === "ok" || chip.tone === "off" ? "bg-cream" : CHIP_DOT[chip.tone])} style={{ width: `${pct}%` }} />
+        </span>
       ) : (
-        <>
-          {/* an active basic plan: the pay link opens on the upgrade (the prorated difference, the saved card) */}
-          {meter.plan === "basic" ? (
-            <Cta tone="ink" href={payHref} block className="mt-7">
-              לשדרוג לפרו
-            </Cta>
-          ) : null}
-          <Link href={`${payHref}?view=card` as Route} className="mt-5 inline-block rounded-sm text-[0.9375rem] font-semibold underline underline-offset-3">
-            עדכון אמצעי תשלום
-          </Link>
-        </>
+        <span aria-hidden="true" className={cn("size-2 flex-none rounded-full", CHIP_DOT[chip.tone])} />
       )}
-
-      {!onTrial && subscription && subscription.status !== "cancelled" ? (
-        <details className="group mt-6 border-t border-ink/12 pt-5">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md text-[0.9375rem] font-semibold [&::-webkit-details-marker]:hidden">
-            ביטול המנוי
-            <Chevron />
-          </summary>
-          <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink-muted">
-            המנוי יישאר פעיל עד {nextCharge ?? "סוף התקופה"}, ולא יהיה חיוב נוסף. אפשר לחדש בכל רגע.
-          </p>
-          <form action={cancelSubscriptionAction} className="mt-4">
-            <Cta tone="outline" size="sm" type="submit">
-              לבטל את המנוי
-            </Cta>
-          </form>
-        </details>
-      ) : null}
-    </section>
+      <span className="sm:whitespace-nowrap">{chip.label}</span>
+    </AreaLink>
   );
 }
 
-/**
- * What the plan in force includes, folded (lib/billing/plans.ts planFeatures — the same lines as the landing and the pay
- * page): basic's list (the trial is basic in what it connects to), and on basic and in the trial what pro adds.
- */
-function PlanIncludes({ plan }: { plan: EffectivePlan }) {
-  const basic = planFeatures("basic");
-  const pro = planFeatures("pro");
+/** The shape of the page while the session is checked: the same frame, no data (no blank flash, no layout jump). */
+function AccountSkeleton() {
+  const bar = "rounded-full bg-cream/[0.06]";
   return (
-    <details className="group mt-6 border-t border-ink/12 pt-5">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md text-[0.9375rem] font-semibold [&::-webkit-details-marker]:hidden">
-        {plan === "trial" ? "מה כלול בתקופת הניסיון" : "מה כלול במסלול"}
-        <Chevron />
-      </summary>
-      {plan === "pro" ? <p className="mt-3 text-[0.875rem] text-ink-muted">{pro.lead}</p> : null}
-      <PlanFeatureList lines={plan === "pro" ? pro.lines : basic.lines} className="mt-3" itemClassName="py-2 text-[0.875rem]" />
-      {plan !== "pro" ? (
-        <>
-          <p className="mt-4 text-[0.875rem] text-ink-muted">במסלול פרו, בנוסף:</p>
-          <PlanFeatureList lines={pro.lines} className="mt-2" itemClassName="py-2 text-[0.875rem]" />
-        </>
-      ) : null}
-    </details>
-  );
-}
-
-function DeleteAccount({ className }: { className?: string }) {
-  return (
-    <section aria-labelledby="delete-title" className={className}>
-      <details className="group rounded-2xl border border-line">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-4 transition-colors hover:bg-cream/[0.03] [&::-webkit-details-marker]:hidden">
-          <span>
-            <span id="delete-title" className="block font-heading text-[1.25rem] leading-tight font-bold">
-              מחיקת החשבון
-            </span>
-            <span className="mt-0.5 block text-[0.9375rem] text-cream-muted">לצמיתות, כולל ההודעות והחיבורים.</span>
-          </span>
-          <Chevron />
-        </summary>
-        <div className="border-t border-line px-5 pt-4 pb-5">
-          <p className="max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">
-            נמחקים לצמיתות ההודעות, ההעדפות, התזכורות, יומן הפעולות והחיבורים, והמנוי מתבטל. אין שחזור.
-          </p>
-          <DeleteAccountForm action={deleteAccountAction} word={DELETE_CONFIRM_WORD} />
+    <div aria-busy="true">
+      <p role="status" className="sr-only">
+        טוען את האזור האישי…
+      </p>
+      <div className="pt-6 pb-8 sm:pt-10 lg:pb-12">
+        <div className={cn(bar, "h-8 w-44")} />
+        <p aria-hidden="true" className="mt-2 text-title leading-[1.1] font-bold text-cream/90">
+          האזור האישי
+        </p>
+        <div className={cn(bar, "mt-4 h-6 w-full max-w-[34rem]")} />
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          {["sm:w-36", "sm:w-36", "sm:w-36", "sm:w-60"].map((w, i) => (
+            <div key={i} className={cn("h-11 rounded-2xl bg-cream/[0.06] sm:h-10 sm:rounded-full", w)} />
+          ))}
         </div>
-      </details>
-    </section>
+      </div>
+      <div className="lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:gap-12 xl:gap-16">
+        <div className="-mx-4 grid grid-flow-col border-b border-line px-2 sm:-mx-8 sm:px-6 lg:mx-0 lg:flex lg:flex-col lg:gap-1 lg:border-0 lg:px-0" aria-hidden="true">
+          {ACCOUNT_AREAS.map((a) => (
+            <div key={a.id} className="flex flex-col items-center gap-1 px-1.5 pt-3 pb-2.5 text-[0.8125rem] leading-none text-cream-muted/60 lg:flex-row lg:gap-3.5 lg:px-4 lg:py-3 lg:text-[1.0625rem] lg:leading-snug">
+              <span className="size-[1.375rem] rounded-md bg-cream/[0.06] lg:size-5" />
+              {a.label}
+            </div>
+          ))}
+        </div>
+        <div className="pt-8 lg:pt-0">
+          <div className={cn(bar, "h-8 w-40")} />
+          <div className="mt-6 grid gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-20 rounded-2xl bg-cream/[0.03]" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

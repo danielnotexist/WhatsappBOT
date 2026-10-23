@@ -16,13 +16,14 @@ import {
   unlinkPhoneFor,
   type AccountActionResult,
 } from "@/lib/account/service";
+import type { AccountArea } from "./areas";
 
-/** Back to the personal area with a notice; `section` puts it (and the scroll position) on that section. */
-function back(result: AccountActionResult, section?: "agents"): never {
+/** Back to the personal area, on the area the action belongs to (./areas.ts), with the result as its notice. */
+function back(result: AccountActionResult, area: Exclude<AccountArea, "overview">): never {
   const sp = new URLSearchParams();
+  sp.set("tab", area);
   sp.set(result.ok ? "notice" : "error", result.message);
-  if (section) sp.set("at", section);
-  redirect(`/account?${sp.toString()}${section ? `#${section}` : ""}` as Route);
+  redirect(`/account?${sp.toString()}` as Route);
 }
 
 async function requireUserId(): Promise<string> {
@@ -33,23 +34,23 @@ async function requireUserId(): Promise<string> {
 
 export async function disconnectAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
-  back(await disconnectConnectionFor(getDb(), userId, String(formData.get("id") ?? "")));
+  back(await disconnectConnectionFor(getDb(), userId, String(formData.get("id") ?? "")), "connections");
 }
 
 export async function unlinkPhoneAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
-  back(await unlinkPhoneFor(getDb(), userId, String(formData.get("id") ?? "")));
+  back(await unlinkPhoneFor(getDb(), userId, String(formData.get("id") ?? "")), "whatsapp");
 }
 
 export async function cancelSubscriptionAction(): Promise<void> {
   const userId = await requireUserId();
-  back(await cancelSubscriptionFor(getDb(), userId));
+  back(await cancelSubscriptionFor(getDb(), userId), "plan");
 }
 
 export async function deleteAccountAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
   const result = await deleteAccountFor(getDb(), userId, String(formData.get("confirm") ?? ""));
-  if (!result.ok) back(result);
+  if (!result.ok) back(result, "settings");
   const store = await cookies();
   store.delete(SESSION_COOKIE);
   redirect("/?deleted=1" as Route);

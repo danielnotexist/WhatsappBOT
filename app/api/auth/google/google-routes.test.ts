@@ -67,6 +67,7 @@ describe("Google connect routes (memory mode)", () => {
     const cb = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=4%2F0Afix&scope=openid`));
     expect(cb.status).toBe(303);
     expect(location(cb).pathname).toBe("/account");
+    expect(location(cb).searchParams.get("tab")).toBe("connections"); // the notice is shown in "חיבורים"
     expect(location(cb).searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
     const [conn] = await db.listConnections(user.id);
     expect(conn).toMatchObject({ provider: "google", account_email: "dana.levi@gmail.com", tenant_id: null, status: "active", consent_type: "user" });

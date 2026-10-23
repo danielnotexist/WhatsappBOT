@@ -108,7 +108,7 @@ test.describe("DEMO_MODE=1 — production build, zero keys", () => {
     await page.goto(`${B}/pay/${payToken}`);
     await expect(page.getByText(email)).toBeVisible();
     await page.getByRole("button", { name: "לתשלום" }).first().click();
-    await expect(page).toHaveURL(new RegExp(`^${B}/account\\?notice=`), { timeout: 30_000 });
+    await expect(page).toHaveURL(new RegExp(`^${B}/account\\?tab=plan&notice=`), { timeout: 30_000 });
     await expect(page.getByText("התשלום התקבל והחשבון פעיל")).toBeVisible();
     await ctx.close();
   });

@@ -10,13 +10,16 @@ import type { BuiltinRole } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
 import { createAgentAction, deleteAgentAction, toggleAgentAction, updateAgentAction } from "../actions";
 import type { AgentRowView, AgentsView } from "../view";
+import { AgentSheet, SheetCancel, SheetFormWatch } from "./agent-sheet";
 import { InstructionsField } from "./instructions-field";
-import { Chevron, Section, Tile } from "./parts";
+import { Section, Tile } from "./parts";
 
 /**
- * "הסוכנים שלי" (docs/design/agents.md §10): the agents as quiet rows on the stage, each opening (a <details>, no JS)
- * into its own form; a new agent starts from a template link that renders a filled form on the server
- * (/account?new=<template>#agents). The approval rule is stated once, plainly, and cannot be switched off.
+ * "סוכנים" — the agents area (docs/design/agents.md §10): the quota line and the way up, the built-in agents and the
+ * user's own as cards in a grid (name, status, origin, what each may do), and "סוכן חדש" from a template. Editing or
+ * creating opens a side sheet over the grid (./agent-sheet.tsx) with the same server-action forms as before; a template
+ * link (/account?tab=agents&new=<template>) renders the filled form on the server. The approval rule is stated once,
+ * plainly, and cannot be switched off.
  */
 export function AgentsSection({
   view,
@@ -36,26 +39,32 @@ export function AgentsSection({
 }) {
   const byKey = new Map(agents.map((a) => [a.key as string, a]));
   return (
-    <Section id="agents" title="הסוכנים שלי" description="תפקידים עם שם, שאפשר לפנות אליהם בוואטסאפ בתחילת ההודעה: ״@שם״ ואז הבקשה." className={className}>
-      {banner}
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
-        <p className="max-w-[34rem] text-[0.9375rem] leading-relaxed text-cream">{view.quotaLine}</p>
-        {view.upgrade ? (
+    <Section
+      id="agents"
+      title="הסוכנים שלי"
+      description="תפקידים עם שם, שאפשר לפנות אליהם בוואטסאפ בתחילת ההודעה: ״@שם״ ואז הבקשה."
+      action={
+        view.upgrade ? (
           <Cta tone="honey" size="sm" href={payHref}>
             {view.upgrade.label}
           </Cta>
-        ) : null}
-      </div>
+        ) : null
+      }
+      className={className}
+    >
+      {banner}
+      <p className="max-w-[40rem] text-[0.9375rem] leading-relaxed text-cream">{view.quotaLine}</p>
 
-      <ul className="mt-5 divide-y divide-line border-y border-line">
+      <ul className="mt-5 grid gap-3 sm:grid-cols-2">
         {view.rows.map((row) => (
-          <AgentItem key={row.key} row={row} agent={byKey.get(row.key)!} />
+          <AgentCard key={row.key} row={row} agent={byKey.get(row.key)!} />
         ))}
       </ul>
 
-      {view.canCreate ? newTemplate !== null ? <NewAgentForm template={newTemplate === "blank" ? null : newTemplate} /> : <TemplatePicker /> : null}
+      {view.canCreate ? <TemplatePicker /> : null}
+      {view.canCreate && newTemplate !== null ? <NewAgentSheet template={newTemplate} /> : null}
 
-      <p className="mt-6 flex max-w-[36rem] items-start gap-3 text-[0.9375rem] leading-relaxed text-cream-muted">
+      <p className="mt-8 flex max-w-[40rem] items-start gap-3 text-[0.9375rem] leading-relaxed text-cream-muted">
         <svg viewBox="0 0 24 24" aria-hidden="true" className="mt-0.5 size-5 flex-none fill-none stroke-sage stroke-2">
           <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
           <path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" strokeLinecap="round" />
@@ -66,7 +75,7 @@ export function AgentsSection({
   );
 }
 
-/* ---------- rows ---------- */
+/* ---------- cards ---------- */
 
 const STATUS_STYLE: Record<AgentRowView["status"], { text: string; dot: string }> = {
   active: { text: "text-sage", dot: "bg-sage" },
@@ -75,8 +84,10 @@ const STATUS_STYLE: Record<AgentRowView["status"], { text: string; dot: string }
   not_in_plan: { text: "text-cream-muted", dot: "border-[1.5px] border-cream-muted" },
 };
 
+const dimmed = (row: AgentRowView) => row.status === "locked" || row.status === "not_in_plan";
+
 function AgentMark({ row }: { row: AgentRowView }) {
-  const dim = row.status === "locked" || row.status === "not_in_plan";
+  const dim = dimmed(row);
   if (row.kind === "custom") {
     return (
       <Tile muted>
@@ -116,60 +127,54 @@ const GLYPHS: Record<BuiltinRole, ReactNode> = {
   ),
 };
 
-function AgentSummary({ row }: { row: AgentRowView }) {
+function StatusLine({ row }: { row: AgentRowView }) {
   const s = STATUS_STYLE[row.status];
   return (
-    <div className="min-w-0 flex-1">
-      <p className="text-[1.0625rem] leading-snug font-semibold">{row.name}</p>
-      <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.9375rem]">
-        <span className={cn("flex items-center gap-2", s.text)}>
-          <span aria-hidden="true" className={cn("size-2 flex-none rounded-full", s.dot)} />
-          {row.statusLabel}
-        </span>
-        <span className="text-cream-muted">{row.origin}</span>
-      </p>
-      {row.capsLine ? <p className="mt-1 text-[0.875rem] leading-relaxed text-cream-muted">{row.capsLine}</p> : null}
-      {row.hint ? <p className="mt-1 text-[0.875rem] text-cream">{row.hint}</p> : null}
-    </div>
+    <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.9375rem]">
+      <span className={cn("flex items-center gap-2", s.text)}>
+        <span aria-hidden="true" className={cn("size-2 flex-none rounded-full", s.dot)} />
+        {row.statusLabel}
+      </span>
+      <span className="text-cream-muted">{row.origin}</span>
+    </p>
   );
 }
 
-function AgentItem({ row, agent }: { row: AgentRowView; agent: ResolvedAgent }) {
-  if (!row.editable) {
-    return (
-      <li className="flex items-center gap-4 py-5">
-        <AgentMark row={row} />
-        <AgentSummary row={row} />
-      </li>
-    );
-  }
+/** One agent: a card on the stage. Editable agents open their form in the sheet. */
+function AgentCard({ row, agent }: { row: AgentRowView; agent: ResolvedAgent }) {
   return (
-    <li>
-      <details className="group">
-        <summary className="flex cursor-pointer list-none items-center gap-4 rounded-2xl py-5 [&::-webkit-details-marker]:hidden">
-          <AgentMark row={row} />
-          <AgentSummary row={row} />
-          <span className="flex flex-none items-center gap-1.5 text-[0.9375rem] font-semibold text-cream">
-            עריכה
-            <Chevron />
-          </span>
-        </summary>
-        <div className="pb-6">
-          <AgentForm row={row} agent={agent} />
-          <div className="mt-4 flex flex-wrap items-start gap-3">
-            {row.toggle ? (
-              <form action={toggleAgentAction}>
-                <input type="hidden" name="key" value={row.key} />
-                <input type="hidden" name="enabled" value={row.toggle === "enable" ? "1" : "0"} />
-                <Cta tone="ghost" size="sm" type="submit">
-                  {row.toggle === "enable" ? "הפעלת הסוכן" : "השבתת הסוכן"}
-                </Cta>
-              </form>
-            ) : null}
-            {row.deletable ? <DeleteAgent row={row} /> : null}
-          </div>
+    <li className={cn("flex flex-col rounded-2xl border border-line p-5", dimmed(row) ? "bg-transparent" : "bg-night-2/60")}>
+      <div className="flex items-start gap-4">
+        <AgentMark row={row} />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[1.0625rem] leading-snug font-semibold">{row.name}</h3>
+          <StatusLine row={row} />
         </div>
-      </details>
+      </div>
+      {row.capsLine ? <p className="mt-4 text-[0.875rem] leading-relaxed text-cream-muted">{row.capsLine}</p> : null}
+      {row.hint ? <p className="mt-2 text-[0.875rem] leading-relaxed text-cream">{row.hint}</p> : null}
+      {row.editable ? (
+        <div className="mt-auto pt-5">
+          <AgentSheet id={row.key} title={`עריכת ״${row.name}״`} description={row.origin} mark={<AgentMark row={row} />} trigger={{ label: "עריכה", srName: `של ״${row.name}״` }}>
+            <AgentForm row={row} agent={agent} />
+            {row.toggle || row.deletable ? (
+              <div className="mt-8 flex flex-wrap items-start gap-3 border-t border-line pt-6">
+                {row.toggle ? (
+                  <form action={toggleAgentAction}>
+                    <SheetFormWatch />
+                    <input type="hidden" name="key" value={row.key} />
+                    <input type="hidden" name="enabled" value={row.toggle === "enable" ? "1" : "0"} />
+                    <Cta tone="ghost" size="sm" type="submit">
+                      {row.toggle === "enable" ? "הפעלת הסוכן" : "השבתת הסוכן"}
+                    </Cta>
+                  </form>
+                ) : null}
+                {row.deletable ? <DeleteAgent row={row} /> : null}
+              </div>
+            ) : null}
+          </AgentSheet>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -183,6 +188,7 @@ function DeleteAgent({ row }: { row: AgentRowView }) {
       <div className="mt-2 max-w-[32rem]">
         <p className="text-[0.9375rem] leading-relaxed text-cream-muted">ההנחיות של ״{row.name}״ נמחקות. מה שכבר נעשה נשאר ביומן הפעולות.</p>
         <form action={deleteAgentAction} className="mt-3">
+          <SheetFormWatch />
           <input type="hidden" name="key" value={row.key} />
           <button
             type="submit"
@@ -243,7 +249,7 @@ function CapabilityBoxes({ options, checked }: { options: readonly Capability[];
 
 function LimitFields({ scope, recipients, maxOutbound }: { scope: string; recipients: readonly string[]; maxOutbound: number | undefined }) {
   return (
-    <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_14rem]">
+    <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_12rem]">
       <TextField
         id={fieldId(scope, "recipients")}
         label="כתובות מותרות"
@@ -275,7 +281,8 @@ function AgentForm({ row, agent }: { row: AgentRowView; agent: ResolvedAgent }) 
   const builtin = row.kind === "builtin";
   const options = builtin ? BUILTIN_AGENTS[row.role as BuiltinRole].capabilities : CAPABILITY_IDS;
   return (
-    <form action={updateAgentAction} className="grid gap-5 rounded-2xl border border-line bg-night-2/70 p-5 sm:p-6">
+    <form action={updateAgentAction} className="grid gap-6">
+      <SheetFormWatch />
       <input type="hidden" name="key" value={row.key} />
       {builtin ? null : (
         <TextField id={fieldId(row.key, "name")} label="שם" name="name" defaultValue={row.name} required minLength={AGENT_NAME_MIN} maxLength={AGENT_NAME_MAX} pattern={NAME_PATTERN} title="אותיות, ספרות, רווח, מקף וגרש; 2 עד 24 תווים" autoComplete="off" />
@@ -304,18 +311,24 @@ function TemplatePicker() {
     { id: "blank", name: "סוכן ריק", summary: "מתחילים מאפס: שם, הנחיות ויכולות" },
   ];
   return (
-    <div className="mt-8">
+    <div className="mt-10">
       <h3 className="font-heading text-[1.25rem] leading-tight font-bold">סוכן חדש</h3>
       <p className="mt-1 text-[0.9375rem] text-cream-muted">מאיפה מתחילים? אפשר לשנות הכול אחר כך.</p>
-      <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+      <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {options.map((o) => (
           <li key={o.id}>
             <Link
-              href={`/account?new=${o.id}#agents` as Route}
-              className="flex h-full flex-col rounded-2xl border border-line px-4 py-3.5 transition-colors hover:border-cream-muted/60 hover:bg-cream/[0.03]"
+              href={`/account?tab=agents&new=${o.id}` as Route}
+              scroll={false}
+              className="group flex h-full flex-col rounded-2xl border border-dashed border-cream-muted/35 px-4 py-3.5 transition-colors hover:border-honey/70 hover:bg-cream/[0.03]"
             >
-              <span className="text-[1rem] font-semibold text-cream">{o.name}</span>
-              <span className="mt-0.5 text-[0.875rem] leading-relaxed text-cream-muted">{o.summary}</span>
+              <span className="flex items-center gap-2 text-[1rem] font-semibold text-cream">
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4 flex-none fill-none stroke-honey stroke-[2.4]">
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+                {o.name}
+              </span>
+              <span className="mt-1 text-[0.875rem] leading-relaxed text-cream-muted">{o.summary}</span>
             </Link>
           </li>
         ))}
@@ -324,13 +337,13 @@ function TemplatePicker() {
   );
 }
 
-function NewAgentForm({ template }: { template: BuiltinRole | null }) {
-  const tpl = template ? BUILTIN_AGENTS[template] : null;
+function NewAgentSheet({ template }: { template: BuiltinRole | "blank" }) {
+  const tpl = template === "blank" ? null : BUILTIN_AGENTS[template];
   return (
-    <div className="mt-8">
-      <h3 className="font-heading text-[1.25rem] leading-tight font-bold">{tpl ? `סוכן חדש על בסיס ״${tpl.name}״` : "סוכן חדש"}</h3>
-      <form action={createAgentAction} className="mt-4 grid gap-5 rounded-2xl border border-line bg-night-2/70 p-5 sm:p-6">
-        <input type="hidden" name="template" value={template ?? ""} />
+    <AgentSheet id={`new:${template}`} newTemplate={template} title={tpl ? `סוכן חדש על בסיס ״${tpl.name}״` : "סוכן חדש"} description="אפשר לשנות הכול אחר כך.">
+      <form action={createAgentAction} className="grid gap-6">
+        <SheetFormWatch />
+        <input type="hidden" name="template" value={tpl ? template : ""} />
         <TextField
           id={fieldId("new", "name")}
           label="שם"
@@ -351,11 +364,9 @@ function NewAgentForm({ template }: { template: BuiltinRole | null }) {
           <Cta tone="honey" size="sm" type="submit">
             יצירת הסוכן
           </Cta>
-          <Link href={"/account#agents" as Route} className="rounded-sm text-[0.9375rem] text-cream-muted underline underline-offset-3 hover:text-cream">
-            ביטול
-          </Link>
+          <SheetCancel>ביטול</SheetCancel>
         </div>
       </form>
-    </div>
+    </AgentSheet>
   );
 }
