@@ -253,9 +253,10 @@ describe("ConnectStep and Toggle", () => {
       ["דילוג בינתיים", "/start/ready"],
     ]);
     // what each account unlocks today is the tile's description (nothing marked "בקרוב" in the catalogue);
-    // Microsoft's handwritten note is read once, as part of that description, never in the name
+    // Microsoft's handwritten note is read once, as part of that description (a full stop before the products, so a
+    // screen reader pauses there), never in the name
     const ms = screen.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" });
-    expect(ms).toHaveAccessibleDescription("הנפוץ במשרדים Outlook, יומן ו-OneDrive");
+    expect(ms).toHaveAccessibleDescription("הנפוץ במשרדים. Outlook, יומן ו-OneDrive");
     expect(ms).toHaveAccessibleName("חיבור Microsoft 365 / Outlook");
     expect(screen.getByRole("link", { name: "חיבור Gmail / Google" })).toHaveAccessibleDescription("Gmail, יומן ו-Drive");
     for (const tile of screen.getAllByRole("link").slice(0, 2)) expect(tile.textContent).not.toMatch(/Teams|Meet/);

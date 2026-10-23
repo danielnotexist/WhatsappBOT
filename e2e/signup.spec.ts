@@ -110,12 +110,13 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     // handing the redirected request to the route, the real Microsoft page loaded through the network, and its own
     // requests (no redirect_uri) reached the handler as "TypeError: Invalid URL".
     let authorizeUrl: URL | null = null;
-    // hold the hand-off until the transition screen has been checked (it only shows for ~0.9s)
+    // hold the hand-off until the transition screen has been checked (it only shows for ~0.9s); never for good: should
+    // a check below fail or lag, the hold gives way after 20s and the test fails on that check, not on a deadlock
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     await ctx.route("**/api/auth/microsoft/start**", async (route) => {
       expect(new URL(route.request().url()).searchParams.get("returnTo")).toBe("onboarding");
-      await gate;
+      await Promise.race([gate, new Promise((r) => setTimeout(r, 20_000))]);
       const res = await route.fetch({ maxRedirects: 0 });
       authorizeUrl = new URL(res.headers()["location"]!);
       expect(authorizeUrl.hostname).toBe("login.microsoftonline.com");
@@ -126,11 +127,15 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     });
     // and should anything still head for Microsoft, fail here instead of loading the real sign-in page
     await ctx.route("https://login.microsoftonline.com/**", (route) => route.abort("blockedbyclient"));
+    // a cold dev server would compile the hand-off route during the timed step below: warm it first
+    await ctx.request.get("/connect/microsoft");
     const page = await ctx.newPage();
     await page.goto("/start/connect");
+    // the URL is checked when it commits, not after the click: by then the hand-off may already be on its way out
+    const handoff = page.waitForURL(/\/connect\/microsoft$/, { waitUntil: "commit", timeout: 30_000 });
     await page.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" }).click();
-    // a cold dev server compiles the hand-off route on this first visit
-    await expect(page).toHaveURL(/\/connect\/microsoft$/, { timeout: 30_000 });
+    await handoff;
+    // what the hand-off screen shows, held there by the gate above
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("עלזה רוצה להתחבר ל-Outlook שלך");
     await expect(page.getByText("מעבירים אותך ל-Microsoft…")).toBeVisible();
     release();
