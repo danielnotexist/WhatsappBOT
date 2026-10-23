@@ -3,11 +3,49 @@ import { TINY_PDF_BASE64 } from "@/lib/ms/__fixtures__/graph-fixtures";
 /**
  * Recorded-shape Google responses served by a fake `fetch` — used by tests and by DATA_MODE=memory.
  * Shapes follow the docs (OAuth token/revoke, OIDC userinfo, Calendar v3 events, Drive v3 files, Gmail v1
- * messages.send) as of 2026-10. All data is fictional.
+ * messages.send, Tasks v1 tasklists/tasks) as of 2026-10. All data is fictional.
  */
 export const FIXTURE_GOOGLE_ACCOUNT = { sub: "109876543210", email: "dana.levi@gmail.com", name: "דנה לוי" };
 
-export const FIXTURE_GOOGLE_SCOPE = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send";
+export const FIXTURE_GOOGLE_SCOPE =
+  "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/tasks";
+
+/** Google Tasks v1 (tasks.googleapis.com): two lists, the first is the default ("@default"). */
+export interface RawFixtureTask {
+  kind: "tasks#task";
+  id: string;
+  title: string;
+  notes?: string;
+  status: "needsAction" | "completed";
+  due?: string;
+  updated: string;
+  webViewLink: string;
+}
+export interface FixtureTaskList {
+  kind: "tasks#taskList";
+  id: string;
+  title: string;
+  updated: string;
+  tasks: RawFixtureTask[];
+}
+
+export function fixtureTaskLists(): FixtureTaskList[] {
+  const task = (id: string, title: string, extra: Partial<RawFixtureTask> = {}): RawFixtureTask => ({ kind: "tasks#task", id, title, status: "needsAction", updated: "2026-10-20T08:00:00.000Z", webViewLink: `https://tasks.google.com/task/${id}`, ...extra });
+  return [
+    {
+      kind: "tasks#taskList",
+      id: "MDE4fixtureDefault",
+      title: "My Tasks",
+      updated: "2026-10-20T08:00:00.000Z",
+      tasks: [
+        task("gt-1", "להחזיר לעו״ד כהן את ההסכם", { due: "2026-10-23T00:00:00.000Z", notes: "עם ההערות מהפגישה" }),
+        task("gt-2", "לשלם ארנונה", { due: "2026-10-28T00:00:00.000Z" }),
+        task("gt-3", "לסגור דוח רבעוני", { status: "completed" }),
+      ],
+    },
+    { kind: "tasks#taskList", id: "MDE4fixtureClients", title: "לקוחות", updated: "2026-10-19T08:00:00.000Z", tasks: [task("gt-4", "להתקשר למשפחת אברהם")] },
+  ];
+}
 
 export function fixtureIdToken(claims: Record<string, unknown> = {}): string {
   const payload = { iss: "https://accounts.google.com", aud: "fixture-client", sub: FIXTURE_GOOGLE_ACCOUNT.sub, email: FIXTURE_GOOGLE_ACCOUNT.email, email_verified: true, name: FIXTURE_GOOGLE_ACCOUNT.name, ...claims };
@@ -239,7 +277,9 @@ export interface GoogleFixtureState {
   /** simulate an expired access token once */
   unauthorizedOnce: boolean;
   /** API families that answer 403 insufficientPermissions (granular consent unticked); gmail = send, gmail_read = gmail.readonly */
-  denied: Set<"calendar" | "drive" | "gmail" | "gmail_read">;
+  denied: Set<"calendar" | "drive" | "gmail" | "gmail_read" | "tasks">;
+  /** Google Tasks lists (the first is "@default") */
+  taskLists: FixtureTaskList[];
 }
 
 /** A tiny evaluator for the Gmail search syntax the app uses (in:, is:unread, from:, subject:, newer_than:, category:, has:attachment, words). */
@@ -324,6 +364,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
     grantedScope: FIXTURE_GOOGLE_SCOPE,
     unauthorizedOnce: false,
     denied: new Set(),
+    taskLists: fixtureTaskLists(),
   };
   let n = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=UTF-8" } });
@@ -428,7 +469,10 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       if (url.pathname === "/drive/v3/files" && method === "GET") {
         const q = url.searchParams.get("q") ?? "";
         const name = q.match(/name contains '((?:[^'\\]|\\.)*)'/)?.[1]?.replace(/\\(.)/g, "$1").toLowerCase();
-        const files = state.files.filter((f) => !f.trashed && f.mimeType !== "application/vnd.google-apps.folder" && (!name || f.name.toLowerCase().includes(name))).sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime));
+        // `(name contains 'x' or fullText contains 'x')` (drive.readonly search): the name, or the text content
+        const fullText = /fullText contains/.test(q);
+        const matches = (f: FixtureFile) => !name || f.name.toLowerCase().includes(name) || (fullText && Buffer.from(f.content).toString("utf8").toLowerCase().includes(name));
+        const files = state.files.filter((f) => !f.trashed && f.mimeType !== "application/vnd.google-apps.folder" && matches(f)).sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime));
         return json({ kind: "drive#fileList", incompleteSearch: false, files: files.slice(0, Number(url.searchParams.get("pageSize") ?? 100)).map(fileMeta) });
       }
       if (url.pathname === "/upload/drive/v3/files" && method === "POST") {
@@ -462,6 +506,32 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
           return new Response(Buffer.from(f.content), { status: 200, headers: { "content-type": f.mimeType } });
         }
         return json(fileMeta(f));
+      }
+    }
+
+    // ---- Tasks v1 ----
+    if (url.hostname === "tasks.googleapis.com") {
+      if (state.denied.has("tasks")) return scopeDenied();
+      if (url.pathname === "/tasks/v1/users/@me/lists" && method === "GET") {
+        return json({ kind: "tasks#taskLists", items: state.taskLists.slice(0, Number(url.searchParams.get("maxResults") ?? 20)).map((l) => ({ kind: l.kind, id: l.id, title: l.title, updated: l.updated })) });
+      }
+      const tl = url.pathname.match(/^\/tasks\/v1\/lists\/([^/]+)\/tasks$/);
+      if (tl) {
+        const id = decodeURIComponent(tl[1]!);
+        const list = id === "@default" ? state.taskLists[0] : state.taskLists.find((l) => l.id === id);
+        if (!list) return apiError(404, "notFound", "Task list not found.");
+        if (method === "GET") {
+          const completed = url.searchParams.get("showCompleted") !== "false";
+          const items = list.tasks.filter((t) => completed || t.status !== "completed").slice(0, Number(url.searchParams.get("maxResults") ?? 20));
+          return json({ kind: "tasks#tasks", ...(items.length ? { items } : {}) });
+        }
+        if (method === "POST") {
+          const b = body as { title?: string; notes?: string; due?: string };
+          if (!b.title) return apiError(400, "invalid", "Missing task title.");
+          const t: RawFixtureTask = { kind: "tasks#task", id: `gtnew${++n}`, title: b.title, ...(b.notes ? { notes: b.notes } : {}), status: "needsAction", ...(b.due ? { due: `${b.due.slice(0, 10)}T00:00:00.000Z` } : {}), updated: "2026-10-21T10:00:00.000Z", webViewLink: `https://tasks.google.com/task/gtnew${n}` };
+          list.tasks.unshift(t);
+          return json(t);
+        }
       }
     }
 

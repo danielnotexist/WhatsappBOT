@@ -1,6 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { MS_SCOPES, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, parseIdToken, pkcePair, refreshTokens } from "./oauth";
+import { MemoryDb } from "@/lib/db/memory";
+import { MS_ADMIN_SCOPES, MS_SCOPES, MS_SCOPES_V1, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, msHasScope, msRefreshScopes, normalizeMsScopes, parseIdToken, pkcePair, refreshTokens } from "./oauth";
+import { getAccessToken, sealTokens } from "./token-store";
 
 const cfg = { clientId: "cid", clientSecret: "sec", tenant: "common", redirectUri: "https://app.example.co.il/api/auth/microsoft/callback" };
 
@@ -46,5 +48,51 @@ describe("Microsoft OAuth", () => {
     const revoked = (await refreshTokens({ ...cfg, fetchImpl: mk({ error: "invalid_grant", error_description: "AADSTS50173: The provided grant has expired" }) }, "rt").catch((e: unknown) => e)) as MsOAuthError;
     expect(revoked.needsReconnect).toBe(true);
     expect(revoked.needsAdminConsent).toBe(false);
+  });
+
+  it("asks for Microsoft To Do and SharePoint (Tasks.ReadWrite, Sites.Read.All) on connect and in the admin consent — not Chat.Read", () => {
+    expect(MS_SCOPES).toEqual(["openid", "profile", "email", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.Read.All", "Tasks.ReadWrite", "Sites.Read.All"]);
+    expect(MS_ADMIN_SCOPES).toEqual(["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.Read.All", "Tasks.ReadWrite", "Sites.Read.All"]);
+    const u = new URL(buildAuthorizeUrl(cfg, { state: "s", codeChallenge: "c" }));
+    expect(u.searchParams.get("scope")!.split(" ")).toEqual(expect.arrayContaining(["Tasks.ReadWrite", "Sites.Read.All"]));
+    const admin = new URL(buildAdminConsentUrl(cfg, { state: "s", redirectUri: cfg.redirectUri })).searchParams.get("scope")!;
+    expect(admin).toContain("https://graph.microsoft.com/Tasks.ReadWrite");
+    expect(admin).toContain("https://graph.microsoft.com/Sites.Read.All");
+    expect(admin).not.toMatch(/Chat\./);
+  });
+
+  it("normalizes echoed scopes (Graph prefix, any case) and checks a connection's grant; nothing recorded = the v1 set", () => {
+    expect(normalizeMsScopes("https://graph.microsoft.com/tasks.readwrite openid Mail.Send mail.send https://graph.microsoft.com/Custom.Thing")).toEqual(["Tasks.ReadWrite", "openid", "Mail.Send", "Custom.Thing"]);
+    expect(msHasScope(["https://graph.microsoft.com/SITES.READ.ALL"], "Sites.Read.All")).toBe(true);
+    expect(msHasScope([], "Files.Read.All")).toBe(true);
+    expect(msHasScope([], "Tasks.ReadWrite")).toBe(false);
+    expect(msHasScope(["Mail.ReadWrite"], "Files.Read.All")).toBe(false);
+  });
+
+  it("refreshes with the connection's own grant, never a wider set (a superset would fail with AADSTS65001 and expire the connection)", () => {
+    expect(msRefreshScopes(["Mail.ReadWrite", "User.Read", "openid", "profile"])).toEqual(["openid", "profile", "email", "offline_access", "Mail.ReadWrite", "User.Read"]);
+    expect(msRefreshScopes([])).toEqual(["openid", "profile", "email", "offline_access", ...MS_SCOPES_V1.slice(4)]);
+    expect(msRefreshScopes([...MS_SCOPES])).toContain("Tasks.ReadWrite");
+  });
+
+  it("the token store refreshes a connection made before Tasks / Sites with its own scopes, and keeps it active", async () => {
+    vi.stubEnv("TOKEN_ENC_KEY", randomBytes(32).toString("base64"));
+    try {
+      const db = new MemoryDb();
+      const user = await db.createUser("dana@example.com");
+      const conn = await db.upsertConnection({ user_id: user.id, provider: "microsoft", account_email: "dana@levi-law.co.il", tenant_id: "t1", scopes: ["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.Read.All", "openid", "profile", "email"], consent_type: "user", ...sealTokens(user.id, { accessToken: "old", refreshToken: "rt", expiresAt: new Date(Date.now() - 60_000), scope: [], idToken: null }) });
+      let asked = "";
+      const fetchImpl = vi.fn(async (_u: string | URL | Request, init?: RequestInit) => {
+        asked = new URLSearchParams(String(init?.body)).get("scope") ?? "";
+        return new Response(JSON.stringify({ access_token: "fresh", expires_in: 3600, scope: "Mail.ReadWrite" }), { status: 200 });
+      });
+      expect(await getAccessToken(db, { ...cfg, fetchImpl: fetchImpl as unknown as typeof fetch }, conn)).toBe("fresh");
+      expect(asked.split(" ")).not.toContain("Tasks.ReadWrite");
+      expect(asked.split(" ")).not.toContain("Sites.Read.All");
+      expect(asked.split(" ")).toEqual(expect.arrayContaining(["offline_access", "Mail.ReadWrite", "Files.Read.All"]));
+      expect((await db.listConnections(user.id))[0]!.status).toBe("active");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

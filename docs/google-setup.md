@@ -1,6 +1,6 @@
 # הקמת חיבור Google (אבן דרך 6) — מדריך לדניאל
 
-> עודכן 21.10.2026 (ערב: קריאת Gmail ל-100 המשתמשים הראשונים בלי CASA). הפרמטרים והמגבלות נבדקו מול developers.google.com ו-support.google.com באותו יום — המקורות בסוף כל סעיף.
+> עודכן 21.10.2026 (ערב: קריאת Gmail ל-100 המשתמשים הראשונים בלי CASA). **23.10.2026:** נוספו Google Tasks (`tasks`, רגיש) וקריאת כל ה-Drive (`drive.readonly`, מוגבל, באותה תקרה) — מה ללחוץ: סעיף 10. הפרמטרים והמגבלות נבדקו מול developers.google.com ו-support.google.com באותו יום — המקורות בסוף כל סעיף.
 > הקוד: `lib/google/**` (תקרת המשתמשים: `lib/google/user-cap.ts`; קריאת Gmail: `lib/google/gmail.ts`, `lib/google/gmail-tools.ts`), `app/api/auth/google/**`. משתני סביבה: `.env.example` (קטע Google + "תפעול").
 
 ## 0. מה מקבלים עכשיו
@@ -11,15 +11,19 @@
 | יומן: הצגה, חלונות פנויים, קביעה, הזזה, ביטול | `https://www.googleapis.com/auth/calendar.events` | **רגיש** | אימות אפליקציה (סעיף 5). עד אז — נספר בתקרת 100 |
 | Drive: רק קבצים שנוצרו/נפתחו דרכנו | `https://www.googleapis.com/auth/drive.file` | לא רגיש | כלום |
 | שליחת מייל מ-Gmail (אחרי כפתור אישור) | `https://www.googleapis.com/auth/gmail.send` | **רגיש** | אימות אפליקציה (סעיף 5). עד אז — נספר בתקרת 100 |
+| Google Tasks: הצגה והוספה של משימות (23.10.2026) | `https://www.googleapis.com/auth/tasks` | **רגיש** (לא מוגבל — אין CASA; לוודא בבורר ה-scopes, סעיף 10) | אימות אפליקציה (סעיף 5). עד אז — נספר בתקרת 100 |
 | קריאת Gmail: חיפוש, מייל מלא, שרשור, "מחכים לתשובה", סיכום הבוקר | `https://www.googleapis.com/auth/gmail.readonly` | **מוגבל (restricted)** | בלי CASA: רק ל-100 המשתמשים הראשונים (אצלנו עד 95 — סעיף 6). אחר כך CASA או ספק מתווך |
+| קריאת כל ה-Drive: חיפוש לפי שם ותוכן, קריאת Docs / Sheets / Slides קיימים (23.10.2026) | `https://www.googleapis.com/auth/drive.readonly` | **מוגבל (restricted)** | בדיוק כמו קריאת Gmail: אותה תקרה ואותו פנקס, מתג משלו `GOOGLE_DRIVE_READ_ENABLED` (סעיף 6) |
 
+- `drive.file` נשאר: הוא מה שמאפשר לשמור מסמכים שעלזה יוצרת (`gdrive_save_doc`) גם בלי `drive.readonly`.
+- חיבורים שנוצרו לפני 23.10.2026 אין להם `tasks`: באזור האישי Google Tasks מסומן "צריך אישור נוסף", והלחיצה מבקשת רק את `tasks` (`?feature=tasks`, הסכמה מצטברת). בשיחה הכלים `gtasks_*` שולחים את אותו קישור.
 - בחרנו `calendar.events` ולא `calendar` המלא (צר יותר: אירועים בלבד, בלי שיתוף/מחיקת יומנים). "חלונות פנויים" מחושבים מרשימת האירועים, לכן לא צריך `calendar.readonly` / `calendar.freebusy`.
 - מסמך הגילוי `docs/legal/oauth-consent-screen-he.md` §3 מציג בדיוק את מה שמבוקש בפועל, כולל `gmail.readonly` (עודכן 21.10).
 
 ## 1. פרויקט ב-Google Cloud
 
 1. https://console.cloud.google.com → בורר הפרויקטים למעלה → **New project**. שם: שם המוצר (אפשר לשנות אחר כך). אם יש ארגון Workspace לעסק — לפתוח תחתיו.
-2. **APIs & Services → Library** → להפעיל: **Google Calendar API**, **Google Drive API**, **Gmail API**. (בשלב 2 גם **Google Picker API**.)
+2. **APIs & Services → Library** → להפעיל: **Google Calendar API**, **Google Drive API**, **Gmail API**, **Google Tasks API** (23.10.2026). (בשלב 2 גם **Google Picker API**.)
 3. חיוב (Billing) לא נדרש ל-APIs האלה במכסות שלנו.
 
 ## 2. מסך ההסכמה (Google Auth Platform)
@@ -27,7 +31,7 @@
 ב-Console: **Google Auth Platform** (לשעבר "OAuth consent screen"):
 1. **Branding** — שם האפליקציה (**עלזה** — `BRAND.name` ב-`lib/brand.ts`; שינוי אחרי אימות מחייב אימות מחדש), מייל תמיכה, לוגו (120×120), **Application home page**, **Privacy policy**, **Terms of service**, ו-**Authorized domains** (הדומיין של האתר). דף הבית ומדיניות הפרטיות חייבים להיות **באותו דומיין**, ציבוריים, ומדיניות הפרטיות חייבת לכלול את משפט ה-Limited Use (נוסח ב-`docs/legal/oauth-consent-screen-he.md` §3).
 2. **Audience** — User type: **External**. Publishing status מתחיל ב-**Testing** — ועוברים ל-**In production** לפני שמזמינים לקוחות (סעיף 3).
-3. **Data access** → Add or remove scopes → לסמן את שישת ה-scopes הבסיסיים מהטבלה. את `gmail.readonly` **לא** מסמנים בשלב הזה — ראו סעיף 6.4.
+3. **Data access** → Add or remove scopes → לסמן את שבעת ה-scopes הבסיסיים מהטבלה (כולל `tasks`). את `gmail.readonly` ואת `drive.readonly` **לא** מסמנים בשלב הזה — ראו סעיף 6.4.
 4. **Clients** → Create client → Application type: **Web application**:
    - Authorized redirect URIs: `https://<הדומיין>/api/auth/google/callback` וגם `http://localhost:3000/api/auth/google/callback` לפיתוח. חייב להתאים בדיוק (כולל https וסלאש).
    - Authorized JavaScript origins: הדומיין (נדרש רק ל-Picker בשלב 2).
@@ -69,6 +73,7 @@
    - **הצדקה** (באנגלית), כולל למה scope צר יותר לא מספיק. טיוטה:
      - `calendar.events`: "Users ask the WhatsApp assistant to list today's meetings, find free time, and create, move or cancel events. Every write is shown as a draft and executed only after the user taps Approve. We do not need calendar sharing or calendar management, so we use calendar.events instead of calendar."
      - `gmail.send`: "Users dictate an email in WhatsApp; the assistant drafts it and sends it from the user's Gmail only after the user taps Send."
+     - `tasks`: "Users ask the WhatsApp assistant to list their open Google Tasks or to add a task ("add a task: call the bank by Thursday"). The assistant reads the user's task lists and inserts the task into the default list; it never deletes tasks. tasks.readonly is not enough because adding a task is the main use."
    - **סרטון הדגמה** ביוטיוב (Unlisted): זרימת ההסכמה **באנגלית** (שפת הדפדפן אנגלית), מסך ההסכמה עם שם האפליקציה, **שורת הכתובת עם ה-client_id** בזמן ההפניה ל-Google, ואז שימוש בכל scope: בקשה בוואטסאפ → טיוטה → לחיצה על אישור → האירוע ביומן / המייל ב-Sent. אפשר כתוביות באנגלית לשיחה בעברית.
    - עד 3 קישורים לתיעוד (דף בית, מדיניות פרטיות, דף "איך זה עובד").
 5. מסמך הגילוי שלנו (לפני ההפניה) צריך להופיע באתר כמו שהוא מוצג בסרטון.
@@ -101,7 +106,8 @@
 | משתנה | ערך | הערה |
 |---|---|---|
 | `GOOGLE_GMAIL_READ_ENABLED` | ריק (או `true`) | ריק = פעיל כש-`GOOGLE_CLIENT_ID` מוגדר. `false` = מתג כיבוי מיידי לכולם: לא מבקשים ולא שומרים `gmail.readonly`, וגם מי שכבר אישר מפסיק לקרוא (כלי `gmail_*`, Gmail בסיכום הבוקר). ההרשאות נשארות אצל Google — החזרה ל-`true` מחזירה את הקריאה בלי אישור חדש (מי שהתחבר מחדש בזמן הכיבוי יתבקש לאשר שוב, בלי מקום חדש בתקרה) |
-| `GOOGLE_GMAIL_READ_CAP` | `95` | 1–100 |
+| `GOOGLE_DRIVE_READ_ENABLED` | ריק (או `true`) | אותם כללים כמו `GOOGLE_GMAIL_READ_ENABLED`, ל-`drive.readonly` (חיפוש בכל ה-Drive וקריאת Docs / Sheets / Slides). `false` = כבוי לכולם; Gmail לא מושפע |
+| `GOOGLE_GMAIL_READ_CAP` | `95` | 1–100. התקרה היא לחשבון, לא ל-scope: חשבון שנספר יכול לקבל גם קריאת Gmail וגם קריאת Drive בלי מקום נוסף |
 | `GOOGLE_SENSITIVE_SCOPES_VERIFIED` | `false` | `true` רק ביום שסעיף 5 מאושר |
 | `OPERATOR_EMAIL` | כתובת של דניאל | אופציונלי; בלי — לוג + דגל בלבד |
 
@@ -128,3 +134,16 @@
 ## 9. ניתוק ומחיקה
 
 ניתוק מהאזור האישי ומחיקת חשבון קוראים ל-`https://oauth2.googleapis.com/revoke` עם ה-refresh token לפני מחיקת הטוקנים אצלנו (נרשם ב-audit_log). המשתמש יכול גם לנתק בעצמו ב-https://myaccount.google.com/permissions — ואז בפעם הבאה הבוט יקבל `invalid_grant` ויציע חיבור מחדש. **שימו לב:** הגיבוב של חשבון ה-Google בפנקס התקרה (`google_scope_grants`) נשאר גם אחרי ניתוק ומחיקה, כי Google ממשיכה לספור אותו (סעיף 6.1). אחרי ניתוק הוא עדיין מקושר לחשבון אצלנו; מחיקת החשבון מנתקת את הקישור. זה גיבוב פסבדונימי (מי שיודע את הכתובת יכול לחשב אותו) — כך זה מנוסח במדיניות הפרטיות §5 ובשאלות לעו"ד (מסמך הגילוי §5).
+
+## 10. Google Tasks וקריאת Drive (23.10.2026) — מה ללחוץ
+
+**בקשת דניאל:** אייקון לכל שירות מתחת לחשבון באזור האישי, והשירותים מחוברים באמת. בקוד: `lib/connections/services.ts` (הסטטוס לכל שירות), `lib/google/tasks-tools.ts`, `lib/google/consent.ts`, `lib/google/tools.ts`.
+
+1. **Google Tasks API:** https://console.cloud.google.com → לבחור את הפרויקט → **APIs & Services → Library** → לחפש **Google Tasks API** → **Enable**. בלי זה כל קריאה ל-Tasks תחזיר 403 (accessNotConfigured), והבוט יענה "אין תגובה".
+2. **ה-scope `tasks` במסך ההסכמה:** **Google Auth Platform → Data access → Add or remove scopes** → בתיבת הסינון לכתוב `tasks` → לסמן `.../auth/tasks` (Google Tasks API, "Create, edit, organize, and delete all your tasks") → **Update** → **Save**. לבדוק שהוא מופיע תחת **Your sensitive scopes** ולא תחת restricted (המחקר לא מצא סיווג רשמי — `docs/research/connectors-israel.md` §14).
+3. **`drive.readonly` — לא מוסיפים ל-Data access**, בדיוק כמו `gmail.readonly` (סעיף 6.4): הוא מבוקש בזמן ריצה, תחת תקרת 100 המשתמשים של אפליקציה לא מאומתת. הצהרה עליו הייתה מכניסה scope מוגבל להגשת האימות של סעיף 5, כלומר CASA. Drive API כבר מופעל (סעיף 1).
+4. **אימות הרגישים (סעיף 5):** להוסיף את `tasks` להגשה, עם ההצדקה שבסעיף 5 וקטע בסרטון ("תוסיפי משימה" בוואטסאפ ← המשימה מופיעה ב-Google Tasks). את `GOOGLE_SENSITIVE_SCOPES_VERIFIED=true` מגדירים רק אחרי ש-**שלושת** הרגישים אושרו (`calendar.events`, `gmail.send`, `tasks`) — אחרת חיבור חדש עדיין נספר בתקרה.
+5. **Vercel:** `GOOGLE_DRIVE_READ_ENABLED` ריק (פעיל כשיש `GOOGLE_CLIENT_ID`) או `false` לכיבוי. אין מיגרציה חדשה: הפנקס (`google_scope_grants`, 0008) מקבל כל scope של Google.
+6. **מסמך הגילוי** (`docs/legal/oauth-consent-screen-he.md` §3) עודכן ל-`tasks` ול-`drive.readonly` — לפרסם באתר לפני שהבקשה הזו יוצאת למשתמשים אמיתיים.
+
+**מה המשתמש רואה:** חיבור חדש מבקש את `tasks` עם שאר הבסיס, ואת `gmail.readonly` + `drive.readonly` כל עוד יש מקום (אפשר להוריד את הסימון — זו בחירה, לא תקלה). באזור האישי: Gmail, יומן, Tasks, Drive, Docs, Sheets, Slides, כל אחד "מחובר" / "צריך אישור נוסף" (לחיצה = הסכמה מצטברת ל-scope החסר בלבד) / "לא זמין" (קריאת Drive כבויה או שהתקרה מלאה לחשבון חדש).

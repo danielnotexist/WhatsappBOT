@@ -1,6 +1,7 @@
 /**
  * Recorded-shape Microsoft Graph responses served by a fake `fetch` — used by tests and by DATA_MODE=memory.
- * Shapes follow the v1.0 docs (message, event, driveItem, subscription). All data is fictional.
+ * Shapes follow the v1.0 docs (message, event, driveItem, subscription, todoTaskList/todoTask, Microsoft Search
+ * searchResponse). All data is fictional.
  */
 export const FIXTURE_MESSAGES = [
   {
@@ -69,6 +70,40 @@ export const FIXTURE_ITEMS = [
   { id: "01FOLDER", name: "לקוחות", size: 0, lastModifiedDateTime: "2026-10-16T08:00:00Z", webUrl: "https://onedrive/f", folder: { childCount: 2 }, parentReference: { path: "/drive/root:" } },
 ];
 
+/** SharePoint document-library items (Microsoft Search hits and /drives/{driveId}/items/{id}). */
+export const FIXTURE_SP_DRIVE = "b!LegalLibraryDrive01";
+export const FIXTURE_SP_ITEMS = [
+  { id: "01SPDOC1", name: "נוהל קליטת לקוח.docx", size: 38_000, lastModifiedDateTime: "2026-10-12T09:00:00Z", webUrl: "https://levilaw.sharepoint.com/sites/Legal/Shared%20Documents/נוהל%20קליטת%20לקוח.docx", file: { mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }, parentReference: { driveId: FIXTURE_SP_DRIVE, siteId: "levilaw.sharepoint.com,site-legal", path: "/drives/b!LegalLibraryDrive01/root:" } },
+  { id: "01SPDOC2", name: "מחירון 2026.xlsx", size: 22_000, lastModifiedDateTime: "2026-10-02T09:00:00Z", webUrl: "https://levilaw.sharepoint.com/sites/Finance/Shared%20Documents/מחירון%202026.xlsx", file: { mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }, parentReference: { driveId: "b!FinanceLibraryDrive02", siteId: "levilaw.sharepoint.com,site-finance", path: "/drives/b!FinanceLibraryDrive02/root:" } },
+];
+export const FIXTURE_SITES = [
+  { id: "levilaw.sharepoint.com,site-legal", name: "Legal", displayName: "מחלקה משפטית", description: "נהלים, תבניות והסכמים", webUrl: "https://levilaw.sharepoint.com/sites/Legal" },
+  { id: "levilaw.sharepoint.com,site-finance", name: "Finance", displayName: "כספים", description: "מחירונים ודוחות", webUrl: "https://levilaw.sharepoint.com/sites/Finance" },
+];
+
+export interface FixtureTodoList {
+  id: string;
+  displayName: string;
+  wellknownListName: "defaultList" | "flaggedEmails" | "none";
+  tasks: { id: string; title: string; status: string; importance: string; dueDateTime?: { dateTime: string; timeZone: string }; body?: { content: string; contentType: string } }[];
+}
+
+export function fixtureTodoLists(): FixtureTodoList[] {
+  return [
+    {
+      id: "AQMkTasksDefault",
+      displayName: "Tasks",
+      wellknownListName: "defaultList",
+      tasks: [
+        { id: "AAMkTask1", title: "להכין ייפוי כוח למשפחת לוי", status: "notStarted", importance: "high", dueDateTime: { dateTime: "2026-10-23T00:00:00.0000000", timeZone: "UTC" }, body: { content: "לבדוק את הנוסח המעודכן", contentType: "text" } },
+        { id: "AAMkTask2", title: "להחזיר טלפון לרו״ח ברק", status: "notStarted", importance: "normal" },
+        { id: "AAMkTask3", title: "לשלוח חשבונית לכהן", status: "completed", importance: "normal" },
+      ],
+    },
+    { id: "AQMkFlagged", displayName: "Flagged Emails", wellknownListName: "flaggedEmails", tasks: [{ id: "AAMkTask4", title: "הצעת פשרה, תיק 4471", status: "notStarted", importance: "normal" }] },
+  ];
+}
+
 /** A one-page PDF saying "Hello PDF 42" — small enough to embed, real enough for unpdf. */
 export const TINY_PDF_BASE64 =
   "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAyMDAgMTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NCA+PgpzdHJlYW0KQlQgL0YxIDE4IFRmIDIwIDQwIFRkIChIZWxsbyBQREYgNDIpIFRqIEVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI2MCAwMDAwMCBuIAowMDAwMDAwMzUzIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNDIwCiUlRU9GCg==";
@@ -80,10 +115,15 @@ export interface FixtureState {
   subscriptions: { id: string; resource: string; expirationDateTime: string; clientState?: string }[];
   /** simulate an expired access token once */
   unauthorizedOnce: boolean;
+  /** Microsoft To Do lists (the first is the default "Tasks") */
+  todo: FixtureTodoList[];
+  /** API families that answer 403 (the scope was not consented): To Do (Tasks.ReadWrite), sites (Sites.Read.All) */
+  denied: Set<"todo" | "sites">;
 }
 
 export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureState } {
-  const state: FixtureState = { calls: [], sent: [], events: FIXTURE_EVENTS.map((e) => ({ ...e })), subscriptions: [], unauthorizedOnce: false };
+  const state: FixtureState = { calls: [], sent: [], events: FIXTURE_EVENTS.map((e) => ({ ...e })), subscriptions: [], unauthorizedOnce: false, todo: fixtureTodoLists(), denied: new Set() };
+  const accessDenied = () => json({ error: { code: "ErrorAccessDenied", message: "Access is denied. Check credentials and try again." } }, 403);
   let n = 0;
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const listShape = (m: (typeof FIXTURE_MESSAGES)[number]) => {
@@ -167,6 +207,45 @@ export function createGraphFixture(): { fetchImpl: typeof fetch; state: FixtureS
       const i = FIXTURE_ITEMS.find((x) => x.id === decodeURIComponent(item[1]!));
       if (!i) return json({ error: { code: "itemNotFound", message: "not found" } }, 404);
       if (item[2]) return new Response(Buffer.from(TINY_PDF_BASE64, "base64"), { status: 200, headers: { "content-type": "application/pdf" } });
+      return json(i);
+    }
+    // ---- Microsoft To Do ----
+    if (p.startsWith("/me/todo/")) {
+      if (state.denied.has("todo")) return accessDenied();
+      if (p === "/me/todo/lists" && method === "GET") return json({ value: state.todo.map((l) => ({ id: l.id, displayName: l.displayName, wellknownListName: l.wellknownListName, isOwner: true, isShared: false })) });
+      const tl = p.match(/^\/me\/todo\/lists\/([^/]+)\/tasks$/);
+      if (tl) {
+        const list = state.todo.find((l) => l.id === decodeURIComponent(tl[1]!));
+        if (!list) return json({ error: { code: "ErrorItemNotFound", message: "not found" } }, 404);
+        if (method === "GET") {
+          const open = (url.searchParams.get("$filter") ?? "").includes("status ne 'completed'");
+          return json({ value: list.tasks.filter((t) => !open || t.status !== "completed").slice(0, Number(url.searchParams.get("$top") ?? 100)) });
+        }
+        if (method === "POST") {
+          const t = { id: `AAMkTaskNew${++n}`, title: String(body.title ?? ""), status: "notStarted", importance: "normal", ...(body.dueDateTime ? { dueDateTime: { dateTime: `${String(body.dueDateTime.dateTime).slice(0, 19)}.0000000`, timeZone: body.dueDateTime.timeZone } } : {}), ...(body.body ? { body: body.body } : {}) };
+          list.tasks.unshift(t);
+          return json(t, 201);
+        }
+      }
+    }
+    // ---- Microsoft Search (OneDrive + SharePoint) ----
+    if (p === "/search/query" && method === "POST") {
+      const req = body.requests?.[0] ?? {};
+      const type = req.entityTypes?.[0];
+      const q = String(req.query?.queryString ?? "").toLowerCase();
+      if (type === "site") {
+        if (state.denied.has("sites")) return accessDenied();
+        const sites = FIXTURE_SITES.filter((x) => `${x.displayName} ${x.name} ${x.description}`.toLowerCase().includes(q));
+        return json({ value: [{ searchTerms: [q], hitsContainers: [{ total: sites.length, moreResultsAvailable: false, hits: sites.map((x, i) => ({ hitId: x.id, rank: i + 1, summary: `<c0>${x.displayName}</c0> ${x.description}<ddd/>`, resource: { "@odata.type": "#microsoft.graph.site", ...x } })) }] }] });
+      }
+      const items = [...FIXTURE_SP_ITEMS, ...FIXTURE_ITEMS.filter((i) => !("folder" in i))].filter((i) => i.name.toLowerCase().includes(q) || i.webUrl.toLowerCase().includes(q));
+      return json({ value: [{ searchTerms: [q], hitsContainers: [{ total: items.length, moreResultsAvailable: false, hits: items.map((i, k) => ({ hitId: i.id, rank: k + 1, summary: `…<c0>${q}</c0>…`, resource: { "@odata.type": "#microsoft.graph.driveItem", ...i, parentReference: { driveId: "b!OneDriveMe", ...i.parentReference } } })) }] }] });
+    }
+    const dr = p.match(/^\/drives\/([^/]+)\/items\/([^/]+)(\/content)?$/);
+    if (dr) {
+      const i = FIXTURE_SP_ITEMS.find((x) => x.parentReference.driveId === decodeURIComponent(dr[1]!) && x.id === decodeURIComponent(dr[2]!));
+      if (!i) return json({ error: { code: "itemNotFound", message: "not found" } }, 404);
+      if (dr[3]) return new Response(Buffer.from(TINY_PDF_BASE64, "base64"), { status: 200, headers: { "content-type": "application/pdf" } });
       return json(i);
     }
     if (p === "/subscriptions" && method === "POST") {

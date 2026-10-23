@@ -7,10 +7,13 @@ import {
   GOOGLE_SCOPES,
   GoogleOAuthError,
   buildGoogleAuthorizeUrl,
+  driveReadActive,
+  driveReadEnabled,
   exchangeGoogleCode,
   gmailReadEnabled,
   googleOAuthConfigFromEnv,
   hasScope,
+  isGoogleFeature,
   missingScopes,
   normalizeScopes,
   parseGoogleIdToken,
@@ -34,7 +37,7 @@ describe("Google OAuth", () => {
       client_id: cfg.clientId,
       redirect_uri: cfg.redirectUri,
       response_type: "code",
-      scope: "openid email profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send",
+      scope: "openid email profile https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/tasks",
       access_type: "offline",
       prompt: "consent",
       include_granted_scopes: "true",
@@ -43,6 +46,7 @@ describe("Google OAuth", () => {
       code_challenge_method: "S256",
     });
     expect(u.searchParams.get("scope")).not.toContain("gmail.readonly");
+    expect(u.searchParams.get("scope")).not.toContain("drive.readonly");
     const hinted = new URL(buildGoogleAuthorizeUrl(cfg, { state: "s", codeChallenge: "c", loginHint: "dana.levi@gmail.com", scopes: scopesForRequest("gmail_read") }));
     expect(hinted.searchParams.get("login_hint")).toBe("dana.levi@gmail.com");
     expect(hinted.searchParams.get("scope")).toBe("openid email https://www.googleapis.com/auth/gmail.readonly");
@@ -100,8 +104,27 @@ describe("Google OAuth", () => {
     const granted = normalizeScopes("openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events");
     expect(granted).toEqual(["email", "https://www.googleapis.com/auth/calendar.events", "openid"]);
     expect(hasScope(granted, "https://www.googleapis.com/auth/userinfo.email")).toBe(true);
-    expect(missingScopes(granted, GOOGLE_BASE_SCOPES)).toEqual([GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend, "profile"]);
+    expect(missingScopes(granted, GOOGLE_BASE_SCOPES)).toEqual([GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks, "profile"]);
     expect(scopesForRequest()).toEqual([...GOOGLE_BASE_SCOPES]);
+  });
+
+  it("Google Tasks is in the base set; the restricted reads ride along only when allowed, and each feature asks for its own scope", () => {
+    expect(GOOGLE_BASE_SCOPES).toContain(GOOGLE_SCOPES.tasks);
+    expect(GOOGLE_BASE_SCOPES).not.toContain(GOOGLE_SCOPES.driveReadonly);
+    expect(scopesForRequest(null, { withGmailRead: true, withDriveRead: true })).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.driveReadonly]);
+    expect(scopesForRequest(null, { withDriveRead: true })).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.driveReadonly]);
+    expect(scopesForRequest("drive_read")).toEqual(["openid", "email", "https://www.googleapis.com/auth/drive.readonly"]);
+    expect(scopesForRequest("tasks")).toEqual(["openid", "email", "https://www.googleapis.com/auth/tasks"]);
+    expect(isGoogleFeature("drive_read")).toBe(true);
+    expect(isGoogleFeature("tasks")).toBe(true);
+    expect(isGoogleFeature("calendar")).toBe(false);
+    // the Drive-read switch: the same rules as Gmail read
+    expect(driveReadEnabled({})).toBe(false);
+    expect(driveReadEnabled({ GOOGLE_CLIENT_ID: "x" })).toBe(true);
+    expect(driveReadEnabled({ GOOGLE_CLIENT_ID: "x", GOOGLE_DRIVE_READ_ENABLED: "false" })).toBe(false);
+    expect(driveReadEnabled({ GOOGLE_DRIVE_READ_ENABLED: "true" })).toBe(true);
+    expect(() => driveReadEnabled({ GOOGLE_DRIVE_READ_ENABLED: "maybe" })).toThrow(EnvError);
+    expect(driveReadActive({ GOOGLE_DRIVE_READ_ENABLED: "maybe" })).toBe(false);
   });
 
   it("reads config and the Gmail-read flag from env, failing in Hebrew when missing", () => {

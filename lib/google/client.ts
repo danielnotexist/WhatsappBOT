@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { buildMimeMessage, toGmailRaw, type MimeMessageInput } from "./mime";
 
 /**
- * Minimal fetch-based Google client (no googleapis SDK) for Calendar v3, Drive v3 (drive.file) and Gmail send.
+ * Minimal fetch-based Google client (no googleapis SDK) for Calendar v3, Drive v3 (drive.file, and every file with
+ * drive.readonly), Tasks v1 and Gmail send.
  * Endpoints verified on developers.google.com (2026-10). Takes an access-token provider so the token store
  * refreshes transparently; retries once after a 401 through `onUnauthorized`.
  */
@@ -13,6 +14,7 @@ export const GOOGLE_API = {
   gmail: "https://gmail.googleapis.com/gmail/v1",
   gmailUpload: "https://gmail.googleapis.com/upload/gmail/v1",
   userinfo: "https://openidconnect.googleapis.com/v1/userinfo",
+  tasks: "https://tasks.googleapis.com/tasks/v1",
 } as const;
 
 export class GoogleApiError extends Error {
@@ -83,6 +85,21 @@ export interface DriveFile {
   size: number | null;
   webViewLink: string | null;
   isFolder: boolean;
+}
+
+export interface GoogleTaskList {
+  id: string;
+  title: string;
+}
+
+export interface GoogleTask {
+  id: string;
+  title: string;
+  notes: string;
+  status: "needsAction" | "completed";
+  /** YYYY-MM-DD (Google keeps only the date of a task's due time) or null */
+  due: string | null;
+  webViewLink: string | null;
 }
 
 export interface GmailSent {
@@ -201,10 +218,14 @@ export class GoogleClient {
   // the Picker API + HTTP referrer, the project number, and CSP script-src/frame-src for apis.google.com and
   // docs.google.com (proxy.ts). See docs/google-setup.md §7.
 
-  /** Files this app can see, newest first; `query` matches the name. Folders and trashed files are excluded. */
-  async listFiles(opts: { query?: string; pageSize?: number } = {}): Promise<DriveFile[]> {
+  /**
+   * Files this app can see (drive.file: what it created or the user opened with it; drive.readonly: every file), newest
+   * first; `query` matches the name, or with `fullText` the name or the content. Folders and trashed files are excluded.
+   */
+  async listFiles(opts: { query?: string; pageSize?: number; fullText?: boolean } = {}): Promise<DriveFile[]> {
     const q = ["trashed = false", `mimeType != ${driveQueryLiteral(GOOGLE_FOLDER_MIME)}`];
-    if (opts.query?.trim()) q.push(`name contains ${driveQueryLiteral(opts.query.trim())}`);
+    const term = opts.query?.trim();
+    if (term) q.push(opts.fullText ? `(name contains ${driveQueryLiteral(term)} or fullText contains ${driveQueryLiteral(term)})` : `name contains ${driveQueryLiteral(term)}`);
     const u = new URL(`${GOOGLE_API.drive}/files`);
     u.searchParams.set("q", q.join(" and "));
     u.searchParams.set("pageSize", String(Math.min(Math.max(opts.pageSize ?? 10, 1), 100)));
@@ -259,6 +280,32 @@ export class GoogleClient {
       body: typeof content === "string" ? Buffer.from(content, "utf8") : Buffer.from(content),
     });
     return mapFile((await res.json()) as RawDriveFile);
+  }
+
+  // ---------- tasks (Google Tasks v1, scope `tasks`) ----------
+
+  /** The user's task lists (the first is the default list, "My Tasks"). */
+  async listTaskLists(maxResults = 20): Promise<GoogleTaskList[]> {
+    const r = await this.json<{ items?: { id: string; title?: string }[] }>("GET", `${GOOGLE_API.tasks}/users/@me/lists?maxResults=${Math.min(Math.max(maxResults, 1), 100)}`);
+    return (r.items ?? []).map((l) => ({ id: l.id, title: l.title ?? "" }));
+  }
+
+  /** Tasks of one list (`@default` = the default list); open ones only unless `showCompleted`. */
+  async listTasks(listId: string, opts: { showCompleted?: boolean; maxResults?: number } = {}): Promise<GoogleTask[]> {
+    const u = new URL(`${GOOGLE_API.tasks}/lists/${encodeURIComponent(listId)}/tasks`);
+    u.searchParams.set("showCompleted", String(Boolean(opts.showCompleted)));
+    u.searchParams.set("showHidden", String(Boolean(opts.showCompleted)));
+    u.searchParams.set("maxResults", String(Math.min(Math.max(opts.maxResults ?? 50, 1), 100)));
+    const r = await this.json<{ items?: RawTask[] }>("GET", u.toString());
+    return (r.items ?? []).filter((t) => !t.deleted && (opts.showCompleted || t.status !== "completed")).map(mapTask);
+  }
+
+  /** Adds a task to a list (`@default` = the default list). `due` = YYYY-MM-DD (Google keeps the date only). */
+  async createTask(listId: string, input: { title: string; notes?: string; due?: string | null }): Promise<GoogleTask> {
+    const body: Record<string, unknown> = { title: input.title };
+    if (input.notes) body.notes = input.notes;
+    if (input.due) body.due = `${input.due}T00:00:00.000Z`;
+    return mapTask(await this.json<RawTask>("POST", `${GOOGLE_API.tasks}/lists/${encodeURIComponent(listId)}/tasks`, body));
   }
 
   // ---------- gmail (gmail.send only — no read, no drafts) ----------
@@ -332,6 +379,10 @@ function eventBody(e: Partial<NewGoogleEvent> & { timeZone: string }): Record<st
   return body;
 }
 
+function mapTask(t: RawTask): GoogleTask {
+  return { id: t.id, title: t.title ?? "", notes: t.notes ?? "", status: t.status === "completed" ? "completed" : "needsAction", due: t.due ? t.due.slice(0, 10) : null, webViewLink: t.webViewLink ?? null };
+}
+
 function mapFile(f: RawDriveFile): DriveFile {
   return { id: f.id, name: f.name ?? "", mimeType: f.mimeType ?? "application/octet-stream", modifiedTime: f.modifiedTime ?? "", size: f.size !== undefined ? Number(f.size) : null, webViewLink: f.webViewLink ?? null, isFolder: f.mimeType === GOOGLE_FOLDER_MIME };
 }
@@ -365,6 +416,16 @@ interface RawDriveFile {
   modifiedTime?: string;
   /** int64 as a string */
   size?: string;
+  webViewLink?: string;
+}
+interface RawTask {
+  id: string;
+  title?: string;
+  notes?: string;
+  status?: string;
+  /** RFC 3339; only the date part is meaningful */
+  due?: string;
+  deleted?: boolean;
   webViewLink?: string;
 }
 interface RawGmailMessage {

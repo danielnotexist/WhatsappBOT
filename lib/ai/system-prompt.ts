@@ -42,7 +42,8 @@ export interface UserContextInput {
   businessType: string | null;
   timezone: string;
   morningTime: string;
-  connections: { provider: string; accountEmail: string | null }[];
+  /** `services`: the connected services of that account ("Gmail, יומן Google ו-Google Tasks" — lib/connections/services.ts) */
+  connections: { provider: string; accountEmail: string | null; services?: string }[];
   profile: Record<string, unknown>;
   summary: string | null;
   facts: string[];
@@ -76,6 +77,8 @@ export function buildSystemPrompt(u: UserContextInput): string {
       ? `- חיבורים פעילים: ${u.connections.map((c) => `${c.provider === "microsoft" ? "Microsoft 365" : "Google"}${c.accountEmail ? ` (${c.accountEmail})` : ""}`).join(", ")}`
       : "- חיבורים: אין עדיין חיבור למייל/יומן/קבצים",
   );
+  // which services of each account work right now (a missing one answers with its approval link from its tool)
+  for (const c of u.connections) if (c.services) lines.push(`- שירותים פעילים ב-${c.provider === "microsoft" ? "Microsoft 365" : "Google"}: ${c.services}`);
   for (const [k, v] of Object.entries(u.profile)) {
     if (INTERNAL_PROFILE_KEYS.has(k) || v === null || v === undefined || v === "") continue;
     lines.push(`- ${k}: ${Array.isArray(v) ? v.map(String).join("; ") : typeof v === "object" ? JSON.stringify(v) : String(v)}`);

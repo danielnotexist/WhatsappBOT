@@ -91,6 +91,66 @@ describe("Google connect routes (memory mode)", () => {
     expect(location(await startFromChat(user.id)).searchParams.get("login_hint")).toBe("dana.levi@gmail.com");
   });
 
+  it("Drive read (restricted): refused while off, asked for on its own when on, kept by the callback; at the cap one Hebrew line", async () => {
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    const off = await startFromChat(user.id, "&feature=drive_read");
+    expect(off.status).toBe(403);
+    expect(await off.text()).toBe("קריאה של כל הקבצים ב-Drive אינה זמינה כרגע. היומן, Gmail וקבצים שנוצרו דרך עלזה ממשיכים לעבוד.");
+
+    vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "true");
+    db.seedConnection(user.id, "google", "dana.levi@gmail.com");
+    const on = location(await startFromChat(user.id, "&feature=drive_read&returnTo=account"));
+    expect(on.searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.driveReadonly}`);
+    expect(on.searchParams.get("include_granted_scopes")).toBe("true");
+    fixture().grantedScope += ` ${GOOGLE_SCOPES.driveReadonly}`;
+    const cb = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${on.searchParams.get("state")}&code=abc`)));
+    expect(cb.pathname).toBe("/account");
+    expect(cb.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
+    expect((await db.listConnections(user.id)).find((c) => c.account_email === "dana.levi@gmail.com" && c.status === "active")!.scopes).toContain(GOOGLE_SCOPES.driveReadonly);
+    expect(db.audit.filter((a) => a.action === "google.connect").at(-1)).toMatchObject({ result: "ok:drive_read" });
+    expect(db.googleScopeGrants.map((g) => g.scope)).toContain(GOOGLE_SCOPES.driveReadonly);
+    expect(wa.texts.at(-1)).toContain("חיפוש וקריאה של כל הקבצים ב-Drive, כולל Docs, Sheets ו-Slides");
+
+    // a brand-new account at the cap
+    for (let i = 0; i < 95; i++) await db.recordGoogleScopeGrant({ account_hash: googleAccountHash(`user${i}@gmail.com`), scope: GOOGLE_SCOPES.gmailReadonly, user_id: null });
+    const newcomer = await db.createUser("new@example.com");
+    const full = await startFromChat(newcomer.id, "&feature=drive_read");
+    expect(full.status).toBe(403);
+    expect(await full.text()).toBe("קריאה של כל הקבצים ב-Drive פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Gmail וקבצים שנוצרו דרך עלזה ממשיכים לעבוד.");
+  });
+
+  it("drive.readonly that comes back while Drive read is off is not kept (the same rule as Gmail read)", async () => {
+    vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "false");
+    const user = await db.createUser("dana@example.com");
+    const consent = location(await startFromChat(user.id));
+    expect(consent.searchParams.get("scope")).not.toContain("drive.readonly");
+    fixture().grantedScope = `${FIXTURE_GOOGLE_SCOPE} ${GOOGLE_SCOPES.driveReadonly}`;
+    await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${consent.searchParams.get("state")}&code=abc`));
+    expect((await db.listConnections(user.id))[0]!.scopes).not.toContain(GOOGLE_SCOPES.driveReadonly);
+    expect(db.audit.find((a) => a.action === "google.drive_read_not_kept")).toMatchObject({ result: "disabled" });
+  });
+
+  it("Google Tasks for a connection made before it joined the base set: an incremental consent for `tasks` only", async () => {
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    db.seedConnection(user.id, "google", "dana.levi@gmail.com").scopes = ["openid", "email", GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend];
+    const consent = location(await startFromChat(user.id, "&feature=tasks"));
+    expect(consent.searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.tasks}`);
+    expect(consent.searchParams.get("login_hint")).toBe("dana.levi@gmail.com");
+    const cb = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${consent.searchParams.get("state")}&code=abc`)));
+    expect(cb.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
+    expect((await db.listConnections(user.id)).find((c) => c.status === "active")!.scopes).toContain(GOOGLE_SCOPES.tasks);
+    expect(db.audit.filter((a) => a.action === "google.connect").at(-1)).toMatchObject({ result: "ok:tasks" });
+
+    // unticked → partial, and the retry link asks for tasks again
+    const again = location(await startFromChat(user.id, "&feature=tasks"));
+    fixture().grantedScope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events";
+    const partial = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${again.searchParams.get("state")}&code=abc`)));
+    expect(partial.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com), אבל לא ניתנה הרשאה לנהל משימות ב-Google Tasks. אפשר לחבר שוב ולסמן את כל האפשרויות.");
+    expect(wa.texts.at(-1)).toMatch(/\/api\/auth\/google\/start\?t=[^&\s]+&feature=tasks/);
+  });
+
   it("web onboarding (session cookie, returnTo=onboarding) → /start/ready?connected=google; errors go back to /start/connect", async () => {
     const user = await db.createUser("dana@example.com");
     expect(location(await startGet(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`))).pathname).toBe("/start"); // no session
@@ -118,7 +178,7 @@ describe("Google connect routes (memory mode)", () => {
   it("granular consent with gmail.send unticked → partial notice + WhatsApp link to add it", async () => {
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
-    fixture().grantedScope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file";
+    fixture().grantedScope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/tasks";
     const state = location(await startFromChat(user.id)).searchParams.get("state")!;
     const cb = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`)));
     expect(cb.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com), אבל לא ניתנה הרשאה לשלוח מיילים מ-Gmail. אפשר לחבר שוב ולסמן את כל האפשרויות.");
@@ -152,25 +212,26 @@ describe("Google connect routes (memory mode)", () => {
     expect((await startFromChat(user.id, "&feature=gmail_read")).status).toBe(503);
   });
 
-  it("web onboarding under the cap asks for gmail.readonly too (default on with GOOGLE_CLIENT_ID); unticking it is a choice, not a partial failure", async () => {
+  it("web onboarding under the cap asks for gmail.readonly and drive.readonly too (default on with GOOGLE_CLIENT_ID); unticking them is a choice, not a partial failure", async () => {
     vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
     jar.session = createSessionToken(user.id);
     const consent = location(await startGet(new Request(`${APP}/api/auth/google/start?returnTo=onboarding`)));
-    expect(consent.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly]);
-    const pending = ((await db.getUser(user.id))!.profile.oauth_pending as { google: { scopes: string[] } }).google;
+    expect(consent.searchParams.get("scope")!.split(" ")).toEqual([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.driveReadonly]);
+    const pending = ((await db.getUser(user.id))!.profile.oauth_pending as { google: { scopes: string[]; gmail_read: string; drive_read: string } }).google;
     expect(pending.scopes).toContain(GOOGLE_SCOPES.gmailReadonly);
+    expect(pending).toMatchObject({ gmail_read: "under_cap", drive_read: "under_cap" });
 
-    // granular consent: the user leaves gmail.readonly unticked (the fixture grants the base set only)
+    // granular consent: the user leaves gmail.readonly and drive.readonly unticked (the fixture grants the base set only)
     const ok = location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${consent.searchParams.get("state")}&code=abc`)));
     expect(ok.pathname).toBe("/start/ready");
     expect(ok.searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
     expect(wa.texts).toHaveLength(1); // connect_done only — no "partial" message with a link
     expect(wa.texts[0]).toContain("את תיבת ה-Gmail אני לא קוראת, כי ההרשאה לכך לא סומנה. אפשר לבקש ממני בהמשך לקרוא מיילים, ואשלח קישור לאישור.");
-    expect(db.audit.find((a) => a.action === "google.connect")).toMatchObject({ result: "ok:gmail_read_declined" });
-    // calendar.events / gmail.send are not verified yet → Google counts this account already
-    expect(db.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend].sort());
+    expect(db.audit.find((a) => a.action === "google.connect")).toMatchObject({ result: "ok:gmail_read_declined,drive_read_declined" });
+    // calendar.events / gmail.send / tasks are not verified yet → Google counts this account already
+    expect(db.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks].sort());
   });
 
   it("at the cap: a new account connects without gmail.readonly, an explicit request gets one Hebrew line, an account Google already counted still can", async () => {
@@ -326,7 +387,7 @@ describe("Google connect routes (memory mode)", () => {
     const user = await failing.createUser("dana@example.com");
     const state = location(await startFromChat(user.id)).searchParams.get("state")!;
     await expect(callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`))).rejects.toThrow("db write failed");
-    expect(failing.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend].sort());
+    expect(failing.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks].sort());
   });
 
   it("real Google project: the partial-consent message carries the 'unverified app' heads-up", async () => {
@@ -340,7 +401,7 @@ describe("Google connect routes (memory mode)", () => {
       db.seedWaIdentity(user.id, "+972501234567");
       const consent = location(await startFromChat(user.id));
       expect(consent.searchParams.get("client_id")).toBe("real-client.apps.googleusercontent.com");
-      fx.state.grantedScope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file";
+      fx.state.grantedScope = "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/tasks";
       await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${consent.searchParams.get("state")}&code=abc`));
       const partial = wa.texts.at(-1)!;
       expect(partial).toContain("לא אוכל לשלוח מיילים מ-Gmail");

@@ -64,9 +64,15 @@ export const serverSchema = z.object({
    * לא שומרים מאישור חדש, וגם מי שכבר אישר מפסיק לקרוא (כלי gmail_*, סיכום הבוקר). ראו docs/google-setup.md §6.
    */
   GOOGLE_GMAIL_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().optional()),
+  /**
+   * קריאת כל קובצי ה-Drive (drive.readonly, scope מוגבל: חיפוש בכל ה-Drive וקריאת Docs/Sheets/Slides) — באותם תנאים כמו
+   * קריאת Gmail: בלי CASA, בתוך תקרת המשתמשים. ריק = פעיל כש-GOOGLE_CLIENT_ID מוגדר (lib/google/oauth.ts driveReadEnabled).
+   * "false" = מתג כיבוי לכולם. ראו docs/google-setup.md §6.
+   */
+  GOOGLE_DRIVE_READ_ENABLED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().optional()),
   /** תקרת המשתמשים (חשבונות Google שונים שאישרו אי-פעם scope לא מאומת). ברירת מחדל 95 — מרווח מתחת ל-100 של Google. */
   GOOGLE_GMAIL_READ_CAP: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().min(1).max(100).default(95)),
-  /** true אחרי ש-Google אישרה את ה-scopes הרגישים (calendar.events, gmail.send). עד אז גם חיבור רגיל נספר בתקרה. */
+  /** true אחרי ש-Google אישרה את ה-scopes הרגישים (calendar.events, gmail.send, tasks). עד אז גם חיבור רגיל נספר בתקרה. */
   GOOGLE_SENSITIVE_SCOPES_VERIFIED: z.preprocess((v) => (v === "" ? undefined : v), z.stringbool().default(false)),
 
   // ---- תפעול ----

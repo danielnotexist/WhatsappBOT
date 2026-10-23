@@ -7,6 +7,7 @@ import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot } from "@/components/brand/mascot";
 import { ProviderLogo, WhatsappGlyph } from "@/components/brand/provider-logo";
+import { ServiceRow } from "@/components/brand/service-row";
 import { SupportChat } from "@/components/brand/support-chat";
 import { UsageMeter } from "@/components/brand/usage-meter";
 import { Wordmark } from "@/components/brand/wordmark";
@@ -15,6 +16,8 @@ import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
 import { PLANS, TRIAL_MESSAGES } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
+import { googleReadGates } from "@/lib/connections/gates";
+import { connectionServices, type ServiceView } from "@/lib/connections/services";
 import { getDb } from "@/lib/db";
 import type { ConnectionRow, SubscriptionRow, WaIdentityRow } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
@@ -102,6 +105,9 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const payHref = `/pay/${createPayLinkToken(user.id)}`;
   const microsoft = connectionFor(connections, "microsoft");
   const google = connectionFor(connections, "google");
+  // the services behind each connected account, from its granted scopes (+ the Google user cap for the restricted reads)
+  const msServices = microsoft.state === "active" && microsoft.row ? connectionServices(microsoft.row) : null;
+  const googleServices = google.state === "active" && google.row ? connectionServices(google.row, { gates: await googleReadGates(db, google.row.account_email) }) : null;
   const linked = linkedPhones(phones);
   const meter = usageView(subscription, usage, now, tz);
   const name = firstName(user.name);
@@ -134,10 +140,10 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
       {error && !atAgents ? <Banner kind="error" text={error} /> : null}
 
       <div className="grid gap-x-16 gap-y-14 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_auto_auto_1fr]">
-        <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} קוראת ושולחת מייל, ורואה את היומן. ניתוק מוחק את הגישה אצלנו.`} className="lg:col-start-1 lg:row-start-1">
+        <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} עובדת עם המייל, היומן, המשימות והקבצים. ניתוק מוחק את הגישה אצלנו.`} className="lg:col-start-1 lg:row-start-1">
           <ul className="divide-y divide-line border-y border-line">
-            <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" {...microsoft} />
-            <ConnectionItem provider="google" title="Google" product="Gmail" {...google} />
+            <ConnectionItem provider="microsoft" title="Microsoft 365" product="Outlook" services={msServices} {...microsoft} />
+            <ConnectionItem provider="google" title="Google" product="Gmail" services={googleServices} {...google} />
           </ul>
         </Section>
 
@@ -204,7 +210,21 @@ function Status({ state, children }: { state: ConnectionState; children?: ReactN
   );
 }
 
-function ConnectionItem({ provider, title, product, row, state }: { provider: "microsoft" | "google"; title: string; product: string; row: ConnectionRow | null; state: ConnectionState }) {
+function ConnectionItem({
+  provider,
+  title,
+  product,
+  row,
+  state,
+  services,
+}: {
+  provider: "microsoft" | "google";
+  title: string;
+  product: string;
+  row: ConnectionRow | null;
+  state: ConnectionState;
+  services: ServiceView[] | null;
+}) {
   const action =
     state === "active" && row ? (
       <form action={disconnectAction}>
@@ -227,6 +247,7 @@ function ConnectionItem({ provider, title, product, row, state }: { provider: "m
       }
       title={title}
       action={action}
+      footer={services?.length ? <ServiceRow services={services} label={`שירותים ב-${title}`} /> : null}
     >
       <Status state={state} />
       {row?.account_email && state !== "none" ? (

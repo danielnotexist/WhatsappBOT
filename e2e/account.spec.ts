@@ -10,9 +10,9 @@ async function signup(ctx: BrowserContext): Promise<string> {
   return email;
 }
 
-/** Stand in for Microsoft one hop early (Playwright does not route the target of a server redirect). */
-async function approveMicrosoft(ctx: BrowserContext) {
-  await ctx.route("**/api/auth/microsoft/start**", async (route) => {
+/** Stand in for Microsoft (or Google) one hop early (Playwright does not route the target of a server redirect). */
+async function approveMicrosoft(ctx: BrowserContext, provider: "microsoft" | "google" = "microsoft") {
+  await ctx.route(`**/api/auth/${provider}/start**`, async (route) => {
     const res = await route.fetch({ maxRedirects: 0 });
     const authorize = new URL(res.headers()["location"]!);
     const back = new URL(authorize.searchParams.get("redirect_uri")!);
@@ -83,6 +83,18 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page).toHaveURL(/\/account\?notice=/);
     await expect(page.getByRole("status").filter({ hasText: "Microsoft 365" })).toBeVisible();
     await expect(page.getByText("אני זמינה בוואטסאפ ומחוברת ל-Outlook.")).toBeVisible();
+    // the services behind the account: one named icon each, a tooltip on hover; Esc closes it
+    const services = page.getByRole("list", { name: "שירותים ב-Microsoft 365" });
+    await expect(services.getByRole("listitem")).toHaveCount(6);
+    const todo = services.getByRole("button", { name: "Microsoft To Do - מחובר" });
+    // right after the OAuth landing the row may not be hydrated yet: move away and hover again until it answers
+    await expect(async () => {
+      await page.mouse.move(1, 1);
+      await todo.hover();
+      await expect(page.getByRole("tooltip").filter({ hasText: "הצגה והוספה של משימות" })).toBeVisible({ timeout: 1_000 });
+    }).toPass();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
     await page.getByRole("button", { name: "ניתוק Microsoft 365" }).click();
     await expect(page.getByRole("status").filter({ hasText: "החיבור ל-Microsoft 365 נותק." })).toBeVisible();
     await expect(page.getByRole("link", { name: "חיבור Microsoft 365" })).toBeVisible();
@@ -101,6 +113,34 @@ test.describe("personal area — same server actions, new design", () => {
     await page.getByRole("button", { name: /^ניתוק המספר/ }).click();
     await expect(page.getByRole("status").filter({ hasText: "המספר נותק" })).toBeVisible();
     await expect(page.getByText("עוד לא קושר מספר", { exact: true })).toBeVisible();
+    await ctx.close();
+  });
+
+  test("Google: the services row under the account, a tooltip on keyboard focus, no horizontal scroll at 390px", async ({ browser }) => {
+    const ctx = await newContext(browser, { width: 390, height: 844 });
+    await signup(ctx);
+    const page = await ctx.newPage();
+    await approveMicrosoft(ctx, "google");
+    await page.goto("/account");
+    await page.getByRole("link", { name: "חיבור Google" }).click();
+    await expect(page).toHaveURL(/\/account\?notice=/);
+    const services = page.getByRole("list", { name: "שירותים ב-Google" });
+    await expect(services.getByRole("listitem")).toHaveCount(7);
+    await expect(services.getByRole("button", { name: "Google Tasks - מחובר" })).toBeVisible();
+    // memory mode has no Google project: the restricted Drive read is off → the Docs family is unavailable
+    await expect(services.getByRole("button", { name: "Google Docs - לא זמין" })).toHaveAttribute("data-status", "unavailable");
+    const gmail = services.getByRole("button", { name: "Gmail - מחובר" });
+    const tip = page.getByRole("tooltip");
+    await expect(async () => {
+      await gmail.blur();
+      await gmail.focus();
+      await expect(tip).toBeVisible({ timeout: 1_000 });
+    }).toPass();
+    await expect(tip).toContainText("שליחת מיילים אחרי אישור");
+    const box = (await tip.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await ctx.close();
   });
 

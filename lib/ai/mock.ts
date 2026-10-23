@@ -41,17 +41,28 @@ function hasToolResult(req: CompletionRequest, name: string): boolean {
   return req.messages.some((m) => m.role === "tool" && m.results.some((r) => r.name === name));
 }
 
-/** the `reply` a tool suggested (reminder tools return the exact Hebrew answer) */
-function toolReply(req: CompletionRequest, names: string[]): string | null {
+/** the `reply` a tool suggested (reminder tools return the exact Hebrew answer); `key: "say"` for a consent/status line */
+function toolReply(req: CompletionRequest, names: string[], key: "reply" | "say" = "reply"): string | null {
   for (const m of req.messages) {
     if (m.role !== "tool") continue;
     for (const r of m.results) {
-      const reply = (r.output as { reply?: unknown } | null)?.reply;
+      const reply = (r.output as Record<string, unknown> | null)?.[key];
       if (names.includes(r.name) && typeof reply === "string") return reply;
     }
   }
   return null;
 }
+
+/** the output of a tool already called this turn */
+function toolOutput(req: CompletionRequest, names: string[]): Record<string, unknown> | null {
+  for (const m of req.messages) {
+    if (m.role !== "tool") continue;
+    for (const r of m.results) if (names.includes(r.name)) return (r.output as Record<string, unknown> | null) ?? {};
+  }
+  return null;
+}
+
+const TASK_TOOLS = { create: ["todo_create_task", "gtasks_create_task"], list: ["todo_list_tasks", "gtasks_list_tasks"] };
 
 function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   const text = lastUserText(req);
@@ -65,6 +76,23 @@ function heuristic(req: CompletionRequest): Partial<CompletionResponse> {
   // reminders (Milestone 5): pass the whole message as `when`; the parser finds the time and the text
   const reminderReply = toolReply(req, ["create_reminder", "list_reminders", "cancel_reminder"]);
   if (reminderReply) return { text: reminderReply };
+  // tasks (Microsoft To Do / Google Tasks): a consent line, the "added" echo, or the open tasks as a list
+  const taskSay = toolReply(req, [...TASK_TOOLS.create, ...TASK_TOOLS.list], "say") ?? toolReply(req, TASK_TOOLS.create);
+  if (taskSay) return { text: taskSay };
+  const listed = toolOutput(req, TASK_TOOLS.list) as { tasks?: { title: string; due: string | null }[] } | null;
+  if (listed) {
+    const rows = (listed.tasks ?? []).slice(0, 8).map((t) => `• ${t.title}${t.due ? ` (עד ${Number(t.due.slice(8, 10))}.${Number(t.due.slice(5, 7))})` : ""}`);
+    return { text: rows.length ? `המשימות הפתוחות:\n${rows.join("\n")}` : "אין משימות פתוחות." };
+  }
+  const createTask = TASK_TOOLS.create.find((t) => tools.has(t));
+  if (createTask && /משימה/.test(text) && /תוסיפ|להוסיף|הוסיפ|חדשה/.test(text)) {
+    const title = text.replace(/^.*?משימה\s*(חדשה)?\s*[:,-]?\s*/, "").trim() || text;
+    return { toolCalls: [{ id: "call_task_1", name: createTask, input: { title, notes: "", due_date: "" } }], stopReason: "tool_use", text: "" };
+  }
+  const listTasks = TASK_TOOLS.list.find((t) => tools.has(t));
+  if (listTasks && /משימות/.test(text)) {
+    return { toolCalls: [{ id: "call_tasks_1", name: listTasks, input: { include_completed: false } }], stopReason: "tool_use", text: "" };
+  }
   if (tools.has("create_reminder") && /תזכיר|תזכורת ל/.test(text)) {
     return { toolCalls: [{ id: "call_reminder_1", name: "create_reminder", input: { text: "", when: text } }], stopReason: "tool_use", text: "" };
   }

@@ -5,18 +5,22 @@ import type { ConnectionRow, PendingActionRow } from "@/lib/db/types";
 import type { ActionExecutor } from "@/lib/bot/pending";
 import { connectLinkFor, type BotContext } from "@/lib/bot/context";
 import { GoogleApiError, GOOGLE_DOC_MIME, GOOGLE_SHEET_MIME, GOOGLE_SLIDES_MIME, type GoogleClient, type GoogleEvent } from "./client";
+import { driveReadStatus } from "./consent";
 import { driveFileText } from "./drive-text";
 import { googleErrorOutput } from "./errors";
 import { gmailReadStatus, gmailReadTools } from "./gmail-tools";
 import { MimeError, isValidEmail, type MimeAttachment } from "./mime";
-import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, gmailReadActive, hasScope } from "./oauth";
+import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, driveReadActive, gmailReadActive, hasScope, type GoogleFeature } from "./oauth";
+import { googleTasksTools } from "./tasks-tools";
 import { connectHeadsUpSuffix } from "./user-cap";
 import { DATE_RE, TIME_RE, addMinutesLocal, freeSlots, localToInstant, minutesBetweenLocal, wallClock } from "./time";
 
 /**
  * Tools exposed to the strong model while a Google connection is active (PLAN §11 milestone 6, phase 1).
- * Names are prefixed (gcal_/gdrive_/gmail_) so they coexist with the Microsoft Graph tools; outbound tools only
+ * Names are prefixed (gcal_/gdrive_/gmail_/gtasks_) so they coexist with the Microsoft Graph tools; outbound tools only
  * create pending actions tagged `provider: "google"` — execution happens after the button press.
+ * A capability the connection lacks answers with its incremental-consent link (gmail_read_status, gdrive_read_status,
+ * and the gtasks_* tools themselves), so the assistant can always say what is missing and how to add it.
  */
 export interface GoogleToolDeps {
   google: () => Promise<GoogleClient>;
@@ -28,6 +32,10 @@ export interface GoogleToolDeps {
   gmailConsentLink?: () => string;
   /** GOOGLE_GMAIL_READ_ENABLED (the kill switch); default: read from the environment, fail closed */
   gmailReadEnabled?: boolean;
+  /** one-time chat link for another incremental consent (`tasks`, `drive_read`) — lib/google/consent.ts googleConsentLink */
+  consentLink?: (feature: GoogleFeature) => string;
+  /** GOOGLE_DRIVE_READ_ENABLED (the kill switch for drive.readonly); default: read from the environment, fail closed */
+  driveReadEnabled?: boolean;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -61,6 +69,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
     }
   };
   const tools: Tool[] = [];
+  const consentFor = (feature: GoogleFeature) => (deps.consentLink ? () => deps.consentLink!(feature) : undefined);
   /** Who a change or a cancellation of an event reaches (its attendees but the user), for an agent limited to a list. */
   const attendeesOf = async (id: string): Promise<string[] | { error: string }> =>
     (await guard(async (g) => (await g.getEvent(id, deps.timeZone)).attendees.filter((a) => !a.self).map((a) => a.email.trim().toLowerCase()).filter(Boolean))) as string[] | { error: string };
@@ -136,17 +145,22 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
     );
   }
 
-  if (hasScope(granted, GOOGLE_SCOPES.driveFile)) {
+  // drive.readonly granted AND switched on (GOOGLE_DRIVE_READ_ENABLED): search and read every file in the Drive
+  const driveFull = hasScope(granted, GOOGLE_SCOPES.driveReadonly) && (deps.driveReadEnabled ?? driveReadActive());
+  if (hasScope(granted, GOOGLE_SCOPES.driveFile) || driveFull) {
     tools.push(
       {
         name: "gdrive_list_files",
-        description: "קבצים ב-Google Drive שהמשתמש פתח או שיתף דרכנו, או שנוצרו על ידינו (הרשאת drive.file — לא כל ה-Drive). חיפוש לפי שם; ריק = האחרונים.",
+        description: driveFull
+          ? "מחפש קבצים בכל ה-Google Drive של המשתמש (Docs, Sheets, Slides, PDF, Word ועוד) לפי שם או תוכן; ריק = האחרונים. מחזיר מזהים ל-gdrive_get_file_text."
+          : "קבצים ב-Google Drive שהמשתמש פתח או שיתף דרכנו, או שנוצרו על ידינו (הרשאת drive.file — לא כל ה-Drive). חיפוש לפי שם; ריק = האחרונים.",
         readOnly: true,
-        input_schema: { type: "object", properties: { query: str("חלק משם הקובץ, או ריק") }, required: ["query"], additionalProperties: false },
+        input_schema: { type: "object", properties: { query: str(driveFull ? "מילים משם הקובץ או מהתוכן, או ריק" : "חלק משם הקובץ, או ריק") }, required: ["query"], additionalProperties: false },
         run: (input) =>
           guard(async (g) => {
-            const files = await g.listFiles({ query: String(input.query ?? ""), pageSize: 10 });
-            return { count: files.length, files: files.map((f) => ({ id: f.id, name: f.name, modified: f.modifiedTime.slice(0, 10), type: f.mimeType })), note: files.length ? undefined : "רק קבצים שנפתחו או נוצרו דרך האפליקציה נגישים. קבצים אחרים — אפשר לשמור עותק דרך האתר (בקרוב) או לשלוח אותם כאן בשיחה." };
+            const files = await g.listFiles({ query: String(input.query ?? ""), pageSize: 10, fullText: driveFull });
+            const note = files.length || driveFull ? undefined : "רק קבצים שנפתחו או נוצרו דרך האפליקציה נגישים. לחיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) צריך אישור נוסף: gdrive_read_status מחזיר מה לומר למשתמש.";
+            return { count: files.length, files: files.map((f) => ({ id: f.id, name: f.name, modified: f.modifiedTime.slice(0, 10), type: f.mimeType })), note };
           }),
       },
       {
@@ -163,6 +177,10 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
             return { name: file.name, pages: res.pages, truncated: res.truncated, text: res.text };
           }),
       },
+    );
+  }
+  if (hasScope(granted, GOOGLE_SCOPES.driveFile)) {
+    tools.push(
       {
         name: "gdrive_save_doc",
         description: "שומר טקסט (סיכום, טיוטה, רשימה) כמסמך Google Docs חדש ב-Drive של המשתמש עצמו. לא משתף עם אף אחד, ולכן לא דורש אישור. להשתמש רק כשהמשתמש ביקש לשמור.",
@@ -223,7 +241,21 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
       description: "להפעיל כשמבקשים לקרוא, לחפש או לסכם מיילים בתיבת Gmail (עדיין אין הרשאת קריאה). מחזיר מה לומר למשתמש — אם יש ב-say קישור, להעביר אותו כלשונו.",
       readOnly: true,
       input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-      run: async (_input, ctx) => gmailReadStatus(ctx.db, { accountEmail: deps.accountEmail, consentLink: deps.gmailConsentLink }),
+      run: async (_input, ctx) => gmailReadStatus(ctx.db, { accountEmail: deps.accountEmail, consentLink: deps.gmailConsentLink ?? consentFor("gmail_read") }),
+    });
+  }
+
+  // Google Tasks: the tools answer with the consent link while the `tasks` scope is missing
+  tools.push(...googleTasksTools({ google: deps.google, granted: hasScope(granted, GOOGLE_SCOPES.tasks), consentLink: consentFor("tasks") }));
+
+  if (!driveFull) {
+    // existing Docs / Sheets / Slides need drive.readonly (restricted, under the user cap): link, or one line when unavailable
+    tools.push({
+      name: "gdrive_read_status",
+      description: "להפעיל כשמבקשים לחפש או לקרוא קבצים קיימים ב-Google Drive (מסמכי Docs, גיליונות Sheets, מצגות Slides) שלא נוצרו דרכנו. מחזיר מה לומר למשתמש; אם יש ב-say קישור, להעביר אותו כלשונו.",
+      readOnly: true,
+      input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+      run: async (_input, ctx) => driveReadStatus(ctx.db, { accountEmail: deps.accountEmail, consentLink: consentFor("drive_read") }),
     });
   }
   return tools;

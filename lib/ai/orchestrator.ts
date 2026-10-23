@@ -2,6 +2,7 @@ import { toolsForAgent } from "@/lib/agents/capabilities";
 import { dailyCapMessage, guardAgentAction } from "@/lib/agents/guard";
 import { maxOutboundPerDay, type ResolvedAgent } from "@/lib/agents/policy";
 import { agentChoices, buildAgentSection, buildRouterAgentBlock } from "@/lib/agents/prompt";
+import { activeServicesFor } from "@/lib/connections/services";
 import { AgentDailyCapError } from "@/lib/db/errors";
 import type { AgentKey, ConnectionRow, Db, PendingActionRow, UserRow } from "@/lib/db/types";
 import { loadMemory } from "./memory";
@@ -90,7 +91,7 @@ export async function runAssistant(input: AssistantInput): Promise<AssistantOutp
     businessType: input.user.business_type,
     timezone: input.user.timezone,
     morningTime: input.user.morning_time,
-    connections: input.connections.filter((c) => c.status === "active").map((c) => ({ provider: c.provider, accountEmail: c.account_email })),
+    connections: input.connections.filter((c) => c.status === "active").map((c) => ({ provider: c.provider, accountEmail: c.account_email, services: activeServicesFor(c) })),
     profile: input.user.profile,
     summary: memory.summary,
     facts: memory.facts,
