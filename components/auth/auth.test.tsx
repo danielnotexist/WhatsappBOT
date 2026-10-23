@@ -245,8 +245,16 @@ describe("ReadyLinkPending — the ready card while its token is issued", () => 
 describe("ConnectStep and Toggle", () => {
   it("offers Microsoft first, then Gmail, then skip; shows the IT link only when needed", () => {
     const { rerender } = render(<ConnectStep />);
-    const links = screen.getAllByRole("link").map((l) => l.textContent);
-    expect(links).toEqual(["חיבור Microsoft 365 / Outlook", "חיבור Gmail", "דילוג בינתיים"]);
+    // the tiles are named by their action (aria-label), the skip by its text
+    const links = screen.getAllByRole("link").map((l) => [l.getAttribute("aria-label") ?? l.textContent, l.getAttribute("href")]);
+    expect(links).toEqual([
+      ["חיבור Microsoft 365 / Outlook", "/connect/microsoft"],
+      ["חיבור Gmail / Google", "/connect/google"],
+      ["דילוג בינתיים", "/start/ready"],
+    ]);
+    // what each account unlocks is the tile's description; Microsoft carries the handwritten note
+    expect(screen.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" })).toHaveAccessibleDescription("הנפוץ במשרדים Outlook, יומן, Teams ו-OneDrive");
+    expect(screen.getByRole("link", { name: "חיבור Gmail / Google" })).toHaveAccessibleDescription("Gmail, יומן, Meet ו-Drive");
     rerender(<ConnectStep error="הארגון דורש אישור חד-פעמי של מנהל ה-IT." adminLink="https://x.example/a" />);
     expect(screen.getByRole("alert")).toHaveTextContent("מנהל ה-IT");
     expect(screen.getByRole("link", { name: "שליחה למנהל ה-IT" }).getAttribute("href")).toMatch(/^mailto:/);
