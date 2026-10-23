@@ -164,7 +164,7 @@ export function AccessibilityWidget() {
           setOpen(true);
         }}
         className={cn(
-          "fixed end-4 bottom-[var(--fab-bottom)] z-40 grid size-10 place-items-center rounded-full border border-line bg-night-2/90 text-cream-muted shadow-[0_8px_24px_-10px_rgb(0_0_0/0.8)] backdrop-blur-sm transition-colors hover:border-cream-muted/50 hover:text-cream",
+          "fixed end-4 bottom-[var(--fab-bottom)] z-40 grid size-11 place-items-center rounded-full border border-line bg-night-2/90 text-cream-muted shadow-[0_8px_24px_-10px_rgb(0_0_0/0.8)] backdrop-blur-sm transition-colors hover:border-cream-muted/50 hover:text-cream",
           open && "border-cream-muted/50 text-cream",
         )}
       >

@@ -362,3 +362,8 @@ html[data-a11y-motion] *::after {
 html[data-a11y-motion] {
   scroll-behavior: auto !important;
 }
+/* the connect tiles' hover/focus lift and chevron nudge are moves, not transitions: hold them still too */
+html[data-a11y-motion] [data-slot="step-body"] .group,
+html[data-a11y-motion] [data-slot="step-body"] .group svg {
+  translate: none !important;
+}

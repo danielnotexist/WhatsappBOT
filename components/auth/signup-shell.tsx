@@ -96,6 +96,13 @@ export function ShellFrame({
               ? cn(
                   "items-center sm:justify-center sm:px-6 sm:pb-16 lg:px-8",
                   deck.length ? "pt-7 sm:pt-10" : "pt-2 sm:pt-4",
+                  // wide screens: centred, but never higher than the hoopoe standing on the paper allows — a taller card
+                  // (an error box) moves down instead of pushing her crest into the header. Two flex spacers: the top one
+                  // keeps a floor (paper top at least 10.5rem under the header, with the padding above), the bottom one
+                  // takes the rest.
+                  tone !== "ready" &&
+                    "lg:justify-start lg:before:flex-1 lg:before:content-[''] lg:after:flex-1 lg:after:content-['']",
+                  tone !== "ready" && (deck.length ? "lg:before:min-h-[8rem]" : "lg:before:min-h-[9.5rem]"),
                 )
               : "px-4 sm:px-8",
           )}

@@ -81,7 +81,10 @@ export function StepMascot({ pose }: { pose: MascotPoseName }) {
   );
 }
 
-/** The answer side of a step: the fields and the actions. Always on the paper. */
+/**
+ * The answer side of a step: the fields and the actions. Always on the paper. On phones its bottom padding clears the
+ * fixed accessibility button (`--fab-bottom`, app/globals.css), so scrolled to the end nothing on the card sits under it.
+ */
 export function StepBody({ children, className }: { children: ReactNode; className?: string }) {
   const entrance = useEntrance("body", 0.16);
   return (
@@ -89,7 +92,7 @@ export function StepBody({ children, className }: { children: ReactNode; classNa
       data-slot="step-body"
       {...entrance}
       className={cn(
-        "relative z-10 col-start-1 row-start-2 flex min-w-0 flex-col px-6 pt-8 pb-7 sm:px-10 sm:pb-9",
+        "relative z-10 col-start-1 row-start-2 flex min-w-0 flex-col px-6 pt-8 pb-[calc(var(--fab-bottom)+3.5rem)] sm:px-10 sm:pb-9",
         "lg:col-start-2 lg:row-start-1 lg:px-10 lg:pt-10 lg:pb-9",
         className,
       )}
