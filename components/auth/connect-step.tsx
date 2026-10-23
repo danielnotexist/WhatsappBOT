@@ -9,9 +9,16 @@ import { StepAside, StepBody, StepMascot } from "./step-slots";
 
 /**
  * One provider as a tile on the paper: the official logo on white (both brands ask for it), the account's name, the
- * products she works in once it is connected, and a quiet chevron toward the inline end. A real link to the hand-off
- * screen; its accessible name is the action ("חיבור Gmail / Google"), the products line its description.
- * Hover and keyboard focus lift it a little and fill the chevron with ink (no lift under reduced motion).
+ * products she works in today once it is connected (only what works now: no "coming soon" promises here), and a quiet
+ * chevron toward the inline end.
+ *  - The link is the account's name, stretched over the whole tile (its ::after), so the tile is one big target while
+ *    the link holds only text that is part of its name: "חיבור Gmail / Google" contains the visible "Google"
+ *    (WCAG 2.5.3, label in name). The note and the products line sit beside it as its description, aria-hidden as
+ *    content, so they are read once (as the description), never twice.
+ *  - Only the tile under the pointer or the keyboard changes: a 2px lift, an ink border (on focus also the email field's
+ *    soft halo and the outer outline of every focusable on the paper) and the chevron filling with ink and nudging
+ *    toward the reading end. No movement under reduced motion.
+ *  - `scroll-mb-*` keeps a focused tile clear of the fixed accessibility button on phones.
  */
 function ProviderTile({
   provider,
@@ -32,23 +39,22 @@ function ProviderTile({
   const tagId = `connect-${provider}-tag`;
   const last = products.length - 1;
   return (
-    <Link
-      href={provider === "microsoft" ? "/connect/microsoft" : "/connect/google"}
-      aria-label={label}
-      aria-describedby={tag ? `${tagId} ${productsId}` : productsId}
+    <div
       className={cn(
-        "group relative flex min-h-[5.5rem] items-center gap-4 rounded-field border-2 border-ink/12 bg-paper/75 px-4 py-4 text-ink sm:gap-5 sm:px-5",
+        "group relative flex min-h-[5.25rem] items-center gap-4 rounded-field border-2 border-ink/12 bg-paper/75 px-4 py-3.5 text-ink sm:gap-5 sm:px-5",
         "transition-[translate,background-color,border-color,box-shadow] duration-200 ease-out",
-        "hover:-translate-y-0.5 hover:border-ink/40 hover:bg-paper hover:shadow-[0_18px_30px_-22px_rgb(19_36_28/0.75)]",
-        "focus-visible:-translate-y-0.5 focus-visible:border-ink focus-visible:bg-paper focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-ink",
-        "active:translate-y-0 active:shadow-none motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:focus-visible:translate-y-0",
+        "hover:-translate-y-0.5 hover:border-ink/45 hover:bg-paper hover:shadow-[0_14px_24px_-20px_rgb(19_36_28/0.7)]",
+        "has-[a:focus-visible]:-translate-y-0.5 has-[a:focus-visible]:border-ink has-[a:focus-visible]:bg-paper has-[a:focus-visible]:shadow-[0_0_0_4px_rgb(19_36_28/0.16)]",
+        "has-[a:focus-visible]:outline-3 has-[a:focus-visible]:outline-offset-4 has-[a:focus-visible]:outline-ink has-[a:focus-visible]:outline-solid",
+        "has-[a:active]:translate-y-0 motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:has-[a:focus-visible]:translate-y-0",
       )}
     >
       {tag ? (
         // a note stuck on the tile's top edge, slightly turned like the handwritten lines above the headlines
         <span
           id={tagId}
-          className="absolute end-4 -top-3 -rotate-2 rounded-[0.3125rem] bg-honey px-2 py-0.5 font-hand text-[0.8125rem] leading-tight font-semibold text-ink shadow-[0_4px_10px_-6px_rgb(19_36_28/0.6)] sm:end-5"
+          aria-hidden="true"
+          className="pointer-events-none absolute end-4 -top-3.5 -rotate-2 rounded-[0.3125rem] bg-honey px-2 py-0.5 font-hand text-[0.875rem] leading-tight font-semibold whitespace-nowrap text-ink shadow-[0_4px_10px_-6px_rgb(19_36_28/0.6)] sm:end-5"
         >
           {tag}
         </span>
@@ -60,8 +66,15 @@ function ProviderTile({
         {logo}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="text-[1.125rem] leading-tight font-bold">{name}</span>
-        <span id={productsId} className="text-[0.9375rem] leading-snug text-ink-muted">
+        <Link
+          href={provider === "microsoft" ? "/connect/microsoft" : "/connect/google"}
+          aria-label={label}
+          aria-describedby={tag ? `${tagId} ${productsId}` : productsId}
+          className="scroll-mt-24 scroll-mb-28 self-start text-[1.125rem] leading-tight font-bold outline-none after:absolute after:-inset-0.5 after:rounded-field after:content-['']"
+        >
+          {name}
+        </Link>
+        <span id={productsId} aria-hidden="true" className="text-[0.9375rem] leading-snug text-ink-muted">
           {/* each product unbroken ("ו-OneDrive" never splits); lines break only between products */}
           {products.map((p, i) => (
             <Fragment key={p}>
@@ -73,13 +86,16 @@ function ProviderTile({
       </span>
       <span
         aria-hidden="true"
-        className="grid size-9 flex-none place-items-center rounded-full border-2 border-ink/20 transition-[background-color,border-color,color] duration-200 group-hover:border-ink group-hover:bg-ink group-hover:text-cream group-focus-visible:border-ink group-focus-visible:bg-ink group-focus-visible:text-cream"
+        className="grid size-9 flex-none place-items-center rounded-full border-2 border-ink/20 transition-[background-color,border-color,color] duration-200 group-hover:border-ink group-hover:bg-ink group-hover:text-cream group-has-[a:focus-visible]:border-ink group-has-[a:focus-visible]:bg-ink group-has-[a:focus-visible]:text-cream motion-reduce:transition-none"
       >
-        <svg viewBox="0 0 24 24" className="size-4 fill-none stroke-current stroke-[2.6] rtl:-scale-x-100">
+        <svg
+          viewBox="0 0 24 24"
+          className="size-4 fill-none stroke-current stroke-[2.6] transition-transform duration-200 ease-out rtl:-scale-x-100 ltr:group-hover:translate-x-0.5 ltr:group-has-[a:focus-visible]:translate-x-0.5 rtl:group-hover:-translate-x-0.5 rtl:group-has-[a:focus-visible]:-translate-x-0.5 motion-reduce:transition-none motion-reduce:translate-x-0!"
+        >
           <path d="m9 5 7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </span>
-    </Link>
+    </div>
   );
 }
 
@@ -137,7 +153,7 @@ export function adminMailto(adminLink: string): string {
 /** Why the last connection failed (the OAuth callback's `?error=`), and the IT-admin mail when the organisation needs one. */
 export function ConnectError({ error, adminLink }: { error: string; adminLink?: string | null }) {
   return (
-    <div role="alert" className="mb-6 rounded-field border-2 border-destructive/40 bg-white/40 p-4 text-[0.9375rem] leading-snug">
+    <div role="alert" className="mb-5 rounded-field border-2 border-destructive/40 bg-white/40 px-4 py-3.5 text-[0.9375rem] leading-snug">
       <p className="font-semibold text-destructive">{error}</p>
       {adminLink ? (
         <p className="mt-2">
@@ -184,35 +200,39 @@ export function ConnectStep({ error, adminLink, notice }: { error?: string; admi
         <p id="connect-choice" className="text-[0.9375rem] font-semibold">
           איפה המייל שלך?
         </p>
-        <div role="group" aria-labelledby="connect-choice" className="mt-4 flex flex-col gap-4">
+        <div role="group" aria-labelledby="connect-choice" className="mt-4 flex flex-col gap-3">
           {/* Microsoft first: the primary market. Official logos on white (Microsoft / Google branding). */}
           <ProviderTile
             provider="microsoft"
             label="חיבור Microsoft 365 / Outlook"
             name="Microsoft 365"
             tag="הנפוץ במשרדים"
-            products={["Outlook", "יומן", "Teams", "OneDrive"]}
+            products={["Outlook", "יומן", "OneDrive"]}
             logo={<MicrosoftLogo className="size-[1.3125rem]" />}
           />
           <ProviderTile
             provider="google"
             label="חיבור Gmail / Google"
             name="Google"
-            products={["Gmail", "יומן", "Meet", "Drive"]}
+            products={["Gmail", "יומן", "Drive"]}
             logo={<GoogleLogo className="size-6" />}
           />
         </div>
-        <p className="mt-4 flex flex-wrap items-center justify-center gap-x-1 text-center text-[0.875rem] text-ink-muted">
-          <span>אפשר לחבר גם אחר כך, מהאזור האישי.</span>
-          <Link
-            href="/start/ready"
-            className="inline-flex min-h-11 items-center rounded-md px-2 text-[0.9375rem] font-semibold text-ink underline decoration-ink/35 underline-offset-4 transition-colors hover:decoration-ink"
-          >
-            דילוג בינתיים
-          </Link>
-        </p>
-        <div className="mt-auto flex items-end justify-between gap-4 pt-8">
-          <StepProgress step={3} />
+        {/* the worry at the moment of choosing, in the code step's helper style */}
+        <p className="mt-4 text-[0.9375rem] leading-snug text-ink-muted">הסיסמה לא עוברת דרכנו, ואפשר לנתק בכל רגע.</p>
+
+        {/* footer: progress and skip share one row (phones: next to the hoopoe; wide screens: progress at the start,
+            skip at the end, the hoopoe standing on the paper's top edge) */}
+        <div className="mt-auto flex items-end justify-between gap-4 pt-8 lg:items-center lg:pt-7">
+          <div className="flex flex-wrap items-center gap-x-3 lg:contents">
+            <StepProgress step={3} />
+            <Link
+              href="/start/ready"
+              className="-ms-2 inline-flex min-h-11 scroll-mb-24 items-center rounded-md px-2 text-[0.9375rem] font-semibold text-ink underline decoration-ink/40 underline-offset-4 hover:decoration-ink lg:ms-0 lg:-me-2"
+            >
+              דילוג בינתיים
+            </Link>
+          </div>
           <StepMascot pose="thinking" />
         </div>
       </StepBody>

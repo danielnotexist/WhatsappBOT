@@ -252,9 +252,15 @@ describe("ConnectStep and Toggle", () => {
       ["חיבור Gmail / Google", "/connect/google"],
       ["דילוג בינתיים", "/start/ready"],
     ]);
-    // what each account unlocks is the tile's description; Microsoft carries the handwritten note
-    expect(screen.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" })).toHaveAccessibleDescription("הנפוץ במשרדים Outlook, יומן, Teams ו-OneDrive");
-    expect(screen.getByRole("link", { name: "חיבור Gmail / Google" })).toHaveAccessibleDescription("Gmail, יומן, Meet ו-Drive");
+    // what each account unlocks today is the tile's description (nothing marked "בקרוב" in the catalogue);
+    // Microsoft's handwritten note is read once, as part of that description, never in the name
+    const ms = screen.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" });
+    expect(ms).toHaveAccessibleDescription("הנפוץ במשרדים Outlook, יומן ו-OneDrive");
+    expect(ms).toHaveAccessibleName("חיבור Microsoft 365 / Outlook");
+    expect(screen.getByRole("link", { name: "חיבור Gmail / Google" })).toHaveAccessibleDescription("Gmail, יומן ו-Drive");
+    for (const tile of screen.getAllByRole("link").slice(0, 2)) expect(tile.textContent).not.toMatch(/Teams|Meet/);
+    // the worry at the moment of choosing
+    expect(screen.getByText("הסיסמה לא עוברת דרכנו, ואפשר לנתק בכל רגע.")).toBeInTheDocument();
     rerender(<ConnectStep error="הארגון דורש אישור חד-פעמי של מנהל ה-IT." adminLink="https://x.example/a" />);
     expect(screen.getByRole("alert")).toHaveTextContent("מנהל ה-IT");
     expect(screen.getByRole("link", { name: "שליחה למנהל ה-IT" }).getAttribute("href")).toMatch(/^mailto:/);

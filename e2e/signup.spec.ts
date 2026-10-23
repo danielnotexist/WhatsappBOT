@@ -104,27 +104,33 @@ test.describe("signup — the screen sequence of round plan §3", () => {
   test("Microsoft path: connect → hand-off screen → Microsoft (fixture) → back on /start/ready with Outlook connected", async ({ browser }) => {
     const ctx = await newContext(browser);
     await apiSignup(ctx);
-    // Stand in for login.microsoftonline.com: approve at once and return to our callback with the same state.
+    // Stand in for login.microsoftonline.com one hop earlier, like the Google path: let our start route answer, read the
+    // authorize URL it redirects to, and approve at once (302 straight to our callback). The browser never leaves
+    // localhost. Intercepting the cross-origin redirect itself was flaky: now and then Chromium followed the 303 without
+    // handing the redirected request to the route, the real Microsoft page loaded through the network, and its own
+    // requests (no redirect_uri) reached the handler as "TypeError: Invalid URL".
     let authorizeUrl: URL | null = null;
-    await ctx.route("https://login.microsoftonline.com/**", async (route) => {
-      authorizeUrl = new URL(route.request().url());
-      const back = new URL(authorizeUrl.searchParams.get("redirect_uri")!);
-      back.searchParams.set("code", "e2e-code");
-      back.searchParams.set("state", authorizeUrl.searchParams.get("state")!);
-      await route.fulfill({ status: 302, headers: { location: back.toString() } });
-    });
     // hold the hand-off until the transition screen has been checked (it only shows for ~0.9s)
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     await ctx.route("**/api/auth/microsoft/start**", async (route) => {
       expect(new URL(route.request().url()).searchParams.get("returnTo")).toBe("onboarding");
       await gate;
-      await route.continue();
+      const res = await route.fetch({ maxRedirects: 0 });
+      authorizeUrl = new URL(res.headers()["location"]!);
+      expect(authorizeUrl.hostname).toBe("login.microsoftonline.com");
+      const back = new URL(authorizeUrl.searchParams.get("redirect_uri")!);
+      back.searchParams.set("code", "e2e-code");
+      back.searchParams.set("state", authorizeUrl.searchParams.get("state")!);
+      await route.fulfill({ status: 302, headers: { location: back.toString() } });
     });
+    // and should anything still head for Microsoft, fail here instead of loading the real sign-in page
+    await ctx.route("https://login.microsoftonline.com/**", (route) => route.abort("blockedbyclient"));
     const page = await ctx.newPage();
     await page.goto("/start/connect");
     await page.getByRole("link", { name: "חיבור Microsoft 365 / Outlook" }).click();
-    await expect(page).toHaveURL(/\/connect\/microsoft$/);
+    // a cold dev server compiles the hand-off route on this first visit
+    await expect(page).toHaveURL(/\/connect\/microsoft$/, { timeout: 30_000 });
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("עלזה רוצה להתחבר ל-Outlook שלך");
     await expect(page.getByText("מעבירים אותך ל-Microsoft…")).toBeVisible();
     release();
