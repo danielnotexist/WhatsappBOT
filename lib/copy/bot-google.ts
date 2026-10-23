@@ -3,6 +3,7 @@
  * checks every id is documented). Shared strings (err.connection_expired, act.cal.*, onb.connect_link …) stay in
  * lib/copy/bot.ts and are reused with the provider label "Google".
  */
+import { BRAND } from "@/lib/brand";
 import { GOOGLE_SCOPES } from "@/lib/google/oauth";
 
 export const GOOGLE_LABEL = "Google";
@@ -13,6 +14,8 @@ export const GOOGLE_CAPABILITY: Record<string, { can: string; cannot: string }> 
   [GOOGLE_SCOPES.gmailSend]: { can: "שליחת מיילים מ-Gmail, אחרי אישור בכפתור", cannot: "לשלוח מיילים מ-Gmail" },
   [GOOGLE_SCOPES.driveFile]: { can: "קבצים ב-Drive שנוצרו או נפתחו דרכי", cannot: "לגשת לקבצים ב-Drive" },
   [GOOGLE_SCOPES.gmailReadonly]: { can: "קריאה, חיפוש וסיכום של מיילים ב-Gmail", cannot: "לקרוא מיילים ב-Gmail" },
+  [GOOGLE_SCOPES.tasks]: { can: "הצגה והוספה של משימות ב-Google Tasks", cannot: "לנהל משימות ב-Google Tasks" },
+  [GOOGLE_SCOPES.driveReadonly]: { can: "חיפוש וקריאה של כל הקבצים ב-Drive, כולל Docs, Sheets ו-Slides", cannot: "לחפש ולקרוא את כל הקבצים ב-Drive" },
 };
 
 /** Scopes that map to a user-visible capability (OIDC scopes excluded). */
@@ -35,6 +38,15 @@ export const gcopy = {
   "g.gmail_read.consent": (link: string, headsUp: boolean) => `כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף אחד מ-Google:\n${link}\n${headsUp ? `${UNVERIFIED_HEADS_UP}\n` : ""}הקישור עובד ל-30 הדקות הקרובות.`,
   "g.gmail_read.consent_no_link": () => 'כדי שאוכל לקרוא את תיבת ה-Gmail צריך אישור נוסף מ-Google. אפשר לכתוב "לחבר את גוגל" ואשלח קישור.',
   "g.err.gmail_read_cap_reached": () => "קריאת מיילים ב-Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
+  // ---- Drive read (drive.readonly, restricted: the same user cap as Gmail read) ----
+  "g.drive_read.consent": (link: string, headsUp: boolean) => `כדי שאוכל לחפש ולקרוא את כל הקבצים ב-Drive (כולל Docs, Sheets ו-Slides) צריך אישור נוסף אחד מ-Google:\n${link}\n${headsUp ? `${UNVERIFIED_HEADS_UP}\n` : ""}הקישור עובד ל-30 הדקות הקרובות.`,
+  "g.drive_read.consent_no_link": () => 'כדי שאוכל לקרוא את כל הקבצים ב-Drive צריך אישור נוסף מ-Google. אפשר לכתוב "לחבר את גוגל" ואשלח קישור.',
+  "g.err.drive_read_cap_reached": () => "קריאה של כל הקבצים ב-Drive פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. קבצים שנוצרו דרכי, היומן ו-Gmail ממשיכים לעבוד.",
+  "g.err.drive_read_unavailable": () => "קריאה של כל הקבצים ב-Drive אינה זמינה כרגע. קבצים שנוצרו דרכי, היומן ו-Gmail ממשיכים לעבוד.",
+  // ---- Google Tasks (tasks, sensitive; connections made before 23.10.2026 add it incrementally) ----
+  "g.tasks.consent": (link: string, headsUp: boolean) => `כדי שאוכל לעבוד עם Google Tasks צריך אישור נוסף אחד מ-Google:\n${link}\n${headsUp ? `${UNVERIFIED_HEADS_UP}\n` : ""}הקישור עובד ל-30 הדקות הקרובות.`,
+  "g.tasks.consent_no_link": () => 'כדי שאוכל לעבוד עם Google Tasks צריך אישור נוסף מ-Google. אפשר לכתוב "לחבר את גוגל" ואשלח קישור.',
+  "g.tasks.created": (title: string, list: string, due: string | null) => `נוספה משימה ל-${list}: ${title}${due ? `, עד ${due}` : ""}.`,
   "g.connect_partial": (missing: string[], link: string) => {
     const cannot = missing.map((s) => GOOGLE_CAPABILITY[s]?.cannot).filter(Boolean) as string[];
     return `חלק מההרשאות לא סומנו במסך של Google, ולכן לא אוכל ${joinHe(cannot)}.\nאם זה היה בטעות — אפשר לאשר שוב כאן:\n${link}\nהקישור עובד ל-30 הדקות הקרובות.`;
@@ -57,6 +69,8 @@ export const gcopy = {
   "g.web.link_expired": () => "הקישור לא בתוקף (הוא עובד 30 דקות). אפשר לבקש קישור חדש בשיחה.",
   "g.web.feature_disabled": () => "קריאת Gmail אינה זמינה כרגע. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
   "g.web.gmail_read_cap_reached": () => "קריאת Gmail פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד.",
+  "g.web.drive_read_disabled": () => `קריאה של כל הקבצים ב-Drive אינה זמינה כרגע. היומן, Gmail וקבצים שנוצרו דרך ${BRAND.name} ממשיכים לעבוד.`,
+  "g.web.drive_read_cap_reached": () => `קריאה של כל הקבצים ב-Drive פתוחה כרגע רק למשתמשים הראשונים, והמקומות התמלאו. היומן, Gmail וקבצים שנוצרו דרך ${BRAND.name} ממשיכים לעבוד.`,
 } as const;
 
 export type GoogleCopyId = keyof typeof gcopy;

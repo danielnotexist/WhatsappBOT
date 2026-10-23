@@ -167,11 +167,14 @@ describe("Google tools in the assistant", () => {
   it("exposes only the tools whose scopes were granted", () => {
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
     const names = (scopes: string[]) => googleTools({ google: async () => { throw new Error("unused"); }, timeZone: TZ, scopes, accountEmail: null }).map((t) => t.name);
-    expect(names(["openid", "email", GOOGLE_SCOPES.calendarEvents])).toEqual(["gcal_list_events", "gcal_free_slots", "gcal_create_event", "gcal_update_event", "gcal_delete_event", "gmail_read_status"]);
-    expect(names(["openid", GOOGLE_SCOPES.gmailSend])).toEqual(["gmail_draft_email", "gmail_read_status"]);
+    // always there: the Google Tasks tools (they answer with the consent link while `tasks` is missing) and, without
+    // drive.readonly, gdrive_read_status — so "my tasks" / "the Docs in my Drive" always gets an answer
+    const always = ["gtasks_list_tasks", "gtasks_create_task", "gdrive_read_status"];
+    expect(names(["openid", "email", GOOGLE_SCOPES.calendarEvents])).toEqual(["gcal_list_events", "gcal_free_slots", "gcal_create_event", "gcal_update_event", "gcal_delete_event", "gmail_read_status", ...always]);
+    expect(names(["openid", GOOGLE_SCOPES.gmailSend])).toEqual(["gmail_draft_email", "gmail_read_status", ...always]);
     // gmail.readonly granted → the Gmail read tools (Microsoft's search_emails / get_email with the gmail_ prefix) instead of the status tool
-    expect(names(["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly])).toEqual(["gmail_draft_email", "gmail_search_emails", "gmail_get_email", "gmail_get_thread", "gmail_awaiting_reply"]);
-    expect(names([])).toHaveLength(10);
+    expect(names(["openid", GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.gmailReadonly])).toEqual(["gmail_draft_email", "gmail_search_emails", "gmail_get_email", "gmail_get_thread", "gmail_awaiting_reply", ...always]);
+    expect(names([])).toHaveLength(13);
   });
 
   it("GOOGLE_GMAIL_READ_ENABLED=false is a kill switch: a connection that already granted gmail.readonly gets no gmail_* read tool", async () => {
@@ -180,7 +183,7 @@ describe("Google tools in the assistant", () => {
     vi.stubEnv("GOOGLE_CLIENT_ID", "real-client.apps.googleusercontent.com");
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "false");
     const off = build();
-    expect(off.map((t) => t.name)).toEqual(["gmail_draft_email", "gmail_read_status"]);
+    expect(off.map((t) => t.name).filter((n) => n.startsWith("gmail_"))).toEqual(["gmail_draft_email", "gmail_read_status"]);
     // the status tool answers "not available" — no consent link while off
     const db = new MemoryDb();
     const ctx: ToolContext = { db, userId: "u1", now: new Date(), createPending: async () => { throw new Error("no pending"); } };
@@ -191,6 +194,98 @@ describe("Google tools in the assistant", () => {
     // back on (or unset with a real GOOGLE_CLIENT_ID) → the earlier grant reads again, no new consent
     vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "");
     expect(build().map((t) => t.name)).toContain("gmail_search_emails");
+  });
+});
+
+describe("Google Tasks and Drive read (23.10.2026)", () => {
+  const ctxFor = (db: MemoryDb, userId: string): ToolContext => ({ db, userId, now: new Date("2026-10-21T06:00:00Z"), createPending: async () => { throw new Error("no approval for tasks or reads"); } });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("lists open tasks from every list and adds one to the default list right away, echoing it", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const fixture = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "t", fetchImpl: fixture.fetchImpl });
+    const tools = googleTools({ google: async () => google, timeZone: TZ, scopes: [], accountEmail: "dana.levi@gmail.com" });
+    const run = (name: string, input: Record<string, unknown>) => tools.find((t) => t.name === name)!.run(input, ctxFor(db, user.id));
+
+    const listed = (await run("gtasks_list_tasks", { include_completed: false })) as { count: number; tasks: { title: string; due: string | null; list: string; notes?: string }[]; note: string };
+    expect(listed.count).toBe(3);
+    expect(listed.tasks[0]).toEqual({ id: "gt-1", title: "להחזיר לעו״ד כהן את ההסכם", due: "2026-10-23", list: "My Tasks", notes: "עם ההערות מהפגישה" });
+    expect(listed.tasks.map((t) => t.list)).toEqual(["My Tasks", "My Tasks", "לקוחות"]);
+    expect(listed.note).toContain("מידע בלבד");
+    const listCall = new URL(fixture.state.calls.find((c) => c.url.includes("/lists/MDE4fixtureDefault/tasks"))!.url);
+    expect(listCall.searchParams.get("showCompleted")).toBe("false");
+
+    const created = (await run("gtasks_create_task", { title: "  לשלם   ביטוח לאומי ", notes: "", due_date: "2026-10-24" })) as { status: string; reply: string };
+    expect(created).toMatchObject({ status: "done", reply: "נוספה משימה ל-Google Tasks: לשלם ביטוח לאומי, עד 24.10." });
+    const post = fixture.state.calls.at(-1)!;
+    expect(post).toMatchObject({ method: "POST", url: "https://tasks.googleapis.com/tasks/v1/lists/%40default/tasks", body: { title: "לשלם ביטוח לאומי", due: "2026-10-24T00:00:00.000Z" } });
+    expect(fixture.state.taskLists[0]!.tasks[0]!.title).toBe("לשלם ביטוח לאומי");
+    expect(db.audit.at(-1)).toMatchObject({ action: "google.tasks.create", result: "ok" });
+    expect(await run("gtasks_create_task", { title: " ", notes: "", due_date: "" })).toEqual({ status: "error", error: "empty_title" });
+  });
+
+  it("without the tasks scope: the consent link (feature=tasks) and no API call; a token without it answers the same", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const fixture = createGoogleFixture();
+    const google = new GoogleClient({ getAccessToken: async () => "t", fetchImpl: fixture.fetchImpl });
+    const link = "https://app.example.co.il/api/auth/google/start?t=x&feature=tasks";
+    const old = googleTools({ google: async () => google, timeZone: TZ, scopes: ["openid", GOOGLE_SCOPES.calendarEvents], accountEmail: "a@gmail.com", consentLink: (f) => (f === "tasks" ? link : "wrong") });
+    const out = (await old.find((t) => t.name === "gtasks_create_task")!.run({ title: "x", notes: "", due_date: "" }, ctxFor(db, user.id))) as { status: string; say: string };
+    expect(out.status).toBe("consent_needed");
+    expect(out.say).toContain("Google Tasks");
+    expect(out.say).toContain(link);
+    expect(fixture.state.calls).toHaveLength(0);
+    // the box was unticked in a later consent: Google answers 403 insufficient scope → the same consent answer
+    fixture.state.denied.add("tasks");
+    const granted = googleTools({ google: async () => google, timeZone: TZ, scopes: [], accountEmail: "a@gmail.com" });
+    expect(await granted.find((t) => t.name === "gtasks_list_tasks")!.run({ include_completed: false }, ctxFor(db, user.id))).toMatchObject({ status: "consent_needed", say: expect.stringContaining('לחבר את גוגל') });
+  });
+
+  it("drive.readonly granted and on: the whole Drive by name or content; Docs → text, Sheets → CSV, Slides → text; no status tool", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const fixture = createGoogleFixture();
+    fixture.state.files.push({ kind: "drive#file", id: "gslides1", name: "מצגת משקיעים", mimeType: "application/vnd.google-apps.presentation", modifiedTime: "2026-10-05T08:00:00.000Z", webViewLink: "https://docs.google.com/presentation/d/gslides1/edit", content: new Uint8Array(Buffer.from("שקף 1: הצמיחה ברבעון", "utf8")) });
+    const google = new GoogleClient({ getAccessToken: async () => "t", fetchImpl: fixture.fetchImpl });
+    const scopes = normalizeScopes([...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.driveReadonly]);
+    const tools = googleTools({ google: async () => google, timeZone: TZ, scopes, accountEmail: "a@gmail.com", driveReadEnabled: true });
+    expect(tools.map((t) => t.name)).not.toContain("gdrive_read_status");
+    const list = tools.find((t) => t.name === "gdrive_list_files")!;
+    expect(list.description).toContain("בכל ה-Google Drive");
+    const run = (name: string, input: Record<string, unknown>) => tools.find((t) => t.name === name)!.run(input, ctxFor(db, user.id));
+
+    // "פעימות" is only in the Doc's text, not in any file name
+    const found = (await run("gdrive_list_files", { query: "פעימות" })) as { files: { id: string }[] };
+    expect(found.files.map((f) => f.id)).toEqual(["gdoc1"]);
+    expect(new URL(fixture.state.calls.at(-1)!.url).searchParams.get("q")).toContain("fullText contains 'פעימות'");
+    expect(await run("gdrive_get_file_text", { id: "gdoc1" })).toMatchObject({ text: "סיכום: הוסכם על תשלום בשלוש פעימות." });
+    expect(await run("gdrive_get_file_text", { id: "gsheet1" })).toMatchObject({ text: "חודש,סכום\nינואר,4200" });
+    expect(await run("gdrive_get_file_text", { id: "gslides1" })).toMatchObject({ text: "שקף 1: הצמיחה ברבעון" });
+    const exports = fixture.state.calls.filter((c) => c.url.includes("/export")).map((c) => new URL(c.url).searchParams.get("mimeType"));
+    expect(exports).toEqual(["text/plain", "text/csv", "text/plain"]);
+
+    // the switch off (or a bad value) → back to drive.file only, with the status tool
+    const off = googleTools({ google: async () => google, timeZone: TZ, scopes, accountEmail: "a@gmail.com", driveReadEnabled: false });
+    expect(off.find((t) => t.name === "gdrive_list_files")!.description).toContain("drive.file");
+    expect(off.map((t) => t.name)).toContain("gdrive_read_status");
+  });
+
+  it("gdrive_read_status: the consent link (feature=drive_read) under the cap, one line when off", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("a@b.co");
+    const build = () => googleTools({ google: async () => { throw new Error("no API call"); }, timeZone: TZ, scopes: [], accountEmail: "a@gmail.com", consentLink: (f) => `https://app.example.co.il/api/auth/google/start?t=x&feature=${f}` });
+    const status = () => build().find((t) => t.name === "gdrive_read_status")!.run({}, ctxFor(db, user.id));
+    expect(await status()).toEqual({ available: false, say: "קריאה של כל הקבצים ב-Drive אינה זמינה כרגע. קבצים שנוצרו דרכי, היומן ו-Gmail ממשיכים לעבוד." });
+    vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "true");
+    const on = (await status()) as { consent_needed: boolean; say: string };
+    expect(on.consent_needed).toBe(true);
+    expect(on.say).toContain("כולל Docs, Sheets ו-Slides");
+    expect(on.say).toContain("feature=drive_read");
+    const empty = (await googleTools({ google: async () => new GoogleClient({ getAccessToken: async () => "t", fetchImpl: createGoogleFixture().fetchImpl }), timeZone: TZ, scopes: [], accountEmail: "a@gmail.com" }).find((t) => t.name === "gdrive_list_files")!.run({ query: "לא קיים" }, ctxFor(db, user.id))) as { note: string };
+    expect(empty.note).toContain("gdrive_read_status");
   });
 });
 

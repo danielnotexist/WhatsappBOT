@@ -7,9 +7,10 @@ import { requireEnv } from "@/lib/env";
  *   authorize  https://accounts.google.com/o/oauth2/v2/auth
  *   token      https://oauth2.googleapis.com/token
  *   revoke     https://oauth2.googleapis.com/revoke
- * Phase 1 asks only for scopes that do NOT need a CASA security assessment (calendar.events + gmail.send are
- * "sensitive" → app verification; drive.file is non-sensitive). Gmail read is "restricted": without CASA it is
- * requested only while under the unverified-app user cap (GOOGLE_GMAIL_READ_ENABLED / _CAP, lib/google/user-cap.ts).
+ * Phase 1 asks only for scopes that do NOT need a CASA security assessment (calendar.events, gmail.send and tasks are
+ * "sensitive" → app verification; drive.file is non-sensitive). Gmail read and Drive read are "restricted": without
+ * CASA they are requested only while under the unverified-app user cap (GOOGLE_GMAIL_READ_ENABLED /
+ * GOOGLE_DRIVE_READ_ENABLED / GOOGLE_GMAIL_READ_CAP, lib/google/user-cap.ts).
  */
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -25,6 +26,10 @@ export const GOOGLE_SCOPES = {
   driveFile: "https://www.googleapis.com/auth/drive.file",
   /** sensitive — send only; cannot read, list or draft */
   gmailSend: "https://www.googleapis.com/auth/gmail.send",
+  /** sensitive (not restricted: no CASA) — Google Tasks: read, create and complete tasks in the user's task lists */
+  tasks: "https://www.googleapis.com/auth/tasks",
+  /** restricted — read every Drive file (search + Docs/Sheets/Slides export); CASA for verification, until then only under the user cap (GOOGLE_DRIVE_READ_*). */
+  driveReadonly: "https://www.googleapis.com/auth/drive.readonly",
   /** restricted — CASA Tier 2 for verification (PLAN §8 risk 5); until then only under the user cap (GOOGLE_GMAIL_READ_*). */
   gmailReadonly: "https://www.googleapis.com/auth/gmail.readonly",
   /** restricted — CASA. Only if we later need mark-as-read / labels. */
@@ -32,28 +37,38 @@ export const GOOGLE_SCOPES = {
 } as const;
 
 /** What phase 1 requests on every connect. Free/busy for the user's own calendar is computed from events.list,
- *  so no `calendar.readonly` / `calendar.events.freebusy` is needed. */
-export const GOOGLE_BASE_SCOPES = [GOOGLE_SCOPES.openid, GOOGLE_SCOPES.email, GOOGLE_SCOPES.profile, GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend] as const;
+ *  so no `calendar.readonly` / `calendar.events.freebusy` is needed. Google Tasks joined on 23.10.2026 (sensitive,
+ *  no CASA): connections made before that lack it and add it through the `tasks` feature below. */
+export const GOOGLE_BASE_SCOPES = [GOOGLE_SCOPES.openid, GOOGLE_SCOPES.email, GOOGLE_SCOPES.profile, GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.driveFile, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks] as const;
 
-/** Capabilities that need an incremental consent later (restricted scopes → CASA first). */
-export type GoogleFeature = "gmail_read" | "gmail_modify";
+/**
+ * Capabilities a connection can add later with an incremental consent (only the new scopes; include_granted_scopes
+ * keeps the rest): the restricted reads (under the user cap), and Google Tasks for connections made before it joined
+ * the base set.
+ */
+export type GoogleFeature = "gmail_read" | "gmail_modify" | "drive_read" | "tasks";
 export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   gmail_read: [GOOGLE_SCOPES.gmailReadonly],
   gmail_modify: [GOOGLE_SCOPES.gmailModify],
+  drive_read: [GOOGLE_SCOPES.driveReadonly],
+  tasks: [GOOGLE_SCOPES.tasks],
 };
+
+/** The restricted reads that ride along a plain connect while the account is under the user cap (lib/google/user-cap.ts). */
+export type RestrictedRead = "gmail_read" | "drive_read";
 
 export function isGoogleFeature(v: unknown): v is GoogleFeature {
   return typeof v === "string" && Object.hasOwn(GOOGLE_FEATURE_SCOPES, v);
 }
 
 /**
- * Scopes for an authorization request. Base connect → the phase-1 set (+ `gmail.readonly` when `withGmailRead`:
- * a connect while under the unverified-app user cap — lib/google/user-cap.ts). A feature → only the new scopes plus
- * openid/email (to identify the account): with `include_granted_scopes=true` Google returns a token that covers
- * everything granted before as well (incremental authorization).
+ * Scopes for an authorization request. Base connect → the phase-1 set (+ `gmail.readonly` when `withGmailRead`, +
+ * `drive.readonly` when `withDriveRead`: a connect while under the unverified-app user cap — lib/google/user-cap.ts).
+ * A feature → only the new scopes plus openid/email (to identify the account): with `include_granted_scopes=true`
+ * Google returns a token that covers everything granted before as well (incremental authorization).
  */
-export function scopesForRequest(feature?: GoogleFeature | null, opts: { withGmailRead?: boolean } = {}): string[] {
-  if (!feature) return opts.withGmailRead ? [...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.gmailReadonly] : [...GOOGLE_BASE_SCOPES];
+export function scopesForRequest(feature?: GoogleFeature | null, opts: { withGmailRead?: boolean; withDriveRead?: boolean } = {}): string[] {
+  if (!feature) return [...GOOGLE_BASE_SCOPES, ...(opts.withGmailRead ? [GOOGLE_SCOPES.gmailReadonly] : []), ...(opts.withDriveRead ? [GOOGLE_SCOPES.driveReadonly] : [])];
   return [GOOGLE_SCOPES.openid, GOOGLE_SCOPES.email, ...GOOGLE_FEATURE_SCOPES[feature]];
 }
 
@@ -259,6 +274,29 @@ export function gmailReadActive(source: Record<string, string | undefined> = pro
     return gmailReadEnabled(source);
   } catch (e) {
     console.error(`[google] Gmail reading is off: ${(e as Error).message}`);
+    return false;
+  }
+}
+
+/**
+ * Feature flag (and kill switch) for the restricted Drive read scope (drive.readonly: search every Drive file and read
+ * Docs/Sheets/Slides by export), on the same terms as Gmail read: under Google's 100-user cap for unverified apps,
+ * without CASA (lib/google/user-cap.ts, docs/google-setup.md §6). Off means off for everyone: not requested, not kept
+ * from a consent, and the whole-Drive search is not offered — also to connections that granted it earlier (their grant
+ * stays at Google). Explicit `true`/`false` wins; unset/empty → on when GOOGLE_CLIENT_ID is set. Anything else →
+ * Hebrew EnvError.
+ */
+export function driveReadEnabled(source: Record<string, string | undefined> = process.env): boolean {
+  const parsed = requireEnv(["GOOGLE_DRIVE_READ_ENABLED"], source);
+  return parsed.GOOGLE_DRIVE_READ_ENABLED ?? Boolean(source.GOOGLE_CLIENT_ID?.trim());
+}
+
+/** driveReadEnabled() for the places that USE an existing grant (chat tools): a bad value logs and fails closed. */
+export function driveReadActive(source: Record<string, string | undefined> = process.env): boolean {
+  try {
+    return driveReadEnabled(source);
+  } catch (e) {
+    console.error(`[google] Drive reading is off: ${(e as Error).message}`);
     return false;
   }
 }

@@ -6,7 +6,7 @@ import { getGoogleConfig, getGoogleFetch } from "@/lib/google";
 import { GoogleClient } from "@/lib/google/client";
 import { GOOGLE_SCOPES, GoogleOAuthError, exchangeGoogleCode, hasScope, isGoogleFeature, missingScopes, parseGoogleIdToken, scopesForRequest } from "@/lib/google/oauth";
 import { sealGoogleTokens, storedGoogleRefreshToken } from "@/lib/google/token-store";
-import { googleConnectShowsUnverified, keepGrantedGmailRead, recordGoogleGrants, type GmailReadKeep } from "@/lib/google/user-cap";
+import { googleConnectShowsUnverified, keepGrantedRestrictedRead, recordGoogleGrants, type RestrictedReadKeep } from "@/lib/google/user-cap";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { replaceOtherConnections } from "@/lib/account/service";
 import { getWaSender } from "@/lib/wa";
@@ -21,8 +21,10 @@ interface PendingGoogle {
   feature?: string | null;
   /** the scopes the start route requested */
   scopes?: unknown[];
-  /** the start route's user-cap decision (GmailReadAccess.reason): "already_counted" | "under_cap" | "disabled" | "cap_reached" */
+  /** the start route's user-cap decision (RestrictedReadAccess.reason): "already_counted" | "under_cap" | "disabled" | "cap_reached" */
   gmail_read?: string;
+  /** the same decision for drive.readonly */
+  drive_read?: string;
   via?: string;
   started_at?: string;
 }
@@ -32,8 +34,8 @@ interface PendingGoogle {
  * Finds the user through the single-use state, exchanges the code with the PKCE verifier, stores the encrypted
  * tokens and the granted scopes (granular consent → maybe fewer than requested), tells the user in WhatsApp,
  * and redirects per `returnTo` (onboarding → /start/ready, else /account).
- * gmail.readonly is stored only when keepGrantedGmailRead allows it (feature on, and asked for within the cap or the
- * account was already counted) — the scope list in the consent URL is not trusted. Google's grant is recorded in
+ * gmail.readonly and drive.readonly are stored only when keepGrantedRestrictedRead allows it (the read switched on, and
+ * asked for within the cap or the account was already counted) — the scope list in the consent URL is not trusted. Google's grant is recorded in
  * the user-cap ledger as soon as the account is known, before any later step can fail: Google counted it already.
  */
 export async function GET(request: Request) {
@@ -104,16 +106,22 @@ export async function GET(request: Request) {
     // what was asked (stored by the start route — the cap may have moved since); older states: the static set
     const stored = Array.isArray(pending.scopes) ? pending.scopes.filter((s): s is string => typeof s === "string") : [];
     const requested = stored.length ? stored : scopesForRequest(feature);
-    // may this connection keep gmail.readonly? (decided before the grant below makes the account "counted")
-    const gmailRead = await keepGrantedGmailRead(db, { accountEmail: email, granted: tokens.scope, requested, startReason: pending.gmail_read });
+    // may this connection keep gmail.readonly / drive.readonly? (decided before the grant below makes the account "counted")
+    const gmailRead = await keepGrantedRestrictedRead(db, { accountEmail: email, granted: tokens.scope, requested, startReason: pending.gmail_read }, "gmail_read");
+    const driveRead = await keepGrantedRestrictedRead(db, { accountEmail: email, granted: tokens.scope, requested, startReason: pending.drive_read }, "drive_read");
     // Google's unverified-app user cap counts this account from now on (lib/google/user-cap.ts) — recorded first,
-    // with what Google really granted (also a gmail.readonly we do not keep: Google counted it), best effort
+    // with what Google really granted (also a restricted read we do not keep: Google counted it), best effort
     await recordGoogleGrants(db, { userId: user.id, accountEmail: email, granted: tokens.scope }).catch((e) => console.error("[google:callback] user-cap ledger failed:", (e as Error).message));
-    const dropped = !gmailRead.keep && gmailRead.reason !== "not_granted";
-    const scopes = dropped ? tokens.scope.filter((s) => s !== GOOGLE_SCOPES.gmailReadonly) : tokens.scope;
-    if (dropped) {
+    const droppedGmail = !gmailRead.keep && gmailRead.reason !== "not_granted";
+    const droppedDrive = !driveRead.keep && driveRead.reason !== "not_granted";
+    const scopes = tokens.scope.filter((s) => !(droppedGmail && s === GOOGLE_SCOPES.gmailReadonly) && !(droppedDrive && s === GOOGLE_SCOPES.driveReadonly));
+    if (droppedGmail) {
       console.warn(`[google:callback] gmail.readonly granted but not kept (${gmailRead.reason}) for user ${user.id}`);
       await db.addAudit({ user_id: user.id, action: "google.gmail_read_not_kept", target: email, result: gmailRead.reason });
+    }
+    if (droppedDrive) {
+      console.warn(`[google:callback] drive.readonly granted but not kept (${driveRead.reason}) for user ${user.id}`);
+      await db.addAudit({ user_id: user.id, action: "google.drive_read_not_kept", target: email, result: driveRead.reason });
     }
 
     // prompt=consent normally returns a new refresh token; if Google omits it on a re-consent, keep the stored one
@@ -122,27 +130,37 @@ export async function GET(request: Request) {
     const connection = await db.upsertConnection({ user_id: user.id, provider: "google", account_email: email, tenant_id: null, scopes, consent_type: "user", ...sealGoogleTokens(user.id, { ...tokens, refreshToken }) });
     await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[google:callback] replacing older connections failed:", (e as Error).message));
 
-    // gmail.readonly riding along a plain connect is optional: unticking it is a choice, not a failed connect
-    const optional: string[] = feature ? [] : [GOOGLE_SCOPES.gmailReadonly];
-    // what the user did not tick (a gmail.readonly we did not keep WAS ticked — see `refused` below)
+    // the restricted reads riding along a plain connect are optional: unticking them is a choice, not a failed connect
+    const optional: string[] = feature ? [] : [GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.driveReadonly];
+    // what the user did not tick (a restricted read we did not keep WAS ticked — see `refused*` below)
     const missing = missingScopes(tokens.scope, requested).filter((s) => GOOGLE_CAPABILITY_SCOPES.includes(s) && !optional.includes(s));
-    const gmailReadDeclined = !feature && requested.includes(GOOGLE_SCOPES.gmailReadonly) && !hasScope(tokens.scope, GOOGLE_SCOPES.gmailReadonly);
-    // the user asked for Gmail reading and ticked it, but it is not available to this account (cap / off)
-    const refused = dropped && requested.includes(GOOGLE_SCOPES.gmailReadonly) ? gmailRead.reason : null;
-    await db.addAudit({ user_id: user.id, action: "google.connect", target: email, result: missing.length ? `partial:${missing.join(" ")}` : refused ? `ok:gmail_read_refused:${refused}` : feature ? `ok:${feature}` : gmailReadDeclined ? "ok:gmail_read_declined" : "ok" });
+    const declinedRide = (scope: string) => !feature && requested.includes(scope) && !hasScope(tokens.scope, scope);
+    const gmailReadDeclined = declinedRide(GOOGLE_SCOPES.gmailReadonly);
+    const declined = [gmailReadDeclined ? "gmail_read_declined" : "", declinedRide(GOOGLE_SCOPES.driveReadonly) ? "drive_read_declined" : ""].filter(Boolean);
+    // the user asked for a restricted read and ticked it, but it is not available to this account (cap / off)
+    const refusedGmail = droppedGmail && requested.includes(GOOGLE_SCOPES.gmailReadonly) ? gmailRead.reason : null;
+    const refusedDrive = droppedDrive && requested.includes(GOOGLE_SCOPES.driveReadonly) ? driveRead.reason : null;
+    await db.addAudit({
+      user_id: user.id,
+      action: "google.connect",
+      target: email,
+      result: missing.length ? `partial:${missing.join(" ")}` : refusedGmail ? `ok:gmail_read_refused:${refusedGmail}` : refusedDrive ? `ok:drive_read_refused:${refusedDrive}` : feature ? `ok:${feature}` : declined.length ? `ok:${declined.join(",")}` : "ok",
+    });
     if (!user.name && claims.name) await db.updateUserProfile(user.id, { name: claims.name });
     if (!refreshToken) console.warn(`[google:callback] no refresh token for connection ${connection.id} - the user will need to reconnect when the access token expires`);
 
     await tell(gcopy["g.connect_done"](email, scopes, { gmailReadDeclined }));
-    if (refused) await tell(refused === "cap_reached" ? gcopy["g.err.gmail_read_cap_reached"]() : gcopy["g.err.gmail_read_unavailable"]());
+    if (refusedGmail) await tell(refusedGmail === "cap_reached" ? gcopy["g.err.gmail_read_cap_reached"]() : gcopy["g.err.gmail_read_unavailable"]());
+    if (refusedDrive) await tell(refusedDrive === "cap_reached" ? gcopy["g.err.drive_read_cap_reached"]() : gcopy["g.err.drive_read_unavailable"]());
     if (missing.length) {
       const retry = new URL(`/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "google"))}${feature ? `&feature=${feature}` : ""}`, appUrl).toString();
       const headsUp = await googleConnectShowsUnverified(db, await db.listConnections(user.id));
       await tell(`${gcopy["g.connect_partial"](missing, retry)}${headsUp ? `\n${gcopy["g.unverified_heads_up"]()}` : ""}`);
     }
     if (missing.length) return back({ ok: true, notice: gcopy["g.web.connected_partial"](email, missing) });
-    // an explicit Gmail-read consent that we could not keep: say so (the rest of the connection is unchanged)
-    if (feature && refused) return back({ ok: false, error: refusedNotice(refused) });
+    // an explicit restricted-read consent that we could not keep: say so (the rest of the connection is unchanged)
+    if (feature && refusedGmail) return back({ ok: false, error: refusedNotice("gmail_read", refusedGmail) });
+    if (feature && refusedDrive) return back({ ok: false, error: refusedNotice("drive_read", refusedDrive) });
     return back({ ok: true, notice: gcopy["g.web.connected"](email) });
   } catch (e) {
     if (e instanceof GoogleOAuthError) {
@@ -155,7 +173,14 @@ export async function GET(request: Request) {
   }
 }
 
-const refusedNotice = (reason: GmailReadKeep["reason"]) => (reason === "cap_reached" ? gcopy["g.web.gmail_read_cap_reached"]() : gcopy["g.web.feature_disabled"]());
+const refusedNotice = (read: "gmail_read" | "drive_read", reason: RestrictedReadKeep["reason"]) =>
+  read === "gmail_read"
+    ? reason === "cap_reached"
+      ? gcopy["g.web.gmail_read_cap_reached"]()
+      : gcopy["g.web.feature_disabled"]()
+    : reason === "cap_reached"
+      ? gcopy["g.web.drive_read_cap_reached"]()
+      : gcopy["g.web.drive_read_disabled"]();
 
 /**
  * A consent that came back but is not in the user-cap ledger: Google may have counted the account (the user saw the

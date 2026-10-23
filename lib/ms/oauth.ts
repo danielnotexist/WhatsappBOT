@@ -3,12 +3,57 @@ import { requireEnv } from "@/lib/env";
 
 /**
  * Microsoft identity platform (Entra ID) OAuth 2.0 authorization-code flow with PKCE, multi-tenant app
- * registered in Daniel's tenant (PLAN §2, §9). Delegated scopes only — minimum for mail / calendar / files.
+ * registered in Daniel's tenant (PLAN §2, §9). Delegated scopes only — minimum for mail / calendar / files, plus
+ * (23.10.2026) Microsoft To Do (`Tasks.ReadWrite`) and SharePoint sites and lists (`Sites.Read.All`).
+ * `Files.Read.All` already covers OneDrive and SharePoint document libraries (Word / Excel / PowerPoint files).
+ * Many tenants need an admin to grant these (Microsoft's managed default consent policy blocks user consent to
+ * Mail / Calendars / Files / Sites / Tasks): the admin-consent URL asks for all of them at once.
  */
-export const MS_SCOPES = ["openid", "profile", "email", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.Read.All"] as const;
+const OIDC_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
+
+/** The delegated set before 23.10.2026 — what a connection without recorded scopes is assumed to hold. */
+export const MS_SCOPES_V1 = ["openid", "profile", "email", "offline_access", "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Files.Read.All"] as const;
+
+export const MS_SCOPES = [...MS_SCOPES_V1, "Tasks.ReadWrite", "Sites.Read.All"] as const;
 
 /** Delegated permissions without the OIDC ones — what the admin-consent URL asks for. */
-export const MS_ADMIN_SCOPES = MS_SCOPES.filter((s) => !["openid", "profile", "email", "offline_access"].includes(s));
+export const MS_ADMIN_SCOPES: string[] = MS_SCOPES.filter((s) => !(OIDC_SCOPES as readonly string[]).includes(s));
+
+const GRAPH_PREFIX = /^https:\/\/graph\.microsoft\.com\//i;
+
+/**
+ * Granted scopes as we compare them: the token endpoint may echo Graph scopes with the resource prefix and in any case
+ * (Microsoft scopes are case-insensitive) — `https://graph.microsoft.com/tasks.readwrite` → `Tasks.ReadWrite`.
+ * Unknown scopes keep their (unprefixed) spelling. Order kept, duplicates dropped.
+ */
+export function normalizeMsScopes(scopes: readonly string[] | string): string[] {
+  const list = typeof scopes === "string" ? scopes.split(/\s+/) : scopes;
+  const known = new Map<string, string>(MS_SCOPES.map((k) => [k.toLowerCase(), k]));
+  const out: string[] = [];
+  for (const raw of list) {
+    const bare = raw.trim().replace(GRAPH_PREFIX, "");
+    if (!bare) continue;
+    const s = known.get(bare.toLowerCase()) ?? bare;
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
+/** Does a connection's stored grant include `scope`? An empty list (not recorded) counts as the v1 set. */
+export function msHasScope(granted: readonly string[], scope: string): boolean {
+  const list: string[] = granted.length ? normalizeMsScopes(granted) : [...MS_SCOPES_V1];
+  return list.includes(normalizeMsScopes([scope])[0] ?? scope);
+}
+
+/**
+ * Scopes for a refresh: the connection's own Graph grant, never more. The v2 endpoint refuses a refresh that asks for a
+ * scope nobody consented to (AADSTS65001, `invalid_grant`), which would mark a working connection `expired` — so a
+ * connection made before Tasks / Sites joined keeps refreshing with what it has, and gains them on its next connect.
+ */
+export function msRefreshScopes(granted: readonly string[]): string[] {
+  const graph = normalizeMsScopes(granted).filter((s) => MS_ADMIN_SCOPES.includes(s));
+  return [...OIDC_SCOPES, ...(graph.length ? graph : MS_SCOPES_V1.filter((s) => MS_ADMIN_SCOPES.includes(s)))];
+}
 
 export interface MsOAuthConfig {
   clientId: string;
@@ -124,8 +169,9 @@ export function exchangeCode(cfg: MsOAuthConfig, code: string, codeVerifier: str
   return tokenRequest(cfg, { grant_type: "authorization_code", code, redirect_uri: cfg.redirectUri, code_verifier: codeVerifier, scope: MS_SCOPES.join(" ") });
 }
 
-export function refreshTokens(cfg: MsOAuthConfig, refreshToken: string): Promise<MsTokens> {
-  return tokenRequest(cfg, { grant_type: "refresh_token", refresh_token: refreshToken, scope: MS_SCOPES.join(" ") });
+/** `scopes`: what to ask for — msRefreshScopes(connection.scopes) from the token store (default: the full set). */
+export function refreshTokens(cfg: MsOAuthConfig, refreshToken: string, scopes: readonly string[] = MS_SCOPES): Promise<MsTokens> {
+  return tokenRequest(cfg, { grant_type: "refresh_token", refresh_token: refreshToken, scope: scopes.join(" ") });
 }
 
 /** Claims from the id_token (payload only — issued to us over TLS by the token endpoint, no signature check needed here). */

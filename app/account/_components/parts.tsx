@@ -15,15 +15,23 @@ export function Section({ id, title, description, className, children }: { id: s
   );
 }
 
-export function Row({ mark, title, children, action }: { mark: ReactNode; title: ReactNode; children?: ReactNode; action: ReactNode }) {
-  return (
-    <li className="flex items-center gap-4 py-5">
+/** `footer`: a full-width line under the row, aligned with the text (the services of a connected account). */
+export function Row({ mark, title, children, action, footer }: { mark: ReactNode; title: ReactNode; children?: ReactNode; action: ReactNode; footer?: ReactNode }) {
+  const line = (
+    <>
       {mark}
       <div className="min-w-0 flex-1">
         <p className="text-[1.0625rem] leading-snug font-semibold">{title}</p>
         {children}
       </div>
       <div className="flex-none">{action}</div>
+    </>
+  );
+  if (!footer) return <li className="flex items-center gap-4 py-5">{line}</li>;
+  return (
+    <li className="py-5">
+      <div className="flex items-center gap-4">{line}</div>
+      <div className="mt-4 ps-16">{footer}</div>
     </li>
   );
 }

@@ -17,9 +17,10 @@ export const CAPABILITIES: Record<Capability, { label: string; kind: CapabilityK
   "mail.forward": { label: "העברת מיילים", kind: "outbound", tools: ["forward_email"] },
   "calendar.read": { label: "קריאת יומן", kind: "read", tools: ["list_events", "gcal_list_events", "gcal_free_slots"] },
   "calendar.write": { label: "שינויים ביומן", kind: "outbound", tools: ["create_event", "update_event", "delete_event", "gcal_create_event", "gcal_update_event", "gcal_delete_event"] },
-  "files.read": { label: "חיפוש וקריאת קבצים", kind: "read", tools: ["search_files", "get_file_text", "gdrive_list_files", "gdrive_get_file_text"] },
+  "files.read": { label: "חיפוש וקריאת קבצים", kind: "read", tools: ["search_files", "get_file_text", "gdrive_list_files", "gdrive_get_file_text", "gdrive_read_status", "sharepoint_search", "sharepoint_get_file_text"] },
   "files.save": { label: "שמירת מסמכים", kind: "internal", tools: ["gdrive_save_doc"] },
-  reminders: { label: "תזכורות", kind: "internal", tools: ["create_reminder", "list_reminders", "cancel_reminder"] },
+  // the user's own task lists (Google Tasks, Microsoft To Do) are reminders by another name: internal, no approval
+  reminders: { label: "תזכורות", kind: "internal", tools: ["create_reminder", "list_reminders", "cancel_reminder", "gtasks_list_tasks", "gtasks_create_task", "todo_list_tasks", "todo_create_task"] },
   morning: { label: "סיכום בוקר", kind: "internal", tools: ["set_morning_time"] },
 };
 

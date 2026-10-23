@@ -12,7 +12,8 @@ import { activeGoogleConnection, googleForConnection, googleForUser } from "@/li
 import { providerForAction, routeExecutorsByProvider } from "@/lib/google/dispatch";
 import { googleExecutors, googleTools } from "@/lib/google/tools";
 import { gmailReadConsentLink } from "@/lib/google/gmail-tools";
-import type { BotContext } from "./context";
+import { googleConsentLink } from "@/lib/google/consent";
+import { connectLinkFor, type BotContext } from "./context";
 import { registerExecutor } from "./pending";
 import { processInbound } from "./process-inbound";
 
@@ -54,8 +55,17 @@ export function botContext(overrides: { db?: Db; wa?: WaSender } = {}): BotConte
       const ms = activeMicrosoftConnection(connections);
       const g = activeGoogleConnection(connections);
       return [
-        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone }) : []),
-        ...(g ? googleTools({ google: async () => googleForConnection(db, g), timeZone: user.timezone, scopes: g.scopes, accountEmail: g.account_email, gmailConsentLink: () => gmailReadConsentLink(ctx, user.id) }) : []),
+        ...(ms ? graphTools({ graph: async () => graphForConnection(db, ms), timeZone: user.timezone, scopes: ms.scopes, connectLink: () => connectLinkFor(ctx, user.id, "microsoft") }) : []),
+        ...(g
+          ? googleTools({
+              google: async () => googleForConnection(db, g),
+              timeZone: user.timezone,
+              scopes: g.scopes,
+              accountEmail: g.account_email,
+              gmailConsentLink: () => gmailReadConsentLink(ctx, user.id),
+              consentLink: (feature) => googleConsentLink(ctx, user.id, feature),
+            })
+          : []),
       ];
     },
   };

@@ -67,8 +67,8 @@ export interface UserContextInput {
   businessType: string | null;
   timezone: string;
   morningTime: string;
-  /** the active connections only — the newest per provider, the one the tools use */
-  connections: { provider: ConnectionFacts["provider"]; accountEmail: string | null; scopes?: readonly string[] }[];
+  /** the active connections only — the newest per provider, the one the tools use; `services`: its connected services ("Gmail, יומן Google ו-Google Tasks" — lib/connections/services.ts) */
+  connections: { provider: ConnectionFacts["provider"]; accountEmail: string | null; scopes?: readonly string[]; services?: string }[];
   profile: Record<string, unknown>;
   summary: string | null;
   facts: string[];
@@ -134,6 +134,8 @@ export function buildSystemPrompt(u: UserContextInput): string {
     u.connections.map((c) => ({ provider: c.provider, accountEmail: c.accountEmail, scopes: c.scopes ?? [] })),
     { gmailRead: u.gmailRead ?? false },
   );
+  // which services of each account work right now (a missing one answers with its approval link from its tool)
+  for (const c of u.connections) if (c.services) connections.push(`- שירותים פעילים ב-${c.provider === "microsoft" ? "Microsoft 365" : "Google"}: ${c.services}`);
   const memory = [u.summary ? `## סיכום השיחה עד כה\n${u.summary}` : "", u.facts.length ? `## עובדות שנלמדו\n${u.facts.map((f) => `- ${f}`).join("\n")}` : ""].filter(Boolean).join("\n\n");
   return `${BASE_SYSTEM_PROMPT}
 

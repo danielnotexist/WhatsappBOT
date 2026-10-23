@@ -4,7 +4,7 @@ import { gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionProvider, ConnectionRow, Db } from "@/lib/db/types";
 import { EnvError, integrationsMocked, requireEnv } from "@/lib/env";
 import { getMailer } from "@/lib/mail";
-import { GOOGLE_SCOPES, gmailReadEnabled, hasScope } from "./oauth";
+import { GOOGLE_SCOPES, driveReadEnabled, gmailReadEnabled, hasScope, type RestrictedRead } from "./oauth";
 
 /**
  * Google's user cap for unverified apps (owner decision 21.10.2026: Gmail reading for the first users without
@@ -19,13 +19,18 @@ import { GOOGLE_SCOPES, gmailReadEnabled, hasScope } from "./oauth";
  * scope, never deleted. We stop requesting gmail.readonly from NEW accounts at GOOGLE_GMAIL_READ_CAP (default 95,
  * headroom for users who are on Google's consent screen at the same moment).
  *
- * Which grants Google counts: gmail.readonly (restricted, not verified without CASA) always; calendar.events and
- * gmail.send (sensitive) too, until the sensitive-scope verification is approved
+ * Which grants Google counts: gmail.readonly and drive.readonly (restricted, not verified without CASA) always;
+ * calendar.events, gmail.send and tasks (sensitive) too, until the sensitive-scope verification is approved
  * (GOOGLE_SENSITIVE_SCOPES_VERIFIED=true). Rows recorded before that stay counted — they used up slots.
+ *
+ * The cap is per Google account, not per scope: an account that is counted may add Gmail read AND Drive read without a
+ * new slot. Each read has its own switch (GOOGLE_GMAIL_READ_ENABLED / GOOGLE_DRIVE_READ_ENABLED).
  */
 
-export const RESTRICTED_SCOPES: readonly string[] = [GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.gmailModify];
-export const SENSITIVE_SCOPES: readonly string[] = [GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend];
+export const RESTRICTED_SCOPES: readonly string[] = [GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.gmailModify, GOOGLE_SCOPES.driveReadonly];
+export const SENSITIVE_SCOPES: readonly string[] = [GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks];
+/** The scope each restricted read asks for. */
+export const RESTRICTED_READ_SCOPE: Record<RestrictedRead, string> = { gmail_read: GOOGLE_SCOPES.gmailReadonly, drive_read: GOOGLE_SCOPES.driveReadonly };
 /** Every scope a ledger row may hold — the count is over all of them (the ledger only holds counted grants). */
 export const CAP_LEDGER_SCOPES: readonly string[] = [...RESTRICTED_SCOPES, ...SENSITIVE_SCOPES];
 /** Operator alert levels: 80 and the cap (95 by default). */
@@ -33,13 +38,15 @@ export const CAP_ALERT_AT = 80;
 
 export interface GoogleCapConfig {
   gmailReadEnabled: boolean;
+  /** GOOGLE_DRIVE_READ_ENABLED; absent = off */
+  driveReadEnabled?: boolean;
   cap: number;
   sensitiveVerified: boolean;
   /** a real Google project (not the fixtures of DATA_MODE=memory / DEMO_MODE): the unverified-app screen appears */
   realGoogle: boolean;
 }
 
-/** Reads GOOGLE_GMAIL_READ_ENABLED / _CAP / GOOGLE_SENSITIVE_SCOPES_VERIFIED. Bad values → Hebrew EnvError. */
+/** Reads GOOGLE_GMAIL_READ_ENABLED / GOOGLE_DRIVE_READ_ENABLED / _CAP / GOOGLE_SENSITIVE_SCOPES_VERIFIED. Bad values → Hebrew EnvError. */
 export function googleCapConfig(source: Record<string, string | undefined> = process.env): GoogleCapConfig {
   const env = requireEnv(["GOOGLE_GMAIL_READ_CAP", "GOOGLE_SENSITIVE_SCOPES_VERIFIED"], source);
   let mocked = true;
@@ -48,7 +55,7 @@ export function googleCapConfig(source: Record<string, string | undefined> = pro
   } catch {
     mocked = true;
   }
-  return { gmailReadEnabled: gmailReadEnabled(source), cap: env.GOOGLE_GMAIL_READ_CAP, sensitiveVerified: env.GOOGLE_SENSITIVE_SCOPES_VERIFIED, realGoogle: Boolean(source.GOOGLE_CLIENT_ID?.trim()) && !mocked };
+  return { gmailReadEnabled: gmailReadEnabled(source), driveReadEnabled: driveReadEnabled(source), cap: env.GOOGLE_GMAIL_READ_CAP, sensitiveVerified: env.GOOGLE_SENSITIVE_SCOPES_VERIFIED, realGoogle: Boolean(source.GOOGLE_CLIENT_ID?.trim()) && !mocked };
 }
 
 /** Scopes whose grant Google counts right now (what we record). */
@@ -68,16 +75,34 @@ export async function countCapUsers(db: Db): Promise<number> {
 export type GmailReadAccess =
   | { allowed: true; reason: "already_counted" | "under_cap"; count: number | null; cap: number }
   | { allowed: false; reason: "disabled" | "cap_reached"; count: number | null; cap: number };
+/** The same decision for any restricted read (Gmail or Drive). */
+export type RestrictedReadAccess = GmailReadAccess;
+
+/** Is this restricted read switched on (GOOGLE_GMAIL_READ_ENABLED / GOOGLE_DRIVE_READ_ENABLED)? */
+export function restrictedReadEnabled(cfg: Pick<GoogleCapConfig, "gmailReadEnabled" | "driveReadEnabled">, read: RestrictedRead): boolean {
+  return read === "gmail_read" ? cfg.gmailReadEnabled : Boolean(cfg.driveReadEnabled);
+}
 
 /**
- * May we request gmail.readonly for this Google account? `accountEmail` = the account of the user's existing Google
- * connection (any status), or null on a first connect. An account Google already counted never costs a new slot.
+ * May we request this restricted read (gmail.readonly / drive.readonly) for this Google account? `accountEmail` = the
+ * account of the user's existing Google connection (any status), or null on a first connect. An account Google already
+ * counted never costs a new slot.
  */
-export async function gmailReadAccess(db: Db, accountEmail: string | null, cfg: GoogleCapConfig = googleCapConfig()): Promise<GmailReadAccess> {
-  if (!cfg.gmailReadEnabled) return { allowed: false, reason: "disabled", count: null, cap: cfg.cap };
+export async function restrictedReadAccess(db: Db, accountEmail: string | null, read: RestrictedRead, cfg: GoogleCapConfig = googleCapConfig()): Promise<RestrictedReadAccess> {
+  if (!restrictedReadEnabled(cfg, read)) return { allowed: false, reason: "disabled", count: null, cap: cfg.cap };
   if (accountEmail && (await db.hasGoogleScopeGrant(googleAccountHash(accountEmail), [...CAP_LEDGER_SCOPES]))) return { allowed: true, reason: "already_counted", count: null, cap: cfg.cap };
   const count = await countCapUsers(db);
   return count < cfg.cap ? { allowed: true, reason: "under_cap", count, cap: cfg.cap } : { allowed: false, reason: "cap_reached", count, cap: cfg.cap };
+}
+
+/** May we request gmail.readonly for this Google account? (restrictedReadAccess for Gmail) */
+export function gmailReadAccess(db: Db, accountEmail: string | null, cfg?: GoogleCapConfig): Promise<GmailReadAccess> {
+  return restrictedReadAccess(db, accountEmail, "gmail_read", cfg);
+}
+
+/** May we request drive.readonly for this Google account? (restrictedReadAccess for Drive) */
+export function driveReadAccess(db: Db, accountEmail: string | null, cfg?: GoogleCapConfig): Promise<RestrictedReadAccess> {
+  return restrictedReadAccess(db, accountEmail, "drive_read", cfg);
 }
 
 /**
@@ -92,6 +117,8 @@ export function googleAccountOf(connections: ConnectionRow[]): string | null {
 export type GmailReadKeep =
   | { keep: true; reason: "already_counted" | "requested" }
   | { keep: false; reason: "not_granted" | "disabled" | "not_requested" | "cap_reached" | "error" };
+/** The same verdict for any restricted read. */
+export type RestrictedReadKeep = GmailReadKeep;
 
 /**
  * The callback side of the cap: may the connection keep the gmail.readonly Google just returned? The start route
@@ -109,16 +136,27 @@ export async function keepGrantedGmailRead(
   input: { accountEmail: string; granted: readonly string[]; requested: readonly string[]; startReason?: unknown },
   cfg?: GoogleCapConfig,
 ): Promise<GmailReadKeep> {
-  if (!hasScope(input.granted, GOOGLE_SCOPES.gmailReadonly)) return { keep: false, reason: "not_granted" };
+  return keepGrantedRestrictedRead(db, input, "gmail_read", cfg);
+}
+
+/** keepGrantedGmailRead for any restricted read: the same rules for drive.readonly (its own switch, the same cap). */
+export async function keepGrantedRestrictedRead(
+  db: Db,
+  input: { accountEmail: string; granted: readonly string[]; requested: readonly string[]; startReason?: unknown },
+  read: RestrictedRead,
+  cfg?: GoogleCapConfig,
+): Promise<RestrictedReadKeep> {
+  const scope = RESTRICTED_READ_SCOPE[read];
+  if (!hasScope(input.granted, scope)) return { keep: false, reason: "not_granted" };
   try {
     const c = cfg ?? googleCapConfig();
-    if (!c.gmailReadEnabled) return { keep: false, reason: "disabled" };
+    if (!restrictedReadEnabled(c, read)) return { keep: false, reason: "disabled" };
     if (await db.hasGoogleScopeGrant(googleAccountHash(input.accountEmail), [...CAP_LEDGER_SCOPES])) return { keep: true, reason: "already_counted" };
-    if (!hasScope(input.requested, GOOGLE_SCOPES.gmailReadonly)) return { keep: false, reason: "not_requested" };
+    if (!hasScope(input.requested, scope)) return { keep: false, reason: "not_requested" };
     if (input.startReason === "already_counted" && (await countCapUsers(db)) >= c.cap) return { keep: false, reason: "cap_reached" };
     return { keep: true, reason: "requested" };
   } catch (e) {
-    console.error("[google:user-cap] gmail.readonly keep check failed — not kept:", (e as Error).message);
+    console.error(`[google:user-cap] ${scope} keep check failed — not kept:`, (e as Error).message);
     return { keep: false, reason: "error" };
   }
 }
@@ -212,11 +250,11 @@ export function capAlertMail(a: CapAlert): { subject: string; text: string } {
   const text = [
     `חשבונות Google שאישרו scope לא מאומת: ${a.count}. התקרה שלנו: ${a.cap}. Google חוסמת משתמשים חדשים ב-100, לכל חיי הפרויקט, בלי איפוס.`,
     reached
-      ? "הגענו לתקרה: משתמשים חדשים כבר לא מתבקשים לאשר קריאת Gmail. היומן, Drive ושליחת מיילים מ-Gmail ממשיכים לעבוד, וסיכום הבוקר שלהם בלי \"מיילים שמחכים לתשובה\"."
-      : `עוד ${a.cap - a.count} חשבונות עד שנפסיק לבקש קריאת Gmail ממשתמשים חדשים.`,
+      ? "הגענו לתקרה: משתמשים חדשים כבר לא מתבקשים לאשר קריאת Gmail וקריאת כל ה-Drive. היומן, Google Tasks, קבצי Drive שנוצרו דרכנו ושליחת מיילים מ-Gmail ממשיכים לעבוד, וסיכום הבוקר שלהם בלי \"מיילים שמחכים לתשובה\"."
+      : `עוד ${a.cap - a.count} חשבונות עד שנפסיק לבקש קריאת Gmail וקריאת Drive ממשתמשים חדשים.`,
     a.sensitiveVerified
       ? ""
-      : "חשוב: calendar.events ו-gmail.send עדיין לא אושרו ב-Verification Center, ולכן כל חיבור Google חדש נספר בתקרה — גם בלי קריאת Gmail. ב-100 Google תחסום חיבורים חדשים לגמרי. להגיש עכשיו אימות ל-scopes הרגישים (docs/google-setup.md §5) ואז GOOGLE_SENSITIVE_SCOPES_VERIFIED=true.",
+      : "חשוב: calendar.events ו-gmail.send (וגם tasks) עדיין לא אושרו ב-Verification Center, ולכן כל חיבור Google חדש נספר בתקרה — גם בלי קריאת Gmail. ב-100 Google תחסום חיבורים חדשים לגמרי. להגיש עכשיו אימות ל-scopes הרגישים (docs/google-setup.md §5) ואז GOOGLE_SENSITIVE_SCOPES_VERIFIED=true.",
     "הצעד הבא לקריאת Gmail מעבר לתקרה: הערכת CASA או ספק מתווך (Composio) — docs/google-setup.md §6. מצב התקרה ב-Console: Google Auth Platform → Audience → OAuth user cap.",
   ].filter(Boolean);
   return { subject, text: text.join("\n\n") };
@@ -241,9 +279,9 @@ async function emailOperator(alert: CapAlert): Promise<void> {
 // the "unverified app" heads-up
 // ---------------------------------------------------------------------------------------------
 
-/** Will Google show "Google hasn't verified this app" before its consent screen? */
-export function unverifiedScreenExpected(cfg: Pick<GoogleCapConfig, "realGoogle" | "sensitiveVerified">, requestsGmailRead: boolean): boolean {
-  return cfg.realGoogle && (requestsGmailRead || !cfg.sensitiveVerified);
+/** Will Google show "Google hasn't verified this app" before its consent screen? (`requestsRestricted`: gmail.readonly / drive.readonly) */
+export function unverifiedScreenExpected(cfg: Pick<GoogleCapConfig, "realGoogle" | "sensitiveVerified">, requestsRestricted: boolean): boolean {
+  return cfg.realGoogle && (requestsRestricted || !cfg.sensitiveVerified);
 }
 
 /** "\n<heads-up line>" to append to a chat message carrying a connect link for `provider`, or "". Never throws. */
@@ -253,14 +291,15 @@ export async function connectHeadsUpSuffix(db: Db, connections: ConnectionRow[],
 
 /**
  * For a chat message carrying a Google connect link: will the consent behind it show the unverified-app screen?
- * Mirrors the start route (gmail.readonly is added while the account may still get it). Never throws.
+ * Mirrors the start route (gmail.readonly / drive.readonly are added while the account may still get them). Never throws.
  */
 export async function googleConnectShowsUnverified(db: Db, connections: ConnectionRow[], cfg?: GoogleCapConfig): Promise<boolean> {
   try {
     const c = cfg ?? googleCapConfig();
     if (!c.realGoogle) return false;
     if (!c.sensitiveVerified) return true;
-    return (await gmailReadAccess(db, googleAccountOf(connections), c)).allowed;
+    const account = googleAccountOf(connections);
+    return (await gmailReadAccess(db, account, c)).allowed || (await driveReadAccess(db, account, c)).allowed;
   } catch (e) {
     console.error("[google:user-cap] heads-up check failed:", (e as Error).message);
     return false;

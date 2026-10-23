@@ -15,11 +15,15 @@ import {
   googleAccountOf,
   googleCapConfig,
   googleConnectShowsUnverified,
+  driveReadAccess,
   gmailReadAccess,
   keepGrantedGmailRead,
+  keepGrantedRestrictedRead,
   maybeCheckGoogleUserCapAlerts,
   recordGoogleGrants,
   resetGoogleUserCapCheckForTests,
+  restrictedReadAccess,
+  restrictedReadEnabled,
   unverifiedScreenExpected,
   type GoogleCapConfig,
 } from "./user-cap";
@@ -43,7 +47,9 @@ describe("Google unverified-app user cap — configuration", () => {
   });
 
   it("cap 95 and sensitive-unverified by default; the cap must be 1–100", () => {
-    expect(googleCapConfig({ GOOGLE_CLIENT_ID: "x" })).toEqual({ gmailReadEnabled: true, cap: 95, sensitiveVerified: false, realGoogle: true });
+    expect(googleCapConfig({ GOOGLE_CLIENT_ID: "x" })).toEqual({ gmailReadEnabled: true, driveReadEnabled: true, cap: 95, sensitiveVerified: false, realGoogle: true });
+    expect(googleCapConfig({ GOOGLE_CLIENT_ID: "x", GOOGLE_DRIVE_READ_ENABLED: "false" })).toMatchObject({ gmailReadEnabled: true, driveReadEnabled: false });
+    expect(() => googleCapConfig({ GOOGLE_DRIVE_READ_ENABLED: "maybe" })).toThrow(EnvError);
     expect(googleCapConfig({ GOOGLE_GMAIL_READ_CAP: "60", GOOGLE_SENSITIVE_SCOPES_VERIFIED: "true" })).toMatchObject({ cap: 60, sensitiveVerified: true, gmailReadEnabled: false, realGoogle: false });
     // fixtures (DATA_MODE=memory / DEMO_MODE) never show Google's screen
     expect(googleCapConfig({ GOOGLE_CLIENT_ID: "x", DATA_MODE: "memory" }).realGoogle).toBe(false);
@@ -136,7 +142,8 @@ describe("Google unverified-app user cap — 79 / 80 / 95 / 96 users", () => {
 
   it("which grants count: sensitive scopes until GOOGLE_SENSITIVE_SCOPES_VERIFIED, restricted always; non-sensitive never", async () => {
     await grant("base@gmail.com", GOOGLE_BASE_SCOPES);
-    expect(db.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend].sort());
+    // tasks (sensitive, 23.10.2026) is counted like calendar.events and gmail.send until verified
+    expect(db.googleScopeGrants.map((g) => g.scope).sort()).toEqual([GOOGLE_SCOPES.calendarEvents, GOOGLE_SCOPES.gmailSend, GOOGLE_SCOPES.tasks].sort());
     const verified = { ...CFG, sensitiveVerified: true };
     const r = await recordGoogleGrants(db, { userId: "u2", accountEmail: "after@gmail.com", granted: [...GOOGLE_BASE_SCOPES] }, { cfg: verified, notify });
     expect(r).toEqual({ recorded: [], count: 1, alerts: [] }); // approved scopes no longer use slots…
@@ -154,6 +161,49 @@ describe("Google unverified-app user cap — 79 / 80 / 95 / 96 users", () => {
     expect(googleAccountOf([conn("revoked", "old@gmail.com")])).toBe("old@gmail.com");
     expect(googleAccountOf([conn("revoked", "old@gmail.com"), conn("active", "new@gmail.com")])).toBe("new@gmail.com");
     expect(googleAccountOf([])).toBeNull();
+  });
+});
+
+describe("Drive read (drive.readonly) — the same cap, its own switch", () => {
+  const DRIVE = [GOOGLE_SCOPES.driveReadonly];
+  let db: MemoryDb;
+  beforeEach(() => {
+    db = new MemoryDb();
+  });
+
+  it("is recorded in the ledger (restricted) and decided per account with the Gmail read", async () => {
+    const cfg: GoogleCapConfig = { ...CFG, driveReadEnabled: true };
+    expect(await recordGoogleGrants(db, { userId: "u1", accountEmail: "drive@gmail.com", granted: DRIVE }, { cfg: { ...cfg, sensitiveVerified: true } })).toMatchObject({ recorded: DRIVE, count: 1 });
+    expect(await driveReadAccess(db, null, cfg)).toEqual({ allowed: true, reason: "under_cap", count: 1, cap: 95 });
+    await seed(db, 95);
+    expect(await driveReadAccess(db, "new@gmail.com", cfg)).toMatchObject({ allowed: false, reason: "cap_reached" });
+    // the account that granted Drive read is counted: Gmail read costs it no new slot either
+    expect(await gmailReadAccess(db, "drive@gmail.com", cfg)).toMatchObject({ allowed: true, reason: "already_counted" });
+    expect(await restrictedReadAccess(db, "drive@gmail.com", "drive_read", cfg)).toMatchObject({ allowed: true, reason: "already_counted" });
+  });
+
+  it("switched off on its own: GOOGLE_DRIVE_READ_ENABLED=false leaves Gmail read alone", async () => {
+    expect(await driveReadAccess(db, "a@gmail.com", { ...CFG, driveReadEnabled: false })).toMatchObject({ allowed: false, reason: "disabled" });
+    expect(await driveReadAccess(db, "a@gmail.com", CFG)).toMatchObject({ allowed: false, reason: "disabled" }); // absent = off
+    expect(await gmailReadAccess(db, "a@gmail.com", { ...CFG, driveReadEnabled: false })).toMatchObject({ allowed: true });
+    expect(restrictedReadEnabled({ gmailReadEnabled: false, driveReadEnabled: true }, "drive_read")).toBe(true);
+    expect(restrictedReadEnabled({ gmailReadEnabled: false, driveReadEnabled: true }, "gmail_read")).toBe(false);
+  });
+
+  it("the callback keeps drive.readonly by the same rules as gmail.readonly", async () => {
+    const cfg: GoogleCapConfig = { ...CFG, driveReadEnabled: true };
+    const granted = [...GOOGLE_BASE_SCOPES, GOOGLE_SCOPES.driveReadonly];
+    const keep = (requested: string[], c: GoogleCapConfig = cfg) => keepGrantedRestrictedRead(db, { accountEmail: "new@gmail.com", granted, requested, startReason: "under_cap" }, "drive_read", c);
+    expect(await keep(granted)).toEqual({ keep: true, reason: "requested" });
+    expect(await keep([...GOOGLE_BASE_SCOPES])).toEqual({ keep: false, reason: "not_requested" });
+    expect(await keep(granted, { ...cfg, driveReadEnabled: false })).toEqual({ keep: false, reason: "disabled" });
+    expect(await keepGrantedRestrictedRead(db, { accountEmail: "new@gmail.com", granted: [...GOOGLE_BASE_SCOPES], requested: granted }, "drive_read", cfg)).toEqual({ keep: false, reason: "not_granted" });
+  });
+
+  it("the unverified-app heads-up also covers a connect that would ask for Drive read only", async () => {
+    const verified: GoogleCapConfig = { ...CFG, sensitiveVerified: true, gmailReadEnabled: false, driveReadEnabled: true };
+    expect(await googleConnectShowsUnverified(db, [], verified)).toBe(true);
+    expect(await googleConnectShowsUnverified(db, [], { ...verified, driveReadEnabled: false })).toBe(false);
   });
 });
 
@@ -267,7 +317,8 @@ describe("operator alert email", () => {
     const at80 = capAlertMail({ level: 80, count: 80, cap: 95, sensitiveVerified: false });
     expect(at80.subject).toBe("עלזה: 80 חשבונות Google בתקרה של אפליקציה לא מאומתת (סף 80)");
     expect(at80.text).toContain("עוד 15 חשבונות");
-    expect(at80.text).toContain("calendar.events ו-gmail.send עדיין לא אושרו");
+    expect(at80.text).toContain("calendar.events ו-gmail.send (וגם tasks) עדיין לא אושרו");
+    expect(at80.text).toContain("קריאת Gmail וקריאת Drive");
     expect(at80.text).toContain("Composio");
     const at95 = capAlertMail({ level: 95, count: 95, cap: 95, sensitiveVerified: true });
     expect(at95.text).toContain("משתמשים חדשים כבר לא מתבקשים לאשר קריאת Gmail");

@@ -1,5 +1,6 @@
 /**
- * Minimal Microsoft Graph client for mail, calendar, OneDrive and change notifications (PLAN §11 milestone 4).
+ * Minimal Microsoft Graph client for mail, calendar, OneDrive, SharePoint (Microsoft Search), Microsoft To Do and change
+ * notifications (PLAN §11 milestone 4).
  * Takes an access-token provider so the token store can refresh transparently; retries once on 401.
  */
 export const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
@@ -61,6 +62,42 @@ export interface DriveItem {
   mimeType: string | null;
   isFolder: boolean;
   parentPath: string | null;
+}
+
+/** A document found by Microsoft Search (OneDrive or a SharePoint library): read it with its drive id + item id. */
+export interface SearchFileHit {
+  driveId: string | null;
+  itemId: string;
+  name: string;
+  webUrl: string;
+  lastModifiedDateTime: string;
+  size: number | null;
+  /** the search snippet (HTML highlight tags removed) */
+  summary: string;
+}
+
+export interface SearchSiteHit {
+  id: string;
+  name: string;
+  webUrl: string;
+  description: string;
+}
+
+export interface TodoList {
+  id: string;
+  name: string;
+  /** wellknownListName "defaultList" — the "Tasks" list */
+  isDefault: boolean;
+}
+
+export interface TodoTask {
+  id: string;
+  title: string;
+  status: string;
+  /** YYYY-MM-DD or null */
+  due: string | null;
+  notes: string;
+  importance: string;
 }
 
 export interface GraphSubscription {
@@ -152,7 +189,7 @@ export class GraphClient {
   async requestBytes(path: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
     const token = await this.opts.getAccessToken();
     const res = await this.fetchImpl(`${this.base}${path}`, { headers: { Authorization: `Bearer ${token}` }, redirect: "follow" });
-    if (!res.ok) throw new GraphError(`Graph ${res.status} downloading ${path}`, res.status, null);
+    if (!res.ok) throw new GraphError(`Graph ${res.status} downloading ${path}`, res.status, res.status === 403 ? "accessDenied" : null);
     return { bytes: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get("content-type") };
   }
 
@@ -329,6 +366,62 @@ export class GraphClient {
     return this.requestBytes(`/me/drive/items/${encodeURIComponent(id)}/content${format ? `?format=${format}` : ""}`);
   }
 
+  /** An item of any drive the user can read (a SharePoint document library, a shared OneDrive) — Files.Read.All. */
+  async getDriveItem(driveId: string, itemId: string): Promise<DriveItem> {
+    return this.mapItem(await this.request<RawDriveItem>("GET", `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}?$select=id,name,size,lastModifiedDateTime,webUrl,file,folder,parentReference`));
+  }
+
+  /** downloadItem for an item of another drive. */
+  downloadDriveItem(driveId: string, itemId: string, format?: "pdf"): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+    return this.requestBytes(`/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/content${format ? `?format=${format}` : ""}`);
+  }
+
+  // ---------- Microsoft Search (OneDrive + SharePoint): POST /search/query ----------
+
+  private async search<T>(entityType: "driveItem" | "site", query: string, size: number): Promise<T[]> {
+    const r = await this.request<{ value?: { hitsContainers?: { hits?: { summary?: string; resource?: T }[] }[] }[] }>("POST", "/search/query", {
+      requests: [{ entityTypes: [entityType], query: { queryString: query.slice(0, 200) }, from: 0, size: Math.min(Math.max(size, 1), 25) }],
+    });
+    return (r.value?.[0]?.hitsContainers?.[0]?.hits ?? []).filter((h) => h.resource).map((h) => ({ ...(h.resource as T), _summary: h.summary ?? "" }));
+  }
+
+  /** Documents across OneDrive and the SharePoint sites the user can read (Files.Read.All or Sites.Read.All). Folders are dropped. */
+  async searchDriveItems(query: string, size = 10): Promise<SearchFileHit[]> {
+    const hits = await this.search<RawDriveItem & { _summary: string }>("driveItem", query, size);
+    return hits
+      .filter((h) => !h.folder)
+      .map((h) => ({ driveId: h.parentReference?.driveId ?? null, itemId: h.id, name: h.name ?? "", webUrl: h.webUrl ?? "", lastModifiedDateTime: h.lastModifiedDateTime ?? "", size: h.size ?? null, summary: stripHighlights(h._summary) }));
+  }
+
+  /** SharePoint sites the user can read (Sites.Read.All). */
+  async searchSites(query: string, size = 10): Promise<SearchSiteHit[]> {
+    const hits = await this.search<{ id: string; name?: string; displayName?: string; webUrl?: string; description?: string; _summary: string }>("site", query, size);
+    return hits.map((h) => ({ id: h.id, name: h.displayName ?? h.name ?? "", webUrl: h.webUrl ?? "", description: h.description ?? stripHighlights(h._summary) }));
+  }
+
+  // ---------- Microsoft To Do (Tasks.ReadWrite) ----------
+
+  async todoLists(): Promise<TodoList[]> {
+    const r = await this.request<{ value: { id: string; displayName?: string; wellknownListName?: string }[] }>("GET", "/me/todo/lists?$top=20");
+    return r.value.map((l) => ({ id: l.id, name: l.displayName ?? "", isDefault: l.wellknownListName === "defaultList" }));
+  }
+
+  /** Tasks of a list — open ones unless `includeCompleted`. */
+  async todoTasks(listId: string, opts: { includeCompleted?: boolean; top?: number } = {}): Promise<TodoTask[]> {
+    const q = new URLSearchParams({ $top: String(Math.min(Math.max(opts.top ?? 50, 1), 100)) });
+    if (!opts.includeCompleted) q.set("$filter", "status ne 'completed'");
+    const r = await this.request<{ value: RawTodoTask[] }>("GET", `/me/todo/lists/${encodeURIComponent(listId)}/tasks?${q}`);
+    return r.value.map(mapTodoTask).filter((t) => opts.includeCompleted || t.status !== "completed");
+  }
+
+  /** Adds a task; `due` = YYYY-MM-DD, stored as that date (midnight UTC, a date-only due date as To Do shows it). */
+  async createTodoTask(listId: string, input: { title: string; notes?: string; due?: string | null }): Promise<TodoTask> {
+    const body: Record<string, unknown> = { title: input.title };
+    if (input.notes) body.body = { content: input.notes, contentType: "text" };
+    if (input.due) body.dueDateTime = { dateTime: `${input.due}T00:00:00`, timeZone: "UTC" };
+    return mapTodoTask(await this.request<RawTodoTask>("POST", `/me/todo/lists/${encodeURIComponent(listId)}/tasks`, body));
+  }
+
   // ---------- change notifications ----------
 
   async createSubscription(input: { resource: string; notificationUrl: string; clientState: string; expiresAt: Date; changeType?: string }): Promise<GraphSubscription> {
@@ -350,7 +443,24 @@ export class GraphClient {
   }
 }
 
+/** Microsoft Search snippets mark the matched words with <c0>…</c0> (and may carry <ddd/>): plain text only. */
+function stripHighlights(summary: string): string {
+  return summary.replace(/<\/?c\d+>|<ddd\/>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+function mapTodoTask(t: RawTodoTask): TodoTask {
+  return { id: t.id, title: t.title ?? "", status: t.status ?? "notStarted", due: t.dueDateTime?.dateTime ? t.dueDateTime.dateTime.slice(0, 10) : null, notes: t.body?.contentType === "html" ? htmlToText(t.body.content ?? "") : (t.body?.content ?? ""), importance: t.importance ?? "normal" };
+}
+
 // ---- raw Graph shapes (subset) ----
+interface RawTodoTask {
+  id: string;
+  title?: string;
+  status?: string;
+  importance?: string;
+  dueDateTime?: { dateTime?: string; timeZone?: string };
+  body?: { content?: string; contentType?: string };
+}
 interface RawAddress {
   emailAddress?: { name?: string; address?: string };
 }
@@ -387,7 +497,7 @@ interface RawDriveItem {
   webUrl?: string;
   file?: { mimeType?: string };
   folder?: unknown;
-  parentReference?: { path?: string };
+  parentReference?: { path?: string; driveId?: string; siteId?: string };
 }
 interface RawSubscription {
   id: string;

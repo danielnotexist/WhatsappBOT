@@ -4,11 +4,19 @@ import { acopy } from "@/lib/copy/bot-agents";
 import type { ActionExecutor } from "@/lib/bot/pending";
 import { driveItemText } from "./files-text";
 import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from "./graph";
+import { msWorkspaceTools } from "./workspace-tools";
 
-/** Tools exposed to the strong model once a Microsoft 365 connection is active (PLAN §11 milestone 4). */
+/**
+ * Tools exposed to the strong model once a Microsoft 365 connection is active (PLAN §11 milestone 4), plus Microsoft
+ * To Do and SharePoint (lib/ms/workspace-tools.ts, 23.10.2026).
+ */
 export interface GraphToolDeps {
   graph: () => Promise<GraphClient>;
   timeZone: string;
+  /** the connection's granted scopes (To Do / SharePoint answer with a reconnect link while theirs are missing) */
+  scopes?: string[];
+  /** one-time chat link that reconnects Microsoft 365 */
+  connectLink?: () => string;
 }
 
 const str = (description: string) => ({ type: "string", description });
@@ -157,6 +165,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           return { name: item.name, pages: res.pages, truncated: res.truncated, text: res.text };
         }),
     },
+    ...msWorkspaceTools({ graph: deps.graph, scopes: deps.scopes, connectLink: deps.connectLink }),
   ];
 }
 
