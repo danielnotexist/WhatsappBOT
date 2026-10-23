@@ -4,7 +4,7 @@ import { demoConnect } from "@/lib/auth/demo-connect";
 import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
-import { EnvError } from "@/lib/env";
+import { EnvError, msMocked } from "@/lib/env";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { getMsConfig } from "@/lib/ms";
 import { buildAdminConsentUrl, buildAuthorizeUrl, pkcePair } from "@/lib/ms/oauth";
@@ -35,8 +35,8 @@ export async function GET(request: Request) {
   // where the callback lands: back into the signup flow or the personal area (fixed paths only — no open redirect)
   const returnTo = parseReturnTo(url.searchParams.get("returnTo"));
 
-  // DEMO_MODE: no Microsoft — a fixture connection through the data layer, then the same landing as the callback
-  if (isDemo()) {
+  // DEMO_MODE without LIVE_MS: no Microsoft — a fixture connection through the data layer, then the same landing as the callback
+  if (isDemo() && msMocked()) {
     const { notice } = await demoConnect(db, user, "microsoft");
     return Response.redirect(oauthReturnUrl(process.env.APP_URL || url.origin, returnTo, "microsoft", { ok: true, notice }), 303);
   }

@@ -601,3 +601,11 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - **QR וכפתור הוואטסאפ ב-`/start/ready`:** עם `LIVE_WA=1` הם פותחים את וואטסאפ באמת, ולא את חלון ההסבר של ההדגמה.
 - בדיקות: `lib/queue/local.test.ts`, "רק שנייה…" ב-`lib/bot/process-inbound.test.ts`, ועדכון הסדר ב-onboarding / voice.
 - **רשימת "מה מעמיס" - כמה בחירות:** רשימה בוואטסאפ מאפשרת בחירה אחת להודעה (מגבלה של Meta). אחרי כל בחירה עלזה שולחת "עוד משהו שמעמיס?" עם מה שנשאר ועם השורה "זהו, מספיק"; הבחירות נשמרות ב-`profile.pain_points` (ו-`pain_point` נשאר הראשון). `lib/bot/onboarding.ts` (`sendPainList`), טקסטים ב-`lib/copy/bot.ts` ו-`docs/copy/bot-copy.md`.
+
+## Microsoft ו-Google חיים בהדגמה (`LIVE_MS=1`, `LIVE_GOOGLE=1`)
+> דניאל שאל למה "החיבור לגוגל" באתר לא דרש SSO: בהדגמה החיבור היה מדומה (fixture עם המייל של החשבון).
+- `lib/demo.ts`: `liveMsFlag()` / `liveGoogleFlag()`; עם הדגל ההדגמה מתירה את `MS_CLIENT_SECRET` / `GOOGLE_CLIENT_SECRET` בהתאמה (ורק אותם).
+- `lib/env.ts`: `liveMsInDemo()`, `msMocked()`, `liveGoogleInDemo()`, `googleMocked()`. `lib/ms/index.ts` ו-`lib/google/index.ts` שואלים אותם: עם הדגל - OAuth אמיתי מול Entra / GCP, Graph ו-Google APIs אמיתיים, ובלי fixture. `/api/auth/{microsoft,google}/start` מדלגים על `demoConnect` כשהספק חי.
+- כתובות החזרה אומתו מול שני הספקים (`https://alze.vercel.app/api/auth/microsoft/callback`, `.../google/callback`). ה-webhook של Graph (`/api/graph/notify`) פתוח אחרי המעבר ל-Standard Protection.
+- חיבורי ההדגמה הישנים (fixture) נמחקו מ-Supabase, כדי שהחיבור האמיתי יחליף אותם.
+- בדיקות: `lib/demo-factories.test.ts` - כל דגל פותח רק את הספק שלו, והסוד של הספק השני עדיין נדחה.

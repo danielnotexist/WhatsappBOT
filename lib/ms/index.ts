@@ -1,15 +1,15 @@
 import "server-only";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
-import { integrationsMocked } from "@/lib/env";
+import { msMocked } from "@/lib/env";
 import { globalSingleton } from "@/lib/global-singleton";
 import { createGraphFixture } from "./__fixtures__/graph-fixtures";
 import { GraphClient } from "./graph";
 import { msOAuthConfigFromEnv, type MsOAuthConfig } from "./oauth";
 import { getAccessToken } from "./token-store";
 
-/** OAuth config: real from env, or a fixture-backed one in DATA_MODE=memory / DEMO_MODE=1 (no Entra app needed, even when MS_* keys exist). */
+/** OAuth config: real from env, or a fixture-backed one in DATA_MODE=memory / DEMO_MODE=1 (no Entra app needed, even when MS_* keys exist) — real again in the demo with LIVE_MS=1. */
 export function getMsConfig(): MsOAuthConfig {
-  if (integrationsMocked()) {
+  if (msMocked()) {
     return { clientId: "memory-client", clientSecret: "memory-secret", tenant: "common", redirectUri: new URL("/api/auth/microsoft/callback", process.env.APP_URL || "http://localhost:3000").toString(), fetchImpl: memoryTokenFetch() };
   }
   return msOAuthConfigFromEnv();
@@ -22,7 +22,7 @@ function memoryTokenFetch(): typeof fetch {
 }
 
 export function getGraphFetch(): typeof fetch | undefined {
-  if (!integrationsMocked()) return undefined;
+  if (!msMocked()) return undefined;
   return globalSingleton("graph-fixture", () => createGraphFixture()).fetchImpl;
 }
 

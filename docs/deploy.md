@@ -119,6 +119,8 @@ Settings → **Deployment Protection** → **Vercel Authentication** → Enabled
 | משתנה | ערך | הערות |
 |---|---|---|
 | `LIVE_AI` | `1` | המתג. משפיע רק יחד עם `DEMO_MODE=1`. |
+| `LIVE_MS` | `1` | Microsoft 365 אמיתי בהדגמה (OAuth ו-Graph). מתיר את `MS_CLIENT_SECRET`; דורש `MS_CLIENT_ID`, `MS_TENANT`. |
+| `LIVE_GOOGLE` | `1` | Google אמיתי בהדגמה (OAuth, Calendar, Drive, Gmail). מתיר את `GOOGLE_CLIENT_SECRET`; דורש `GOOGLE_CLIENT_ID`. |
 | `LIVE_WA` | `1` | וואטסאפ אמיתי בהדגמה (מספר הבדיקה של Meta). מתיר את `WA_ACCESS_TOKEN`; דורש גם `WA_PHONE_NUMBER_ID`, `WA_PUBLIC_NUMBER`, `WA_VERIFY_TOKEN`, `META_APP_SECRET` (Sensitive). |
 | `ANTHROPIC_API_KEY` | מ-platform.claude.com | **Sensitive** (מוצפן, לא נראה אחרי שמירה). חסר → הצ'אט עונה בהודעה בעברית עם שם המשתנה החסר (בלי ערכים). |
 | `OPENROUTER_API_KEY` | מ-openrouter.ai → Keys | **Sensitive**. לתמלול. |

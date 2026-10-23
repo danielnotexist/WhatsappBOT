@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoHasSupabase, isDemo, liveWaFlag } from "@/lib/demo";
+import { demoHasSupabase, isDemo, liveGoogleFlag, liveMsFlag, liveWaFlag } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -159,6 +159,26 @@ export function liveWaInDemo(source: Record<string, string | undefined> = proces
 /** The WhatsApp sender (lib/wa) records instead of sending: same rule as the model — real in the demo only with LIVE_WA=1. */
 export function waMocked(source: Record<string, string | undefined> = process.env): boolean {
   return integrationsMocked(source) && !liveWaInDemo(source);
+}
+
+/** מצב "Microsoft חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_MS=1` — real Entra OAuth and Graph (lib/demo.ts then allows MS_CLIENT_SECRET). */
+export function liveMsInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveMsFlag(source) && isDemo(source);
+}
+
+/** Microsoft (lib/ms) uses its fixtures: in DATA_MODE=memory and in the demo, except the demo with LIVE_MS=1. */
+export function msMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveMsInDemo(source);
+}
+
+/** מצב "Google חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_GOOGLE=1` — real Google OAuth and APIs (lib/demo.ts then allows GOOGLE_CLIENT_SECRET). */
+export function liveGoogleInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveGoogleFlag(source) && isDemo(source);
+}
+
+/** Google (lib/google) uses its fixtures: in DATA_MODE=memory and in the demo, except the demo with LIVE_GOOGLE=1. */
+export function googleMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveGoogleInDemo(source);
 }
 
 /**

@@ -18,7 +18,7 @@ import { LocalQueue } from "@/lib/queue/local";
 import { getSttProvider } from "@/lib/stt";
 import { MockStt } from "@/lib/stt/mock";
 import { FallbackStt } from "@/lib/stt/fallback";
-import { EnvError, aiMocked, liveAiInDemo, liveWaInDemo, sttMocked, waMocked } from "@/lib/env";
+import { EnvError, aiMocked, googleMocked, liveAiInDemo, liveGoogleInDemo, liveMsInDemo, liveWaInDemo, msMocked, sttMocked, waMocked } from "@/lib/env";
 import { getWaSender } from "@/lib/wa";
 import { DEV_PUBLIC_NUMBER, publicWaNumber } from "@/lib/wa/public-number";
 import { WaClient } from "@/lib/wa/client";
@@ -171,6 +171,30 @@ describe("DEMO_MODE=1 forces every integration factory to its mock", () => {
     vi.stubEnv("LIVE_WA", "1");
     expect(liveWaInDemo()).toBe(false);
     expect(getWaSender()).toBeInstanceOf(RecordingWaSender);
+  });
+
+  it("LIVE_MS=1 / LIVE_GOOGLE=1 in the demo: the real OAuth config and no fixture fetch for that provider only", () => {
+    stubDemo({ LIVE_MS: "1", MS_CLIENT_SECRET: "ms-real", APP_URL: "https://alze.vercel.app" });
+    expect(liveMsInDemo()).toBe(true);
+    expect(msMocked()).toBe(false);
+    expect(getMsConfig().clientId).toBe("real-ms-client");
+    expect(getMsConfig().redirectUri).toBe("https://alze.vercel.app/api/auth/microsoft/callback");
+    expect(getGraphFetch()).toBeUndefined();
+    expect(googleMocked()).toBe(true);
+    expect(getGoogleConfig().clientId).toBe("memory-google-client");
+    expect(getWaSender()).toBeInstanceOf(RecordingWaSender);
+    vi.unstubAllEnvs();
+    reset();
+    stubDemo({ LIVE_GOOGLE: "1", GOOGLE_CLIENT_SECRET: "g-real" });
+    expect(liveGoogleInDemo()).toBe(true);
+    expect(getGoogleConfig().clientId).toBe("real-google-client");
+    expect(getGoogleFetch()).toBeUndefined();
+    expect(getMsConfig().clientId).toBe("memory-client");
+    vi.unstubAllEnvs();
+    reset();
+    // the other provider's secret is still refused
+    stubDemo({ LIVE_MS: "1", MS_CLIENT_SECRET: "ms-real", GOOGLE_CLIENT_SECRET: "g-real" });
+    expect(() => getMsConfig()).toThrow(/GOOGLE_CLIENT_SECRET/);
   });
 
   it("without DEMO_MODE the same keys mean the real clients (the switch is the demo, not the keys)", () => {

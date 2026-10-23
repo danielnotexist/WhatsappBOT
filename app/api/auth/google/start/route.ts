@@ -5,7 +5,7 @@ import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { gcopy } from "@/lib/copy/bot-google";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
-import { EnvError } from "@/lib/env";
+import { EnvError, googleMocked } from "@/lib/env";
 import { getGoogleConfig } from "@/lib/google";
 import { buildGoogleAuthorizeUrl, isGoogleFeature, pkcePair, scopesForRequest } from "@/lib/google/oauth";
 import { gmailReadAccess, googleAccountOf, googleCapConfig, type GmailReadAccess } from "@/lib/google/user-cap";
@@ -54,8 +54,8 @@ export async function GET(request: Request) {
     access = await gmailAccessFor(db, account, Boolean(feature));
     if (feature && access.reason === "disabled") return text(gcopy["g.web.feature_disabled"](), 403);
     if (feature && !access.allowed) return text(gcopy["g.web.gmail_read_cap_reached"](), 403);
-    // DEMO_MODE: no Google — a fixture connection through the data layer, then the same landing as the callback
-    if (isDemo()) {
+    // DEMO_MODE without LIVE_GOOGLE: no Google — a fixture connection through the data layer, then the same landing as the callback
+    if (isDemo() && googleMocked()) {
       const { notice } = await demoConnect(db, user, "google");
       return Response.redirect(oauthReturnUrl(appUrl, parseReturnTo(url.searchParams.get("returnTo")), "google", { ok: true, notice }), 303);
     }

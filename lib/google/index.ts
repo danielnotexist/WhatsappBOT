@@ -1,6 +1,6 @@
 import "server-only";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
-import { integrationsMocked } from "@/lib/env";
+import { googleMocked } from "@/lib/env";
 import { globalSingleton } from "@/lib/global-singleton";
 import { createGoogleFixture } from "./__fixtures__/google-fixtures";
 import { GoogleClient } from "./client";
@@ -12,9 +12,9 @@ function memoryFixture() {
   return globalSingleton("google-fixture", () => createGoogleFixture());
 }
 
-/** OAuth config: real from env, or a fixture-backed one in DATA_MODE=memory / DEMO_MODE=1 (no GCP project needed, even when GOOGLE_* keys exist). */
+/** OAuth config: real from env, or a fixture-backed one in DATA_MODE=memory / DEMO_MODE=1 (no GCP project needed, even when GOOGLE_* keys exist) — real again in the demo with LIVE_GOOGLE=1. */
 export function getGoogleConfig(): GoogleOAuthConfig {
-  if (integrationsMocked()) {
+  if (googleMocked()) {
     return { clientId: "memory-google-client", clientSecret: "memory-google-secret", redirectUri: new URL(GOOGLE_CALLBACK_PATH, process.env.APP_URL || "http://localhost:3000").toString(), fetchImpl: memoryFixture().fetchImpl };
   }
   return googleOAuthConfigFromEnv();
@@ -22,7 +22,7 @@ export function getGoogleConfig(): GoogleOAuthConfig {
 
 /** `fetch` for Google APIs: the fixture in memory mode, the real one otherwise. */
 export function getGoogleFetch(): typeof fetch | undefined {
-  return integrationsMocked() ? memoryFixture().fetchImpl : undefined;
+  return googleMocked() ? memoryFixture().fetchImpl : undefined;
 }
 
 /** A Google client bound to a connection's token store (refresh on expiry, retry once on 401). */
