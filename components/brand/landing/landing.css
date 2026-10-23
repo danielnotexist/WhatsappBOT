@@ -146,6 +146,12 @@ html.lenis body {
     animation: none !important;
   }
 }
+/* the same for "עצירת אנימציות" in the accessibility menu */
+html[data-a11y-motion] .alze-breathe > img,
+html[data-a11y-motion] .alze-float > img,
+html[data-a11y-motion] .alze-mascot:hover {
+  animation: none !important;
+}
 
 /* the hero's chat demo (components/brand/chat-demo.tsx) still draws the placeholder avatar: show her profile picture
    there instead. Once ChatDemo renders the picture itself, `:has(> svg)` stops matching and this does nothing. */

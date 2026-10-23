@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
+import { useMotionStopped } from "@/lib/a11y/store";
 
 /**
  * Lenis smooth scrolling — on the landing page only, and only for a mouse/trackpad with motion allowed (touch scrolling
  * is already smooth, and reduced motion means native scrolling). Loaded after hydration, destroyed on navigation, so
- * the rest of the site keeps the browser's own scrolling. In-page anchor links (#pricing…) glide too.
+ * the rest of the site keeps the browser's own scrolling. In-page anchor links (#pricing…) glide too. "עצירת
+ * אנימציות" in the accessibility menu turns it off at once (and keeps it off).
  */
 export function SmoothScroll() {
+  const stopped = useMotionStopped();
   useEffect(() => {
+    if (stopped) return;
     if (!window.matchMedia?.("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches)
       return;
     let cancelled = false;
@@ -22,6 +26,6 @@ export function SmoothScroll() {
       cancelled = true;
       destroy?.();
     };
-  }, []);
+  }, [stopped]);
   return null;
 }

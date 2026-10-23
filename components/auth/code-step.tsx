@@ -1,7 +1,8 @@
 "use client";
 
 import { OTPInput, REGEXP_ONLY_DIGITS, type SlotProps } from "input-otp";
-import { useAnimate, useReducedMotion } from "motion/react";
+import { useAnimate } from "motion/react";
+import { useReducedMotion } from "@/lib/hooks/use-reduced-motion";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { Route } from "next";

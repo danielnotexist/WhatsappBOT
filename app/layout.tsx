@@ -1,7 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { A11yMotion } from "@/components/brand/a11y-motion";
+import { AccessibilityWidget } from "@/components/brand/accessibility-widget";
 import { DemoBar } from "@/components/demo/DemoBar";
 import { DirectionProvider } from "@/components/ui/direction";
 import { Toaster } from "@/components/ui/sonner";
+import { A11Y_INIT_SCRIPT } from "@/lib/a11y/settings";
 import { BRAND } from "@/lib/brand";
 import { isDemo } from "@/lib/demo";
 import { fontVariables } from "@/lib/fonts";
@@ -38,7 +41,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="he" dir="rtl" className={`${fontVariables} dark h-full antialiased`}>
+    // suppressHydrationWarning: the inline script below adds the saved accessibility settings (data-a11y-*) to <html>
+    // before React hydrates. It covers this element's own attributes only.
+    <html lang="he" dir="rtl" className={`${fontVariables} dark h-full antialiased`} suppressHydrationWarning>
+      <head>
+        {/* the accessibility menu's saved settings, applied before the first paint (lib/a11y/settings.ts) */}
+        <script dangerouslySetInnerHTML={{ __html: A11Y_INIT_SCRIPT }} />
+      </head>
       <body className="flex min-h-full flex-col">
         <a
           href="#main"
@@ -48,7 +57,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </a>
         <DemoBar />
         <DirectionProvider direction="rtl">
-          {children}
+          <A11yMotion>{children}</A11yMotion>
+          <AccessibilityWidget />
           <Toaster />
         </DirectionProvider>
       </body>

@@ -2,12 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { isMotionStopped } from "@/lib/a11y/store";
 import { palette } from "@/lib/design/tokens";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 
 /**
  * One burst of confetti when mounted (/start/ready). canvas-confetti is loaded on demand, draws on our own
- * canvas (no worker → no blob: URL for the CSP), and does nothing under prefers-reduced-motion. The canvas covers the
+ * canvas (no worker → no blob: URL for the CSP), and does nothing under prefers-reduced-motion or "עצירת אנימציות". The canvas covers the
  * viewport from <body> (a portal, client-only), so no ancestor — a step sliding in with a transform — can box it in.
  */
 export function Confetti({ delayMs = 250 }: { delayMs?: number }) {
@@ -17,7 +18,7 @@ export function Confetti({ delayMs = 250 }: { delayMs?: number }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || typeof window === "undefined") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches || isMotionStopped()) return;
     let cancelled = false;
     let reset: (() => void) | undefined;
     const timer = window.setTimeout(async () => {

@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/hooks/use-reduced-motion";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
 
