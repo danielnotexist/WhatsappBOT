@@ -109,7 +109,8 @@ export function ConnectionItem({
       }
       title={title}
       action={action}
-      footer={services?.length ? <ServiceRow services={services} label={`שירותים ב-${title}`} /> : null}
+      // not connected: the same row, faded - what connecting gives (lib/connections/services.ts previewServices)
+      footer={services?.length ? <ServiceRow services={services} label={state === "active" ? `שירותים ב-${title}` : `שירותים שיתחברו עם ${title}`} /> : null}
     >
       {gate === "paused" && state === "active" ? <Status state="expired">מושהה: {plan === "pro" ? "" : `${WHERE[plan]} `}עובדים עם חשבון אחד</Status> : <Status state={state} />}
       {row?.account_email && state !== "none" ? (

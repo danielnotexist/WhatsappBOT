@@ -1,3 +1,4 @@
+import { tileSrc } from "@/lib/integrations/tiles";
 import type { ServiceId } from "./services";
 
 /**
@@ -26,5 +27,5 @@ export const SERVICE_TILE: Record<ServiceId, string> = {
 };
 
 export function serviceTileSrc(id: ServiceId): string {
-  return `/brand/integrations/night/${SERVICE_TILE[id]}.webp`;
+  return tileSrc(SERVICE_TILE[id], "night");
 }

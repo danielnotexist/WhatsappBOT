@@ -15,14 +15,15 @@ import { msHasScope } from "@/lib/ms/oauth";
  *   - "pro_only"       the user's plan does not include it (lib/billing/plans.ts entitlements: Tasks / To Do,
  *                      SharePoint, the Docs family's full read; on a one-account plan every service of a second, paused
  *                      account) → `href` opens the upgrade (the pay link), never a consent for a scope the plan
- *                      would not use.
+ *                      would not use;
+ *   - "preview"        the provider is not connected (previewServices): what connecting it gives, faded in the row.
  * A service that works in part while its restricted read is unavailable (Gmail sends but does not read; Drive sees only
  * the files made through עלזה) stays "connected", with a note that says so; the same for Drive on a plan without the
  * full read.
  * All text is site text: Hebrew, short hyphen only (lib/design/dashes.test.tsx scans this file).
  */
 
-export type ServiceStatus = "connected" | "needs_consent" | "unavailable" | "pro_only";
+export type ServiceStatus = "connected" | "needs_consent" | "unavailable" | "pro_only" | "preview";
 
 /** Our own solid glyphs (components/brand/service-icons.tsx). */
 export type ServiceIcon = "mail" | "calendar" | "tasks" | "folder" | "doc" | "sheet" | "slides" | "cloud" | "sites" | "files";
@@ -81,7 +82,10 @@ interface ServiceDef {
 /** The entitlements a service may rest on. */
 type PlanFlag = "tasks" | "sharepoint" | "driveFullRead";
 
-const STATUS_LABEL: Record<ServiceStatus, string> = { connected: "מחובר", needs_consent: "צריך אישור נוסף", unavailable: "לא זמין", pro_only: "במסלול פרו" };
+const STATUS_LABEL: Record<ServiceStatus, string> = { connected: "מחובר", needs_consent: "צריך אישור נוסף", unavailable: "לא זמין", pro_only: "במסלול פרו", preview: "לא מחובר" };
+
+/** the account a service comes with, in "יתחבר עם Google" (the preview of a provider that is not connected) */
+const PROVIDER_NAME: Record<ConnectionProvider, string> = { google: "Google", microsoft: "Microsoft" };
 
 const G = GOOGLE_SCOPES;
 
@@ -215,6 +219,26 @@ export function serviceStatus(def: ServiceDef, granted: readonly string[], opts:
 
 export function servicesFor(provider: ConnectionProvider): readonly ServiceDef[] {
   return provider === "google" ? GOOGLE_SERVICES : MICROSOFT_SERVICES;
+}
+
+/**
+ * A provider that is not connected: its services as a preview of what connecting gives (Daniel, 23.10.2026) - each one
+ * "preview", named "Gmail - יתחבר עם Google", its tooltip saying what it does (on a plan without it: that it comes with
+ * pro; a second account on a one-account plan: that both together are pro). No links: the row's own button ("חיבור",
+ * or "במסלול פרו") is the way in.
+ */
+export function previewServices(provider: ConnectionProvider, opts: Pick<ServiceOptions, "plan"> & { secondAccount?: boolean } = {}): ServiceView[] {
+  const ent = entitlements(opts.plan ?? "pro");
+  return servicesFor(provider).map((def) => {
+    const note = opts.secondAccount
+      ? PAUSED_NOTE
+      : def.plan && !ent[def.plan]
+        ? `${def.does}. במסלול פרו`
+        : def.limited && !ent[def.limited.without]
+          ? def.limited.note
+          : def.does;
+    return { ...view(def, "preview", note, null), name: `${def.label} - יתחבר עם ${PROVIDER_NAME[def.provider]}` };
+  });
 }
 
 /** Every service of the connection's provider with its status. */

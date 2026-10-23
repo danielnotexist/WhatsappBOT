@@ -12,7 +12,7 @@ import { createPayLinkToken } from "@/lib/billing/pay-link";
 import { entitlements, mayConnect, providerGate } from "@/lib/billing/plans";
 import { BRAND } from "@/lib/brand";
 import { googleReadGates } from "@/lib/connections/gates";
-import { connectionServices } from "@/lib/connections/services";
+import { connectionServices, previewServices } from "@/lib/connections/services";
 import { getDb } from "@/lib/db";
 import { cn } from "@/lib/utils";
 import { isBuiltinRole } from "@/lib/agents/constraints";
@@ -93,11 +93,12 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const { inForce, paused } = providerGate(connections, plan);
   const gateOf = (provider: "microsoft" | "google"): ProviderGate => (paused.includes(provider) ? "paused" : mayConnect(connections, plan, provider) ? "open" : "pro");
   // the services behind each connected account, from its granted scopes (+ the Google user cap for the restricted reads)
-  // and the plan (a service pro has and the plan does not: "במסלול פרו", a click opens the upgrade)
+  // and the plan (a service pro has and the plan does not: "במסלול פרו", a click opens the upgrade); an account that is
+  // not connected shows its services faded, as a preview of what connecting gives ("Gmail - יתחבר עם Google")
   const planOpts = { plan, upgradeHref: payHref };
-  const msServices = microsoft.state === "active" && microsoft.row ? connectionServices(microsoft.row, { ...planOpts, paused: paused.includes("microsoft") }) : null;
+  const msServices = microsoft.state === "active" && microsoft.row ? connectionServices(microsoft.row, { ...planOpts, paused: paused.includes("microsoft") }) : previewServices("microsoft", { plan, secondAccount: gateOf("microsoft") === "pro" });
   const googleServices =
-    google.state === "active" && google.row ? connectionServices(google.row, { ...planOpts, paused: paused.includes("google"), gates: await googleReadGates(db, google.row.account_email) }) : null;
+    google.state === "active" && google.row ? connectionServices(google.row, { ...planOpts, paused: paused.includes("google"), gates: await googleReadGates(db, google.row.account_email) }) : previewServices("google", { plan, secondAccount: gateOf("google") === "pro" });
   const linked = linkedPhones(phones);
   const meter = usageView(subscription, usage, now, tz);
   const name = firstName(user.name);

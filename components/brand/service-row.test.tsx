@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { connectionServices, type ReadGates } from "@/lib/connections/services";
+import { connectionServices, previewServices, type ReadGates } from "@/lib/connections/services";
 import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, normalizeScopes } from "@/lib/google/oauth";
 import { MS_SCOPES, MS_SCOPES_V1 } from "@/lib/ms/oauth";
 import { ServiceGlyph } from "./service-icons";
@@ -140,6 +140,23 @@ describe("ServiceRow", () => {
     expect(screen.getByRole("button", { name: "Google Drive - מחובר" })).toHaveAccessibleDescription("קבצים שנפתחו דרכי. חיפוש בכל ה-Drive ושמירת מסמכים: במסלול פרו");
     expect(screen.queryByText(/מחכים לאישור נוסף|מחכה לאישור נוסף/)).toBeNull();
     expect(screen.getAllByRole("link").every((a) => !a.getAttribute("href")!.startsWith("/api/auth"))).toBe(true);
+  });
+
+  it("an account that is not connected: its services faded, as buttons named 'Gmail - יתחבר עם Google' that only explain", () => {
+    render(<ServiceRow services={previewServices("google", { plan: "trial" })} label="שירותים שיתחברו עם Google" />);
+    const list = screen.getByRole("list", { name: "שירותים שיתחברו עם Google" });
+    const gmail = within(list).getByRole("button", { name: "Gmail - יתחבר עם Google" });
+    expect(gmail).toHaveAttribute("data-status", "preview");
+    expect(gmail.className).toContain("[&_img]:opacity-45");
+    expect(gmail).toHaveAccessibleDescription("קריאה, חיפוש וסיכום של מיילים, ושליחה אחרי אישור");
+    expect(within(list).getByRole("button", { name: "Google Tasks - יתחבר עם Google" })).toHaveAccessibleDescription("הצגה והוספה של משימות. במסלול פרו");
+    expect(within(list).queryAllByRole("link")).toHaveLength(0);
+    // hover shows the paper tooltip with its name
+    fireEvent.pointerEnter(gmail.closest("li")!, { pointerType: "mouse" });
+    expect(shown(gmail)).toBe(true);
+    expect(tooltipOf(gmail).parentElement).toHaveTextContent("Gmail - יתחבר עם Google");
+    // no "waiting for approval" line under a preview
+    expect(screen.queryByText(/לאישור נוסף/)).toBeNull();
   });
 
   it("uses logical (RTL-safe) classes only and respects reduced motion", () => {

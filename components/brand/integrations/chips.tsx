@@ -44,10 +44,11 @@ type Open = { id: string; via: "hover" | "focus" | "tap" } | null;
 const EDGE = 8;
 
 export function IntegrationChips({
-  groups,
+  groups: allGroups,
   labelledBy,
   label,
   tone = "night",
+  collapsed,
   className,
 }: {
   groups: ChipGroup[];
@@ -55,12 +56,23 @@ export function IntegrationChips({
   label?: string;
   /** the surface the row stands on; the tooltip takes the opposite one */
   tone?: TileTone;
+  /**
+   * show only the first N chips and a "+K" button that opens the rest in place (the compact price list); the button
+   * says how many are hidden, and its pressed state (aria-expanded) is announced
+   */
+  collapsed?: number;
   className?: string;
 }) {
   const uid = useId();
   const root = useRef<HTMLDivElement>(null);
   const pressed = useRef(false);
-  const [active, setActive] = useState(groups[0]?.items[0]?.id ?? "");
+  const [expanded, setExpanded] = useState(false);
+  const total = allGroups.reduce((n, g) => n + g.items.length, 0);
+  const limit = collapsed !== undefined && collapsed < total && !expanded ? collapsed : total;
+  const groups = sliceGroups(allGroups, limit);
+  const [activeState, setActive] = useState(groups[0]?.items[0]?.id ?? "");
+  // a chip hidden by collapsing hands its tab stop back to the first one
+  const active = groups.some((g) => g.items.some((i) => i.id === activeState)) ? activeState : (groups[0]?.items[0]?.id ?? "");
   const [open, setOpen] = useState<Open>(null);
   const tipId = (id: string) => `${uid}-tip-${id}`;
 
@@ -122,7 +134,9 @@ export function IntegrationChips({
   }
 
   const isNight = tone === "night";
-  return (
+  const compact = collapsed !== undefined;
+  const hidden = total - limit;
+  const toolbar = (
     <div
       ref={root}
       role="toolbar"
@@ -130,14 +144,18 @@ export function IntegrationChips({
       aria-label={labelledBy ? undefined : label}
       onKeyDown={onKeyDown}
       onBlur={onBlur}
-      className={cn("flex flex-wrap items-center gap-x-5 gap-y-2.5", className)}
+      className={cn(
+        "flex flex-wrap items-center",
+        compact ? "gap-x-3 gap-y-1.5" : "gap-x-5 gap-y-2.5",
+        compact && total > (collapsed ?? total) ? null : className,
+      )}
     >
       {groups.map((g) => (
         <div
           key={g.id}
           role="group"
           aria-label={g.label}
-          className="flex flex-wrap items-center gap-2"
+          className={cn("flex flex-wrap items-center", compact ? "gap-1.5" : "gap-2")}
         >
           {g.items.map((item, i) => {
             const shown = open?.id === item.id;
@@ -220,4 +238,41 @@ export function IntegrationChips({
       ))}
     </div>
   );
+
+  if (collapsed === undefined || total <= collapsed) return toolbar;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
+      {toolbar}
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-label={expanded ? "פחות חיבורים" : `עוד ${hidden} חיבורים`}
+        onClick={() => {
+          setOpen(null);
+          setExpanded((e) => !e);
+        }}
+        className={cn(
+          "inline-flex h-7 min-w-7 items-center justify-center rounded-full border px-2.5 text-[0.8125rem] leading-none font-semibold tabular transition-colors focus-visible:outline-offset-2",
+          isNight
+            ? "border-cream-muted/40 text-cream-muted hover:border-cream hover:text-cream"
+            : "border-ink/25 text-ink-muted hover:border-ink/60 hover:text-ink",
+        )}
+      >
+        <span aria-hidden="true" dir={expanded ? undefined : "ltr"}>{expanded ? "פחות" : `+${hidden}`}</span>
+      </button>
+    </div>
+  );
+}
+
+/** The first `limit` chips across the groups, in order; a group left with none is dropped. */
+function sliceGroups(groups: ChipGroup[], limit: number): ChipGroup[] {
+  let left = limit;
+  const out: ChipGroup[] = [];
+  for (const g of groups) {
+    if (left <= 0) break;
+    const n = Math.min(left, g.items.length);
+    out.push(n === g.items.length ? g : { ...g, items: g.items.slice(0, n), marks: g.marks.slice(0, n) });
+    left -= n;
+  }
+  return out;
 }

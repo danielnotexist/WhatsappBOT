@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRAND } from "@/lib/brand";
 import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
@@ -135,15 +135,20 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     expect(cta.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("pricing: basic ends with 'חשבון אחד: Google או Microsoft' and the one-account systems, pro with 'כולל חיבור ל:' and the full set ('בקרוב' on the business systems)", () => {
+  it("pricing: one compact row per plan - basic under 'חשבון אחד: Google או Microsoft', pro under its count - 8 paper tiles and '+K' that opens the full set ('בקרוב' on the business systems)", () => {
     render(<Pricing />);
-    const label = { basic: "חשבון אחד: Google או Microsoft", pro: "כולל חיבור ל:" } as const;
+    const label = { basic: "חשבון אחד: Google או Microsoft", pro: "כולל 16 חיבורים, ועוד 4 בקרוב" } as const;
     for (const plan of ["basic", "pro"] as const) {
       const card = screen.getByRole("article", { name: PLANS[plan].nameHe });
       expect(card).toHaveAttribute("data-tip-bounds");
       const row = within(card).getByRole("toolbar", { name: label[plan] });
       const names = integrationsForPlan(plan).flatMap((g) => g.items.map((i) => (i.status === "soon" ? `${i.name}, בקרוב` : i.name)));
-      expect(within(row).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(names);
+      const shown = () => within(row).getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+      expect(shown()).toEqual(names.slice(0, 8));
+      // the paper set on the cream sheet
+      expect(row.querySelector("img")?.getAttribute("src")).toMatch(/brand%2Fintegrations%2Fpaper%2F|brand\/integrations\/paper\//);
+      fireEvent.click(within(card).getByRole("button", { name: `עוד ${names.length - 8} חיבורים` }));
+      expect(shown()).toEqual(names);
     }
     const basicRow = within(screen.getByRole("article", { name: PLANS.basic.nameHe })).getByRole("toolbar");
     for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "Google Slides", "monday.com, בקרוב"]) expect(within(basicRow).queryByRole("button", { name }), name).toBeNull();
@@ -151,6 +156,7 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "monday.com, בקרוב"]) expect(within(proRow).getByRole("button", { name }), name).toBeInTheDocument();
     expect(screen.getByText(/בבסיסי ובהודעות החינמיות מחברים חשבון אחד, Google או Microsoft\. בפרו שניהם עובדים יחד/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "לכל החיבורים" })).toHaveAttribute("href", "#connectors");
+    expect(screen.getByRole("link", { name: "להשוואה המלאה" })).toHaveAttribute("href", "/pricing");
   });
 
   it("pricing: the real difference between the plans, from lib/billing/plans.ts (planFeatures)", () => {
@@ -192,9 +198,29 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     ]);
   });
 
-  it("the header links to the list", () => {
+  it("the header links to the list, and 'מחירים' to its own page", () => {
     render(<LandingHeader />);
     expect(screen.getByRole("link", { name: "חיבורים" })).toHaveAttribute("href", "#connectors");
+    expect(screen.getByRole("link", { name: "מחירים" })).toHaveAttribute("href", "/pricing");
+  });
+
+  it("on /pricing the header leads back to the landing's sections and marks 'מחירים' current", () => {
+    render(<LandingHeader page="/pricing" />);
+    expect(screen.getByRole("link", { name: "חיבורים" })).toHaveAttribute("href", "/#connectors");
+    expect(screen.getByRole("link", { name: "מחירים" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("the full list: our night tiles (no white chips), and 'ועוד בהמשך' is a button that opens 'בקשת מערכת'", async () => {
+    const { container } = render(<Connectors />);
+    expect(container.querySelector(".bg-white")).toBeNull();
+    const srcs = [...container.querySelectorAll("img")].map((i) => decodeURIComponent(i.getAttribute("src") ?? ""));
+    expect(srcs.length).toBe(INTEGRATIONS.length + 1);
+    for (const s of srcs) expect(s).toContain("/brand/integrations/night/");
+    const ask = screen.getByRole("button", { name: "בקשת מערכת" });
+    expect(ask).toHaveAccessibleDescription("חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה כאן.");
+    expect(ask.closest("li")).toHaveTextContent("ועוד בהמשך");
+    fireEvent.click(ask);
+    expect(await screen.findByRole("dialog", { name: "בקשת מערכת" })).toBeInTheDocument();
   });
 });
 

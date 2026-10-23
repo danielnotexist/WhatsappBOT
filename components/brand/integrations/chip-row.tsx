@@ -4,7 +4,7 @@ import { IntegrationTile, type TileSize } from "./tile";
 import type { TileTone } from "./soon-tag";
 
 /**
- * Catalogue groups → the interactive chip row (chips.tsx). Server component: the tiles (and their SVG marks) render
+ * Catalogue groups → the interactive chip row (chips.tsx). Server component: the tiles (pictures or SVG marks) render
  * here and travel to the client island as finished elements.
  */
 export function IntegrationChipRow({
@@ -13,6 +13,7 @@ export function IntegrationChipRow({
   label,
   size = "md",
   tone = "night",
+  collapsed,
   className,
 }: {
   groups: IntegrationGroup[];
@@ -20,6 +21,8 @@ export function IntegrationChipRow({
   label?: string;
   size?: TileSize;
   tone?: TileTone;
+  /** show the first N and a "+K" button for the rest (chips.tsx) */
+  collapsed?: number;
   className?: string;
 }) {
   return (
@@ -27,6 +30,7 @@ export function IntegrationChipRow({
       labelledBy={labelledBy}
       label={label}
       tone={tone}
+      collapsed={collapsed}
       className={className}
       groups={groups.map((g) => ({
         id: g.vendor,
@@ -37,9 +41,7 @@ export function IntegrationChipRow({
           benefit: i.benefit,
           soon: i.status === "soon",
         })),
-        marks: g.items.map((i) => (
-          <IntegrationTile key={i.id} integration={i} size={size} tone={tone} />
-        )),
+        marks: g.items.map((i) => <IntegrationTile key={i.id} integration={i} size={size} tone={tone} />),
       }))}
     />
   );
