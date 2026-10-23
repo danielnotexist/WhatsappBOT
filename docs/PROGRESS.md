@@ -614,3 +614,7 @@ DB_NAME=whatsappbot_hyp_test supabase/tests/run-local.sh
 - **התקלה:** דניאל חיבר שני חשבונות Microsoft באותו tenant (קודם חשבון ה-admin של onmicrosoft.com בלי תיבת דואר, אחר כך daniel@secureops.co.il). `activeMicrosoftConnection` בחר את הראשון ברשימה (הישן), ולכן כל קריאה למייל ול-OneDrive החזירה "התיבה לא פעילה".
 - **התיקון:** `activeMicrosoftConnection` / `activeGoogleConnection` בוחרים את החיבור הפעיל האחרון. ה-callback של כל ספק מנתק עכשיו חיבורים קודמים של אותו ספק (`replaceOtherConnections` ב-`lib/account/service.ts`, דרך אותו ניתוק של האזור האישי) - חשבון אחד לכל ספק.
 - בדיקה: `lib/account/service.test.ts`.
+
+## מחקר קונקטורים לשוק הישראלי (23.10)
+- `docs/research/connectors-israel.md`: Tier 1 - Microsoft To Do / Planner, קישורי Teams ו-Meet, Google Tasks ו-Contacts, מורנינג (חשבונית ירוקה), iCount, Hebcal / שער יציג / Waze, monday.com. Tier 2 ו-3 עם נימוקים ומקורות.
+- חשוב: ב-tenant עם הגדרות ברירת מחדל רוב ההרשאות של Mail / Calendars / Files דורשות אישור מנהל - כדאי לבקש את כל ההרשאות של Tier 1 בבקשת אישור המנהל הראשונה.
