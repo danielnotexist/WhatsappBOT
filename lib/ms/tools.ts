@@ -1,8 +1,8 @@
-import { NOT_ORGANIZER, alreadyOnline, onlineMeetingUpdateField, type Tool, type ToolContext } from "@/lib/ai/tools";
+import { NOT_ORGANIZER, alreadyOnline, onlineMeetingUpdateField, onlineUnavailableResult, type Tool, type ToolContext } from "@/lib/ai/tools";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
 import type { ConnectionRow } from "@/lib/db/types";
-import { onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
+import { onlineCheckFailed, onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
 import { TEAMS_PROVIDER, isPersonalMicrosoftAccount } from "@/lib/online-meeting";
 import { driveItemText } from "./files-text";
 import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from "./graph";
@@ -11,16 +11,26 @@ import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from
 export interface GraphToolDeps {
   graph: () => Promise<GraphClient>;
   timeZone: string;
+  /** the Microsoft connection (tenant, address): tells a personal account apart when Teams is unavailable */
+  connection?: Pick<ConnectionRow, "tenant_id" | "account_email"> | null;
 }
 
 const str = (description: string) => ({ type: "string", description });
 const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
 const compactMessage = (m: GraphMessage) => ({ id: m.id, subject: m.subject, from: m.from ? `${m.from.name} <${m.from.address}>` : "", received: m.receivedDateTime, unread: !m.isRead, attachments: m.hasAttachments, preview: m.bodyPreview.slice(0, 200) });
-const compactEvent = (e: GraphEvent) => ({ id: e.id, subject: e.subject, start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: e.location, attendees: e.attendees.map((a) => a.address), organizer_is_me: e.isOrganizer ?? true, ...(e.joinUrl ? { join_url: e.joinUrl } : {}) });
+/** The link to show for an event: its Teams / Skype meeting, else a meeting link written in its location or body. */
+const shownLink = (e: GraphEvent) => e.joinUrl ?? e.textJoinUrl;
+const compactEvent = (e: GraphEvent) => {
+  const link = shownLink(e);
+  return { id: e.id, subject: e.subject, start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: e.location, attendees: e.attendees.map((a) => a.address), organizer_is_me: e.isOrganizer ?? true, ...(link ? { join_url: link } : {}) };
+};
 
-/** The event already has an online meeting (Teams or Skype): Graph ignores a new request, and nothing is added. */
-const hasOnlineMeeting = (e: GraphEvent) => e.isOnlineMeeting || Boolean(e.joinUrl);
+/**
+ * The event already has an online meeting: Teams or Skype (Graph ignores a new request), or a link the Zoom add-in (or
+ * anyone) wrote in the location or body with isOnlineMeeting false. Nothing is added: the attendees would get two links.
+ */
+const hasOnlineMeeting = (e: GraphEvent) => e.isOnlineMeeting || Boolean(e.joinUrl) || Boolean(e.textJoinUrl);
 const addressesOf = (e: GraphEvent) => e.attendees.map((a) => a.address.trim().toLowerCase()).filter(Boolean);
 
 function graphErrorOutput(e: unknown) {
@@ -131,9 +141,16 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
         const changes = Object.values(fields).some((v) => v.trim());
         const wantsLink = input.online_meeting === true;
         // a Teams meeting stays as it is ("תזיזי את פגישת הטימס" is a move, not a new link)
-        if (wantsLink && hasOnlineMeeting(current) && !changes) return alreadyOnline(current.joinUrl);
+        if (wantsLink && hasOnlineMeeting(current) && !changes) return alreadyOnline(shownLink(current));
         if (wantsLink && !hasOnlineMeeting(current) && current.isOrganizer === false) return NOT_ORGANIZER;
         const addLink = wantsLink && !hasOnlineMeeting(current);
+        if (addLink) {
+          // known before the press (a personal account, a work account without Teams): no draft that is certain to fail
+          const teams = (await guard((g) => teamsAvailability(g, deps.connection))) as TeamsAvailability | { error: string };
+          if (teams && "error" in teams) return teams;
+          if (teams && !teams.available) return onlineUnavailableResult("microsoft", teams.personal);
+        }
+        const link = shownLink(current);
         const pending = await ctx.createPending("update_event", {
           ...(addLink ? { provider: "microsoft", online_meeting: true } : {}),
           id,
@@ -142,10 +159,10 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           current_date: current.start.slice(0, 10),
           current_start: current.isAllDay ? "" : current.start.slice(11, 16),
           current_attendee_count: current.attendees.length,
-          ...(current.joinUrl ? { current_join_url: current.joinUrl } : {}),
+          ...(link ? { current_join_url: link } : {}),
           ...(ctx.checksRecipients ? { current_attendees: addressesOf(current) } : {}),
         });
-        return { status: "pending_approval", pending_action_id: pending.id, note: `השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר.${wantsLink && !addLink ? " לפגישה כבר יש קישור, ולא יתווסף קישור חדש." : ""}` };
+        return { status: "pending_approval", pending_action_id: pending.id, ...(addLink ? { online_service: "Teams" } : {}), note: `השינוי מוצג למשתמש עם כפתורי אישור. ענה במשפט קצר.${wantsLink && !addLink ? " לפגישה כבר יש קישור, ולא יתווסף קישור חדש." : ""}` };
       },
     },
     {
@@ -235,25 +252,25 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
     create_event: wrap(async ({ graph, timeZone, connection }, p, action) => {
       const attendees = Array.isArray(p.attendees) ? (p.attendees as string[]).filter(Boolean) : [];
       const online = p.online_meeting === true;
-      const unavailable = () => onlineMeetingUnavailable(action, "microsoft", { personal: isPersonalMicrosoftAccount(connection) });
+      const personal = isPersonalMicrosoftAccount(connection);
+      const unavailable = () => onlineMeetingUnavailable(action, "microsoft", { personal });
       if (online) {
         const allowed = await teamsAllowed(graph);
-        if (allowed === null) return PROVIDER_CHECK_FAILED;
+        if (allowed === null) return onlineCheckFailed(action);
         if (!allowed) return unavailable();
       }
       let e: GraphEvent;
       try {
-        e = await graph.createEvent({ subject: String(p.title ?? ""), start: `${p.date}T${p.start}:00`, end: `${p.date}T${p.end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online });
+        // transactionId: Graph drops a repeated POST of the same approved action instead of creating a second meeting
+        e = await graph.createEvent({ subject: String(p.title ?? ""), start: `${p.date}T${p.start}:00`, end: `${p.date}T${p.end}:00`, timeZone, location: String(p.location ?? "") || undefined, attendees, onlineMeeting: online, transactionId: action.id });
       } catch (err) {
         if (online && isTeamsError(err)) return unavailable();
         throw err;
       }
       const lines = [copy["act.cal.created"](String(p.title ?? ""), dateHe(String(p.date ?? "")), String(p.start ?? ""))];
       const link = online ? await teamsLink(graph, e, timeZone) : null;
-      if (link && "url" in link) lines.push(copy["act.cal.join_link"](link.url));
-      if (link && "later" in link) lines.push(copy["act.cal.join_link_later"]());
-      if (link && "missing" in link) lines.push(copy["act.cal.online_missing"]("microsoft", attendees.length > 0));
-      else if (attendees.length) lines.push("ההזמנות יצאו למשתתפים.");
+      if (link) lines.push(linkLine(link, personal, attendees.length > 0));
+      if (!(link && "missing" in link) && attendees.length) lines.push("ההזמנות יצאו למשתתפים.");
       return lines.join("\n");
     }),
     update_event: wrap(async ({ graph, timeZone, connection }, p, action) => {
@@ -263,6 +280,7 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
       const current = await graph.getEvent(id, timeZone);
       const wantsLink = p.online_meeting === true;
       const addLink = wantsLink && !hasOnlineMeeting(current);
+      const personal = isPersonalMicrosoftAccount(connection);
       const patch: Parameters<GraphClient["updateEvent"]>[1] = { timeZone };
       if (p.subject) patch.subject = String(p.subject);
       if (p.date && p.start) patch.start = `${p.date}T${p.start}:00`;
@@ -270,27 +288,33 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
       if (p.location) patch.location = String(p.location);
       const moved = Boolean(patch.start || patch.end);
       const changed = Boolean(moved || patch.subject || patch.location);
-      if (wantsLink && !addLink && !changed) return copy["act.cal.online_exists"](current.joinUrl);
+      if (wantsLink && !addLink && !changed) return copy["act.cal.online_exists"](shownLink(current));
       if (addLink) {
         if (current.isOrganizer === false) return { ok: false, message: copy["act.cal.online_organizer_only"]() };
         const allowed = await teamsAllowed(graph);
-        if (allowed === null) return PROVIDER_CHECK_FAILED;
-        if (!allowed) return onlineMeetingUnavailable(action, "microsoft", { personal: isPersonalMicrosoftAccount(connection) });
+        if (allowed === null) return onlineCheckFailed(action);
+        if (!allowed) return onlineMeetingUnavailable(action, "microsoft", { personal });
         patch.onlineMeeting = true;
       }
       let e: GraphEvent;
       try {
         e = await graph.updateEvent(id, patch);
       } catch (err) {
-        if (addLink && isTeamsError(err)) return onlineMeetingUnavailable(action, "microsoft", { personal: isPersonalMicrosoftAccount(connection) });
+        if (addLink && isTeamsError(err)) return onlineMeetingUnavailable(action, "microsoft", { personal });
         throw err;
       }
-      const lines = [moved ? copy["act.cal.moved"](e.subject, dateHe(e.start), e.start.slice(11, 16)) : addLink && !changed ? copy["act.cal.online_added"](e.subject, "microsoft") : copy["act.cal.updated"](e.subject)];
-      if (addLink) {
-        const link = await teamsLink(graph, e, timeZone);
-        lines.push("url" in link ? copy["act.cal.join_link"](link.url) : "later" in link ? copy["act.cal.join_link_later"]() : copy["act.cal.online_missing"]("microsoft"));
-      } else if (wantsLink) lines.push(copy["act.cal.online_exists"](current.joinUrl));
-      if (e.attendees.length) lines.push(`עדכון נשלח ל-${e.attendees.length} משתתפים.`);
+      // the link is read back before the reply is worded: no line claims a link the event does not have
+      const link = addLink ? await teamsLink(graph, e, timeZone) : null;
+      const notified = e.attendees.length > 0;
+      if (link && "missing" in link && !changed) {
+        // only the link was asked for and Graph left it out (a tenant policy, Teams not set up for the user): the event
+        // was still written, so the attendees got an update; nothing invites a retry that would fail the same way
+        return { ok: false, message: `${copy["act.cal.online_missing"]("microsoft", false, personal)}\n${copy["act.cal.online_not_added"](e.subject, notified)}` };
+      }
+      const lines = [moved ? copy["act.cal.moved"](e.subject, dateHe(e.start), e.start.slice(11, 16)) : link && !changed ? copy["act.cal.online_added"](e.subject, "microsoft") : copy["act.cal.updated"](e.subject)];
+      if (link) lines.push(linkLine(link, personal));
+      else if (wantsLink) lines.push(copy["act.cal.online_exists"](shownLink(current)));
+      if (notified) lines.push(`עדכון נשלח ל-${e.attendees.length} משתתפים.`);
       return lines.join("\n");
     }),
     delete_event: wrap(async ({ graph }, p) => {
@@ -310,27 +334,44 @@ class NoConnection extends Error {}
 
 /**
  * Teams needs the calendar to list "teamsForBusiness" in allowedOnlineMeetingProviders (a work or school account with
- * Teams). Null when the check itself failed: Graph does not refuse Teams on a calendar without it (a personal account
- * gets 201 with no meeting), so nothing is created blind; the caller answers PROVIDER_CHECK_FAILED.
+ * Teams). Null when Graph did not answer for now (429, 5xx, network): Graph does not refuse Teams on a calendar without
+ * it (a personal account gets 201 with no meeting), so nothing is created blind; the executor answers
+ * onlineCheckFailed (a fresh draft of the same meeting). Any other failure throws (GraphClient.onlineMeetingProviders).
  */
 async function teamsAllowed(graph: GraphClient): Promise<boolean | null> {
   const providers = await graph.onlineMeetingProviders();
   return providers === null ? null : providers.includes(TEAMS_PROVIDER);
 }
 
-/** The Teams check could not run: nothing was created or changed; the user can approve again in a few minutes. */
-const PROVIDER_CHECK_FAILED: ActionResult = { ok: false, message: copy["err.provider_down"]("Microsoft 365"), retryable: true };
+export type TeamsAvailability = { available: boolean; personal: boolean } | null;
+
+/** Teams on this account, asked before a draft names it (the update_event tool, the base create_event's check). */
+export async function teamsAvailability(graph: GraphClient, connection?: Pick<ConnectionRow, "tenant_id" | "account_email"> | null): Promise<TeamsAvailability> {
+  const allowed = await teamsAllowed(graph);
+  return allowed === null ? null : { available: allowed, personal: isPersonalMicrosoftAccount(connection) };
+}
+
+/** The reply line of the link after an approved Teams meeting (`invitesSent`: a new meeting's invitations went out). */
+function linkLine(link: TeamsLink, personal: boolean, invitesSent = false): string {
+  if ("url" in link) return copy["act.cal.join_link"](link.url);
+  if ("later" in link) return copy["act.cal.join_link_later"]();
+  return copy["act.cal.online_missing"]("microsoft", invitesSent, personal);
+}
 
 /** A client error from Graph about the online meeting itself (not auth, throttling, outage or a vanished event). */
 function isTeamsError(e: unknown): boolean {
   return e instanceof GraphError && e.status >= 400 && e.status < 500 && !e.unauthorized && !e.retryable && e.status !== 404 && /online\s*meeting|teams/i.test(`${e.code ?? ""} ${e.message}`);
 }
 
+type TeamsLink = { url: string } | { later: true } | { missing: true };
+
 /**
  * The Teams link after the confirmation; Graph usually returns it at once, else one more read. "Later" only when Graph
- * says the event is a Teams meeting; any other provider (a personal account echoing isOnlineMeeting) never gets one.
+ * says the event is a Teams meeting. Anything else is a silent drop (isOnlineMeeting false, provider "unknown",
+ * onlineMeeting null: a Teams policy that turns off the Outlook add-in, Teams not set up for the user), reported as
+ * "missing": the account cannot create it, and a retry would fail the same way.
  */
-async function teamsLink(graph: GraphClient, e: GraphEvent, timeZone: string): Promise<{ url: string } | { later: true } | { missing: true }> {
+async function teamsLink(graph: GraphClient, e: GraphEvent, timeZone: string): Promise<TeamsLink> {
   let ev = e;
   if (!ev.joinUrl) ev = await graph.getEvent(e.id, timeZone).catch(() => e);
   if (ev.joinUrl) return { url: ev.joinUrl };

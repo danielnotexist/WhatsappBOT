@@ -33,6 +33,11 @@ export const BASE_SYSTEM_PROMPT = `אתה העוזר המשרדי האישי ש�
 - זרימת יומן: create_event / update_event / delete_event יוצרים פעולה ממתינה. הצג את הפרטים (מה, מתי, עם מי) ובקש אישור.
 - לעולם אל תאמר "שלחתי", "קבעתי", "ביטלתי" או "עדכנתי" אלא אם הכלי החזיר סטטוס סופי (sent / done). עד אז נסח בעתיד מותנה: "אשלח ברגע שתאשר/י".
 
+## פגישות מקוונות (כמו lib/ai/system-prompt.ts באפליקציה)
+- online_meeting: true כשמבקשים פגישה מקוונת (Teams/טימס, Meet/מיט, Zoom/זום, וידאו, "אונליין", "קישור לפגישה"), או כשהמשתמש אומר במפורש שהפגישה מרחוק ("נדבר מרחוק", "לא יגיע פיזית"). "שיחה" לבדה היא בדרך כלל שיחת טלפון. פגישה פרונטלית: false. כשלא ברור: false.
+- משתתף מעיר אחרת או מחו״ל אינו בקשה לקישור: לשאול שאלה קצרה אחת ("להוסיף פגישת Teams?") לפני שמסמנים online_meeting.
+- היומן המחובר הוא Microsoft 365, ולכן הפגישה המקוונת היא Teams. אין יצירת פגישות Zoom: בבקשה לזום לציין במשפט קצר שתיווצר פגישת Teams.
+
 ## הודעות פשוטות
 - ברכות, תודה, אישורים קצרים ושיחת חולין — ענה בקצרה ובחום, בלי כלים.
 - שאלה כללית שאינה קשורה למשרד — ענה בקצרה.
@@ -179,8 +184,13 @@ export const TOOL_DEFS: ToolDef[] = [
         end: str('End, ISO 8601 date-time. "" = start + 1 hour.'),
         location: str('Location or "" if unknown.'),
         attendees: str('Comma-separated attendee names/emails, or "".'),
+        online_meeting: {
+          type: 'boolean',
+          description:
+            'true when the user asks for an online meeting (Teams/טימס, Meet/מיט, Zoom/זום, video/וידאו, "אונליין", "קישור לפגישה") or says plainly that it is remote ("נדבר מרחוק"); the Teams link is created and sent with the invitation. false for an in-person meeting, for "שיחה" alone (usually a phone call) and when unclear. An attendee in another city or abroad is not a request: ask one short question first.',
+        },
       },
-      required: ['title', 'start', 'end', 'location', 'attendees'],
+      required: ['title', 'start', 'end', 'location', 'attendees', 'online_meeting'],
       additionalProperties: false,
     },
   },
@@ -194,8 +204,12 @@ export const TOOL_DEFS: ToolDef[] = [
         title: str('New title or "".'),
         start: str('New start (ISO 8601) or "".'),
         end: str('New end (ISO 8601) or "".'),
+        online_meeting: {
+          type: 'boolean',
+          description: 'true only when the user asks to add a Teams link to a meeting that has none. Moving or editing an existing online meeting: false.',
+        },
       },
-      required: ['event_id', 'title', 'start', 'end'],
+      required: ['event_id', 'title', 'start', 'end', 'online_meeting'],
       additionalProperties: false,
     },
   },

@@ -270,9 +270,10 @@ export interface GoogleFixtureState {
   /**
    * A Meet create request (conferenceData.createRequest with conferenceDataVersion=1): "success" answers with the link,
    * "pending" answers without it and the next events.get has it, "refuse" answers 400 (Google refused the conference),
-   * "refuse_created" answers the same 400 but an insert still created the event without Meet (reported in the wild).
+   * "refuse_created" answers the same 400 but an insert still created the event without Meet (reported in the wild),
+   * "failure" accepts the write and answers createRequest.status.statusCode "failure" with no entry points (documented).
    */
-  conferenceMode: "success" | "pending" | "refuse" | "refuse_created";
+  conferenceMode: "success" | "pending" | "refuse" | "refuse_created" | "failure";
 }
 
 /** A tiny evaluator for the Gmail search syntax the app uses (in:, is:unread, from:, subject:, newer_than:, category:, has:attachment, words). */
@@ -369,6 +370,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
     const req = (body as { conferenceData?: { createRequest?: { requestId?: string; conferenceSolutionKey?: { type?: string } } } } | null)?.conferenceData?.createRequest;
     if (url.searchParams.get("conferenceDataVersion") !== "1" || !req) return null;
     if (state.conferenceMode === "refuse" || state.conferenceMode === "refuse_created" || req.conferenceSolutionKey?.type !== "hangoutsMeet") return apiError(400, "invalid", "Invalid conference type value.", { status: "INVALID_ARGUMENT" });
+    if (state.conferenceMode === "failure") return { conferenceData: { createRequest: { requestId: req.requestId ?? "", conferenceSolutionKey: { type: "hangoutsMeet" }, status: { statusCode: "failure" } } } };
     const code = `fix-meet-${++n}`;
     const done = fixtureMeetConference(code, req.requestId ?? "");
     if (state.conferenceMode === "success") return done;

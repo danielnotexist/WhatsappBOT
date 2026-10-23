@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PRODUCT_NAME } from "@/lib/brand";
 import { copy } from "@/lib/copy/bot";
-import { MSA_CONSUMER_TENANT, isPersonalMicrosoftAccount, safeJoinUrl } from "./online-meeting";
+import { MSA_CONSUMER_TENANT, isPersonalMicrosoftAccount, joinUrlInText, safeJoinUrl } from "./online-meeting";
 
 describe("safeJoinUrl", () => {
   it("keeps Teams, Meet and other known meeting links exactly as given", () => {
@@ -33,6 +33,17 @@ describe("safeJoinUrl", () => {
   });
 });
 
+describe("joinUrlInText", () => {
+  it("finds a meeting link written in a location or a body (the Zoom add-in, a pasted Teams link), under the same rules", () => {
+    expect(joinUrlInText("https://us02web.zoom.us/j/8123456789?pwd=abc")).toBe("https://us02web.zoom.us/j/8123456789?pwd=abc");
+    expect(joinUrlInText("", "נצטרף בזום: https://zoom.us/j/42. להתראות")).toBe("https://zoom.us/j/42");
+    expect(joinUrlInText("חדר ישיבות", "(https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0)")).toBe("https://teams.microsoft.com/l/meetup-join/19%3ameeting_x%40thread.v2/0");
+    // the first safe one; links off the list, http and plain text are not meeting links
+    expect(joinUrlInText("https://evil.example/zoom.us/j/1 ואז https://meet.google.com/abc-defg-hij")).toBe("https://meet.google.com/abc-defg-hij");
+    for (const none of [null, undefined, "", "בית משפט השלום, ויצמן 1", "http://zoom.us/j/1", "https://maps.google.com/?q=x", "Google Meet"]) expect(joinUrlInText(none), String(none)).toBeNull();
+  });
+});
+
 describe("isPersonalMicrosoftAccount", () => {
   it("knows a personal account by the consumer tenant or an outlook / hotmail / live address, and nothing else", () => {
     expect(isPersonalMicrosoftAccount({ tenant_id: MSA_CONSUMER_TENANT, account_email: "dana@levi-law.co.il" })).toBe(true);
@@ -54,7 +65,14 @@ describe("online meeting copy", () => {
     expect(copy["act.cal.join_link"]("https://meet.google.com/abc")).toBe("קישור לפגישה: https://meet.google.com/abc");
     // the work / school explanation only where it is known to be the reason
     expect(copy["act.cal.online_unavailable"]("microsoft")).toBe("בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams.");
-    expect(copy["act.cal.online_unavailable"]("microsoft", true)).toBe("בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams (היא זמינה רק בחשבון עבודה או בית ספר).");
+    expect(copy["act.cal.online_unavailable"]("microsoft", true)).toBe("בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams (יצירת פגישת Teams מהיומן זמינה רק בחשבון עבודה או בית ספר).");
+    // a silent drop is "unavailable", with no invitation to retry (it would fail the same way and mail the attendees)
+    expect(copy["act.cal.online_missing"]("google", true)).toBe("לא הצלחתי ליצור פגישת Google Meet בחשבון הזה.\nההזמנות יצאו בלי קישור.");
+    expect(copy["act.cal.online_missing"]("microsoft")).toBe("בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams.");
+    expect(copy["act.cal.online_not_added"]("דיון", true)).toBe("הפגישה ״דיון״ נשארה בלי קישור, והמשתתפים קיבלו עדכון בלי קישור.");
+    expect(copy["act.cal.online_exists"](null)).toBe("לפגישה כבר יש פגישה מקוונת, והקישור מופיע באירוע ביומן. לא נוסף קישור חדש.");
+    expect(copy["act.cal.online_check_failed"]({ isUpdate: false })).toBe("לא הצלחתי לבדוק אם אפשר ליצור פגישת Teams בחשבון הזה, ולכן הפגישה לא נקבעה. אפשר לנסות שוב בעוד כמה דקות.");
+    for (const p of ["microsoft", "google"]) for (const invites of [false, true]) expect(copy["act.cal.online_missing"](p, invites, true)).not.toMatch(/אפשר לבקש|לנסות שוב/);
     expect(copy["act.cal.online_not_done"]("google", { isUpdate: false, askMain: true })).toBe(`לא הצלחתי ליצור פגישת Google Meet בחשבון הזה.\nהפגישה לא נקבעה. אפשר לבקש מ-״@${PRODUCT_NAME}״ לקבוע אותה בלי קישור.`);
     expect(copy["act.cal.online_added"]("פגישת צוות", "google")).toBe("נוסף קישור Google Meet לפגישה ״פגישת צוות״.");
     const texts = [
@@ -64,11 +82,16 @@ describe("online meeting copy", () => {
         copy["act.cal.online_unavailable"](p, true),
         ...[false, true].flatMap((isUpdate) => [false, true].map((askMain) => copy["act.cal.online_not_done"](p, { isUpdate, askMain, somethingLeft: true, personal: true }))),
         copy["act.cal.online_not_done"](p, { isUpdate: true }),
-        copy["act.cal.online_missing"](p, true),
+        copy["act.cal.online_missing"](p, true, true),
         copy["act.cal.online_missing"](p),
         copy["act.cal.online_added"]("פגישה", p),
       ]),
+      ...[false, true].flatMap((isUpdate) => [false, true].map((askMain) => copy["act.cal.online_check_failed"]({ isUpdate, askMain }))),
+      copy["act.cal.online_not_added"]("פגישה", true),
+      copy["act.cal.online_not_added"]("", false),
+      copy["act.cal.create_unverified"](),
       copy["act.cal.join_link_later"](),
+      copy["act.cal.join_link_later"](true),
       copy["act.cal.online_exists"](null),
       copy["act.cal.online_exists"]("https://meet.google.com/abc"),
       copy["act.cal.online_organizer_only"](),
@@ -79,7 +102,8 @@ describe("online meeting copy", () => {
     ];
     for (const t of texts) {
       expect(t).not.toContain("—");
-      expect(t.length).toBeLessThan(160);
+      // the longest: a personal account's reason and the way forward through the main assistant
+      expect(t.length).toBeLessThan(180);
       // every line opens with a Hebrew word (WhatsApp shows a line that opens in Latin right-to-left reversed)
       for (const line of t.split("\n").filter(Boolean)) expect(line, line).toMatch(/^[*א-ת]/);
       // titles in the assistant's own words are quoted with gershayim, not straight quotes

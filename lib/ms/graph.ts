@@ -1,4 +1,4 @@
-import { TEAMS_PROVIDER, safeJoinUrl } from "@/lib/online-meeting";
+import { TEAMS_PROVIDER, joinUrlInText, safeJoinUrl } from "@/lib/online-meeting";
 
 /**
  * Minimal Microsoft Graph client for mail, calendar, OneDrive and change notifications (PLAN §11 milestone 4).
@@ -60,6 +60,8 @@ export interface GraphEvent {
   isOrganizer: boolean | null;
   /** `onlineMeeting.joinUrl` when it is a safe meeting link (lib/online-meeting.ts), else null */
   joinUrl: string | null;
+  /** a meeting link written in the location or the body preview (e.g. the Zoom add-in), when safe; else null */
+  textJoinUrl: string | null;
 }
 
 export interface DriveItem {
@@ -92,6 +94,11 @@ export interface NewEvent {
   isAllDay?: boolean;
   /** true → a Teams meeting (`isOnlineMeeting` + `onlineMeetingProvider: "teamsForBusiness"`); Graph cannot turn it off later */
   onlineMeeting?: boolean;
+  /**
+   * POST only: Graph's `transactionId`, "for the server to avoid redundant POST operations in case of client retries".
+   * The pending action's id, so one approved action is one event.
+   */
+  transactionId?: string;
 }
 
 export interface GraphClientOptions {
@@ -277,6 +284,7 @@ export class GraphClient {
       onlineMeetingProvider: typeof e.onlineMeetingProvider === "string" ? e.onlineMeetingProvider : null,
       isOrganizer: typeof e.isOrganizer === "boolean" ? e.isOrganizer : null,
       joinUrl: safeJoinUrl(e.onlineMeeting?.joinUrl),
+      textJoinUrl: joinUrlInText(e.location?.displayName, e.bodyPreview),
     };
   }
 
@@ -307,16 +315,17 @@ export class GraphClient {
    * The online meeting providers the default calendar allows (GET /me/calendar, covered by Calendars.ReadWrite).
    * A work or school account with Teams lists "teamsForBusiness"; a personal Microsoft account lists
    * "skypeForConsumer" (and Graph then creates the event without a meeting: 201 with onlineMeeting null). A successful
-   * answer without the list counts as none allowed. Null only when the request itself failed; an expired connection
-   * still throws.
+   * answer without the list counts as none allowed. Null only when Graph may answer later (429, 5xx, 408, a network
+   * error); anything else throws (an expired connection, 403 ErrorAccessDenied, 404 MailboxNotEnabledForRESTAPI), so
+   * the caller reports it as it is and nobody is told to wait for a check that will never pass.
    */
   async onlineMeetingProviders(): Promise<string[] | null> {
     try {
       const c = await this.request<{ allowedOnlineMeetingProviders?: unknown }>("GET", "/me/calendar?$select=allowedOnlineMeetingProviders,defaultOnlineMeetingProvider");
       return Array.isArray(c?.allowedOnlineMeetingProviders) ? c.allowedOnlineMeetingProviders.filter((p): p is string => typeof p === "string") : [];
     } catch (e) {
-      if (e instanceof GraphError && e.unauthorized) throw e;
-      return null;
+      if (e instanceof GraphError ? e.retryable : isNetworkError(e)) return null;
+      throw e;
     }
   }
 
@@ -340,6 +349,7 @@ export class GraphClient {
     if (e.body !== undefined) body.body = { contentType: "Text", content: e.body };
     if (e.isAllDay !== undefined) body.isAllDay = e.isAllDay;
     if (e.onlineMeeting) Object.assign(body, { isOnlineMeeting: true, onlineMeetingProvider: TEAMS_PROVIDER });
+    if (e.transactionId) body.transactionId = e.transactionId;
     return body;
   }
 
@@ -383,6 +393,12 @@ export class GraphClient {
       if (!(e instanceof GraphError && e.status === 404)) throw e;
     }
   }
+}
+
+/** fetch failed before Graph answered (connection reset, DNS, a timeout): Graph may answer the same request later */
+function isNetworkError(e: unknown): boolean {
+  const name = (e as { name?: unknown } | null)?.name;
+  return e instanceof TypeError || name === "AbortError" || name === "TimeoutError";
 }
 
 // ---- raw Graph shapes (subset) ----

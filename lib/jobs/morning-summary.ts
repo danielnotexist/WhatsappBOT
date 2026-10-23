@@ -116,8 +116,8 @@ interface DayEvent {
   /** Teams / Meet join link, already checked by safeJoinUrl (lib/online-meeting.ts) */
   joinUrl: string | null;
 }
-const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject, joinUrl: e.joinUrl });
-const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary, joinUrl: e.joinUrl });
+const fromGraph = (e: GraphEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.subject, joinUrl: e.joinUrl ?? e.textJoinUrl });
+const fromGoogle = (e: GoogleEvent): DayEvent => ({ allDay: e.isAllDay, start: e.start, title: e.summary, joinUrl: e.joinUrl ?? e.textJoinUrl });
 /** Google: drop cancelled occurrences and invitations the user declined. */
 const googleAttending = (e: GoogleEvent) => e.status !== "cancelled" && !e.attendees.some((a) => a.self && a.response === "declined");
 /** All-day first, then by local start time (stable: Microsoft before Google on a tie). */

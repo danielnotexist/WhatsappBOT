@@ -23,6 +23,8 @@ interface ModelAgg {
   nComplex: number;
   toolOkRate: number | null;
   toolOkN: number;
+  onlineOkRate: number | null;
+  onlineOkN: number;
   unconfirmedSends: number;
   claimedCompletions: number;
   brokenRecords: number;
@@ -55,6 +57,7 @@ export function aggregate(scores: ScoresFile, meta: RunMeta, profiles: { light: 
     const simple = recs.filter((r) => r.expectedComplexity === 'simple');
     const complex = recs.filter((r) => r.expectedComplexity !== 'simple');
     const withExp = recs.filter((r) => r.checks.expectedToolCalled !== null);
+    const withOnline = recs.filter((r) => typeof r.checks.onlineMeetingOk === 'boolean');
     const costs = ok.map((r) => r.costUsd).filter((v): v is number => typeof v === 'number');
     const avgCost = mean(costs);
     const usage = ok.reduce(
@@ -79,6 +82,8 @@ export function aggregate(scores: ScoresFile, meta: RunMeta, profiles: { light: 
       nComplex: complex.length,
       toolOkRate: withExp.length ? withExp.filter((r) => r.checks.expectedToolCalled).length / withExp.length : null,
       toolOkN: withExp.length,
+      onlineOkRate: withOnline.length ? withOnline.filter((r) => r.checks.onlineMeetingOk).length / withOnline.length : null,
+      onlineOkN: withOnline.length,
       unconfirmedSends: recs.filter((r) => r.checks.unconfirmedSend).length,
       claimedCompletions: recs.filter((r) => r.checks.claimedCompletion).length,
       brokenRecords: recs.filter((r) => r.checks.brokenDirectionLines > 0).length,
@@ -157,13 +162,13 @@ export function renderReport(scores: ScoresFile, meta: RunMeta, aggs: ModelAgg[]
   // ---- deterministic checks
   L.push(`## בדיקות אוטומטיות`);
   L.push('');
-  L.push(`| מודל | קרא לכלי הצפוי | שליחה בלי אישור | "שלחתי/קבעתי" בלי אישור | תשובות עם שורה בכיוון מעורב | תשובות לא בעברית | חלק עברי ממוצע |`);
-  L.push(`|---|---:|---:|---:|---:|---:|---:|`);
+  L.push(`| מודל | קרא לכלי הצפוי | online_meeting נכון | שליחה בלי אישור | "שלחתי/קבעתי" בלי אישור | תשובות עם שורה בכיוון מעורב | תשובות לא בעברית | חלק עברי ממוצע |`);
+  L.push(`|---|---:|---:|---:|---:|---:|---:|---:|`);
   for (const a of aggs) {
-    L.push(`| ${cell(a.modelName)} | ${a.toolOkRate === null ? '—' : `${pct(a.toolOkRate)} (${a.toolOkN})`} | ${a.unconfirmedSends} | ${a.claimedCompletions} | ${a.brokenRecords} | ${a.nonHebrewRecords} | ${pct(a.hebrewRatio)} |`);
+    L.push(`| ${cell(a.modelName)} | ${a.toolOkRate === null ? '—' : `${pct(a.toolOkRate)} (${a.toolOkN})`} | ${a.onlineOkRate === null ? '—' : `${pct(a.onlineOkRate)} (${a.onlineOkN})`} | ${a.unconfirmedSends} | ${a.claimedCompletions} | ${a.brokenRecords} | ${a.nonHebrewRecords} | ${pct(a.hebrewRatio)} |`);
   }
   L.push('');
-  L.push(`"שורה בכיוון מעורב" = שורה שמתחילה באות לטינית ומכילה עברית (בוואטסאפ היא מתהפכת). "קרא לכלי הצפוי" נמדד רק בהודעות שיש להן ציפייה (expected_tools / must_do / כוונה).`);
+  L.push(`"שורה בכיוון מעורב" = שורה שמתחילה באות לטינית ומכילה עברית (בוואטסאפ היא מתהפכת). "קרא לכלי הצפוי" נמדד רק בהודעות שיש להן ציפייה (expected_tools / must_do / כוונה). "online_meeting נכון" נמדד רק בהודעות עם expected_online_meeting שבהן נוצרה טיוטת פגישה.`);
   L.push('');
 
   // ---- latency & cost
@@ -217,6 +222,7 @@ export function renderReport(scores: ScoresFile, meta: RunMeta, aggs: ModelAgg[]
       if (r.checks.brokenDirectionLines) flags.push(`${r.checks.brokenDirectionLines} שורות בכיוון מעורב`);
       if (r.checks.expectedToolCalled === false) flags.push(`לא קרא ל-${r.checks.expectedTools.join('/')}`);
       if (r.checks.unnecessaryToolCall) flags.push('כלי מיותר');
+      if (r.checks.onlineMeetingOk === false) flags.push('online_meeting שגוי');
       if (r.checks.hasResponse && r.checks.hebrewRatio < 0.5) flags.push('לא בעברית');
       if (r.checks.toolLoopTruncated) flags.push('ביקש סבב כלים נוסף');
       const scoreStr = dims.map((d) => `${d.label} ${r.scores[d.id] ?? '—'}`).join(', ');

@@ -1,3 +1,4 @@
+import { capabilityOfAction } from "@/lib/agents/capabilities";
 import { guardAgentAction } from "@/lib/agents/guard";
 import { findAgentByKey } from "@/lib/agents/policy";
 import { loadAgents } from "@/lib/agents/service";
@@ -12,7 +13,8 @@ import type { BotContext } from "./context";
 
 /**
  * A new draft offered instead of a failed action (after the press, nothing executed). Today: the same meeting without
- * an online meeting link when the account cannot create Teams / Meet. It goes through the same approval buttons.
+ * an online meeting link when the account cannot create Teams / Meet, or the same meeting again when the Teams check
+ * did not answer. It goes through the same approval buttons.
  */
 export interface FollowUpDraft {
   kind: PendingActionKind;
@@ -27,7 +29,7 @@ export type ActionResult = { ok: true; message: string } | { ok: false; message:
 export type ActionExecutor = (action: PendingActionRow, ctx: BotContext) => Promise<ActionResult>;
 
 const EVENT_CHANGE_FIELDS = ["subject", "date", "start", "end", "location"] as const;
-const ONLINE_KEYS = new Set(["online_meeting", "online_fallback", "online_personal"]);
+const ONLINE_KEYS = new Set(["online_meeting", "online_fallback", "online_personal", "online_retry"]);
 
 /**
  * The account cannot create the requested online meeting (no Teams on this Microsoft account, or Google refused the
@@ -49,6 +51,17 @@ export function onlineMeetingUnavailable(action: PendingActionRow, provider: Onl
   return { ok: false, message: copy["act.cal.online_not_done"](provider, how), ...(somethingLeft ? { offer } : {}) };
 }
 
+/**
+ * The Teams check did not answer (429, 5xx, network) after the press: nothing was created or changed, and nothing will
+ * retry by itself. The same draft comes back with working buttons (`online_retry`: it opens with why), so the user
+ * can press again in a few minutes; an agent's copy passes the same guard as any of its drafts.
+ */
+export function onlineCheckFailed(action: PendingActionRow): ActionResult {
+  const isUpdate = action.kind === "update_event";
+  const offer: FollowUpDraft = { kind: action.kind, payload: { ...action.payload, online_retry: true }, refusedMessage: copy["act.cal.online_check_failed"]({ isUpdate, askMain: true }) };
+  return { ok: false, message: copy["act.cal.online_check_failed"]({ isUpdate }), offer };
+}
+
 const fallbackOf = (payload: Record<string, unknown>): OnlineMeetingProvider | null => (payload.online_fallback === "microsoft" || payload.online_fallback === "google" ? payload.online_fallback : null);
 
 /** The calendar a draft that asks for an online meeting will run on (its service is named in the draft), or null. */
@@ -56,9 +69,12 @@ async function onlineProvider(ctx: BotContext, action: PendingActionRow): Promis
   return action.payload.online_meeting === true ? providerForAction(ctx.db, action) : null;
 }
 
-/** The fallback draft opens with why the link could not be created. */
-const withFallbackNote = (fallback: OnlineMeetingProvider | null, payload: Record<string, unknown>, draft: string) =>
-  fallback ? `${copy["act.cal.online_unavailable"](fallback, payload.online_personal === true)}\n\n${draft}` : draft;
+/** The fallback draft opens with why the link could not be created; a draft offered again, with why the first did not run. */
+function withFallbackNote(fallback: OnlineMeetingProvider | null, action: PendingActionRow, draft: string): string {
+  if (fallback) return `${copy["act.cal.online_unavailable"](fallback, action.payload.online_personal === true)}\n\n${draft}`;
+  if (action.payload.online_retry === true && action.payload.online_meeting === true) return `${copy["act.cal.online_check_failed"]({ isUpdate: action.kind === "update_event" })}\n\n${draft}`;
+  return draft;
+}
 
 const executors = new Map<string, ActionExecutor>();
 
@@ -96,7 +112,7 @@ export async function presentPendingAction(ctx: BotContext, to: string, action: 
       online: online ? copy["act.cal.online_label"](online, attendees.length > 0) : undefined,
       withoutLink: Boolean(fallback),
     });
-    await send(withFallbackNote(fallback, action.payload, draft), buttons.approve(action.id, fallback ? "קבע בלי קישור" : "קבע"));
+    await send(withFallbackNote(fallback, action, draft), buttons.approve(action.id, fallback ? "קבע בלי קישור" : "קבע"));
   } else if (action.kind === "update_event") {
     const fallback = fallbackOf(action.payload);
     const online = await onlineProvider(ctx, action);
@@ -107,7 +123,7 @@ export async function presentPendingAction(ctx: BotContext, to: string, action: 
     const notified = changes.length && Number(action.payload.current_attendee_count) > 0 ? copy["act.cal.attendees_notified"](Boolean(online)) : "";
     const [ask, approve] = fallback ? ["לעדכן בלי קישור?", "עדכן בלי קישור"] : moves ? ["להזיז?", "הזז"] : ["לעדכן?", "עדכן"];
     const draft = ["*שינוי פגישה*", target, changes.join("\n") || "(אין שינויים)", notified, ask].filter(Boolean).join("\n");
-    await send(withFallbackNote(fallback, action.payload, draft), buttons.approve(action.id, approve));
+    await send(withFallbackNote(fallback, action, draft), buttons.approve(action.id, approve));
   } else if (action.kind === "delete_event") {
     await send(copy["act.cal.cancel_confirm"](p.subject ?? "", "", ""), [
       { id: `pa:approve:${action.id}`, title: "בטל פגישה" },
@@ -188,10 +204,11 @@ export async function handlePendingButton(ctx: BotContext, userId: string, to: s
 
 /**
  * The follow-up draft keeps who prepared the original (the header and the audit); it is a new pending action with
- * its own 10 minutes. A draft of an agent passes the same guard as any draft it prepares (guardAgentAction: its
- * recipient list as it is now, its daily cap; the failed original no longer counts) and the agent must still be
- * active. When the agent may not prepare it, `refused`: the user is pointed to the main assistant instead. When it
- * cannot be stored at all, null: the plain failure message.
+ * its own 10 minutes. A draft of an agent passes the same checks as any draft it prepares: the agent is still active,
+ * it still has the capability for this kind of draft (the tool it would need), and guardAgentAction (its recipient
+ * list as it is now, its daily cap; the failed original no longer counts). When the agent may not prepare it,
+ * `refused`: the user is pointed to the main assistant instead. When it cannot be stored at all, null: the plain
+ * failure message.
  */
 async function createFollowUp(ctx: BotContext, action: PendingActionRow, offer: FollowUpDraft): Promise<{ row: PendingActionRow } | { refused: true } | null> {
   const now = ctx.now();
@@ -201,6 +218,8 @@ async function createFollowUp(ctx: BotContext, action: PendingActionRow, offer: 
       const [{ agents }, user] = await Promise.all([loadAgents(ctx.db, action.user_id, now), ctx.db.getUser(action.user_id)]);
       const agent = findAgentByKey(agents, action.agent_key);
       if (!agent || agent.status !== "active") return { refused: true };
+      const capability = capabilityOfAction(offer.kind);
+      if (!capability || !agent.capabilities.includes(capability)) return { refused: true };
       if (await guardAgentAction(ctx.db, action.user_id, agent, offer.kind, offer.payload, now, user?.timezone)) return { refused: true };
       meta = { agentKey: agent.key, agentName: agent.name };
     }

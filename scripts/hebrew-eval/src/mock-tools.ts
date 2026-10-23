@@ -168,7 +168,10 @@ export function executeTool(
             status: 'pending_confirmation',
             action_id: nextId('act'),
             event: { title: s('title'), start: s('start'), end: s('end'), location: s('location'), attendees: s('attendees') },
-            next_step: 'Present the details and ask the user to confirm (buttons). Do not say the event was created.',
+            ...(input['online_meeting'] === true ? { online_service: 'Teams' } : {}),
+            next_step: input['online_meeting'] === true
+              ? 'Present the details and ask the user to confirm (buttons); say in one short sentence that a Teams meeting will be created. Do not say the event was created.'
+              : 'Present the details and ask the user to confirm (buttons). Do not say the event was created.',
           }),
           isError: false,
         };
@@ -183,7 +186,7 @@ export function executeTool(
             action_id: nextId('act'),
             action: name,
             event: eventSummary(ev),
-            changes: name === 'update_event' ? { title: s('title'), start: s('start'), end: s('end') } : undefined,
+            changes: name === 'update_event' ? { title: s('title'), start: s('start'), end: s('end'), ...(input['online_meeting'] === true ? { add_online_meeting: 'Teams' } : {}) } : undefined,
             next_step: 'Present the change and ask the user to confirm (buttons). Do not say it was done.',
           }),
           isError: false,

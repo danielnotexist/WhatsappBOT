@@ -29,6 +29,7 @@ function normalizeMessage(m: Partial<DatasetMessage>, i: number): DatasetMessage
     notes: m.notes === undefined ? undefined : String(m.notes),
     ...(Array.isArray(m.expected_tools) ? { expected_tools: m.expected_tools.map(String) } : {}),
     ...(typeof m.confirmed === 'boolean' ? { confirmed: m.confirmed } : {}),
+    ...(typeof m.expected_online_meeting === 'boolean' ? { expected_online_meeting: m.expected_online_meeting } : {}),
   };
 }
 

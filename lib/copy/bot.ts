@@ -10,7 +10,7 @@ import type { ListRow, ReplyButton } from "@/lib/wa/types";
 export const onlineService = (provider: string) => (provider === "google" ? "Google Meet" : "Teams");
 /** `personal`: a personal Microsoft account (lib/online-meeting.ts isPersonalMicrosoftAccount), the only case the reason is known. */
 const onlineUnavailable = (provider: string, personal = false) =>
-  provider === "google" ? "לא הצלחתי ליצור פגישת Google Meet בחשבון הזה." : `בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams${personal ? " (היא זמינה רק בחשבון עבודה או בית ספר)" : ""}.`;
+  provider === "google" ? "לא הצלחתי ליצור פגישת Google Meet בחשבון הזה." : `בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams${personal ? " (יצירת פגישת Teams מהיומן זמינה רק בחשבון עבודה או בית ספר)" : ""}.`;
 
 /** How an online meeting that could not be created ends: what did not happen, and the next step. */
 export interface OnlineNotDone {
@@ -86,13 +86,27 @@ export const copy = {
   "act.cal.attendees_notified": (withLink: boolean) => `המשתתפים יקבלו עדכון${withLink ? " עם הקישור" : ""}.`,
   "act.cal.updated": (title: string) => `עודכן: ${title}.`,
   "act.cal.join_link": (url: string) => `קישור לפגישה: ${url}`,
-  "act.cal.join_link_later": () => "הקישור לפגישה עוד בהכנה ויופיע באירוע ביומן.",
-  /** `invitesSent`: the invitations already went out (without the link) */
-  "act.cal.online_missing": (provider: string, invitesSent = false) =>
-    `קישור ${onlineService(provider)} לא נוצר לפגישה הזו.${invitesSent ? "\nההזמנות יצאו בלי קישור." : ""} אפשר לבקש להוסיף אותו.`,
+  /** `ready`: the meeting exists and its link is in the event, it just cannot be shown here */
+  "act.cal.join_link_later": (ready = false) => (ready ? "הקישור לפגישה מופיע באירוע ביומן." : "הקישור לפגישה עוד בהכנה ויופיע באירוע ביומן."),
+  /**
+   * The provider accepted the change but silently left out the online meeting (Graph: no meeting on the event; Google:
+   * the create request failed). Said as "unavailable", without suggesting a retry: on the same account it fails the
+   * same way, and every attempt mails the attendees. `invitesSent`: the invitations already went out (without the link).
+   */
+  "act.cal.online_missing": (provider: string, invitesSent = false, personal = false) => `${onlineUnavailable(provider, personal)}${invitesSent ? "\nההזמנות יצאו בלי קישור." : ""}`,
+  /** a change that only asked for the link, and the provider left it out: the event was still written */
+  "act.cal.online_not_added": (title: string, notified: boolean) => `הפגישה ״${title || "(ללא כותרת)"}״ נשארה בלי קישור${notified ? ", והמשתתפים קיבלו עדכון בלי קישור" : ""}.`,
   "act.cal.online_added": (title: string, provider: string) => `נוסף קישור ${onlineService(provider)} לפגישה ״${title}״.`,
   /** the meeting already has an online meeting (any service): nothing added, no update to the attendees */
-  "act.cal.online_exists": (url: string | null) => (url ? `לפגישה כבר יש קישור, ולא נוסף קישור חדש.\nקישור לפגישה: ${url}` : "לפגישה כבר יש קישור לפגישה מקוונת, והוא מופיע באירוע ביומן. לא נוסף קישור חדש."),
+  "act.cal.online_exists": (url: string | null) => (url ? `לפגישה כבר יש קישור, ולא נוסף קישור חדש.\nקישור לפגישה: ${url}` : "לפגישה כבר יש פגישה מקוונת, והקישור מופיע באירוע ביומן. לא נוסף קישור חדש."),
+  /**
+   * The Teams check (allowedOnlineMeetingProviders) did not answer: nothing was created or changed. A fresh draft of the
+   * same meeting follows when it can be stored; `askMain` when the agent that prepared it may not prepare it now.
+   */
+  "act.cal.online_check_failed": (o: { isUpdate: boolean; askMain?: boolean }) =>
+    `לא הצלחתי לבדוק אם אפשר ליצור פגישת Teams בחשבון הזה, ולכן הפגישה לא ${o.isUpdate ? "עודכנה" : "נקבעה"}. ${o.askMain ? `אפשר לבקש מ-״@${P}״ לנסות שוב בעוד כמה דקות.` : "אפשר לנסות שוב בעוד כמה דקות."}`,
+  /** an insert answered with an error and the event could not be read back: it may exist (and its invitations too) */
+  "act.cal.create_unverified": () => "לא הצלחתי לוודא אם הפגישה נוצרה. כדאי לבדוק ביומן לפני שמבקשים שוב.",
   "act.cal.online_organizer_only": () => "רק מי שארגן את הפגישה יכול להוסיף לה קישור. הפגישה לא עודכנה.",
   "act.cal.online_unavailable": (provider: string, personal = false) => onlineUnavailable(provider, personal),
   "act.cal.online_not_done": (provider: string, o: OnlineNotDone) => {

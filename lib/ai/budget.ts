@@ -272,7 +272,10 @@ export class SpendTurn {
    * settle to what it cost. A call the provider refused with an error status gives its reservation back; one whose
    * outcome is unknown (a timeout, a dropped connection) keeps it.
    */
-  private async paid<T>(estimate: number, call: (signal: AbortSignal | undefined) => Promise<T>, actual: (r: T) => number): Promise<T> {
+  private async paid<T>(rawEstimate: number, call: (signal: AbortSignal | undefined) => Promise<T>, actual: (r: T) => number): Promise<T> {
+    // the store keeps whole micro-dollars (numeric(12, 6)): a reservation rounded there but settled with the unrounded
+    // amount could leave a micro-dollar behind, so the estimate is rounded up once and used for both
+    const estimate = Math.ceil(rawEstimate * 1e6 - 1e-6) / 1e6;
     const day = await this.guard.reserve(estimate);
     if (!this.admitted) {
       try {

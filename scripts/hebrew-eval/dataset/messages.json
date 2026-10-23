@@ -2089,5 +2089,131 @@
       "missing-data",
       "outbound"
     ]
+  },
+  {
+    "id": "msg-101",
+    "persona": "lawyer",
+    "category": "calendar",
+    "text": "תקבע לי פגישת טימס עם יעל פרץ ביום חמישי ב-12, חצי שעה",
+    "expected_intent": "calendar.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-create_event עם online_meeting: true",
+      "22.10 12:00–12:30, משתתפת: יעל פרץ (yael.peretz@techwave.io)",
+      "מציין במשפט קצר שתיווצר פגישת Teams והקישור יישלח בהזמנה",
+      "מבקש אישור לפני היצירה ושליחת ההזמנה"
+    ],
+    "must_not_do": [
+      "ממציא קישור Teams",
+      "כותב קישור או 'Teams' בשדה המקום במקום online_meeting",
+      "אומר שהפגישה נקבעה לפני האישור"
+    ],
+    "notes": "בקשה מפורשת לפגישה מקוונת בתעתיק ('טימס').",
+    "tags": [
+      "calendar",
+      "online-meeting",
+      "outbound",
+      "transliteration"
+    ],
+    "expected_online_meeting": true
+  },
+  {
+    "id": "msg-102",
+    "persona": "consultant",
+    "category": "calendar",
+    "text": "זום עם כהן מחר ב-3 אחהצ שעה",
+    "expected_intent": "calendar.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-create_event עם online_meeting: true",
+      "21.10 15:00–16:00, משתתף: כהן",
+      "מציין במשפט קצר שתיווצר פגישת Teams (אין יצירת פגישות Zoom)",
+      "מבקש אישור"
+    ],
+    "must_not_do": [
+      "מבטיח קישור Zoom",
+      "ממציא קישור",
+      "קובע ל-03:00"
+    ],
+    "notes": "זום = בקשה לפגישה מקוונת; היומן המחובר הוא Microsoft 365, ולכן Teams.",
+    "tags": [
+      "calendar",
+      "online-meeting",
+      "outbound",
+      "time-parsing"
+    ],
+    "expected_online_meeting": true
+  },
+  {
+    "id": "msg-103",
+    "persona": "accountant",
+    "category": "calendar",
+    "text": "תקבע שיחה עם כהן ביום חמישי ב-9, רבע שעה",
+    "expected_intent": "calendar.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-create_event עם online_meeting: false ('שיחה' לבדה היא בדרך כלל טלפון)",
+      "22.10 09:00–09:15",
+      "מבקש אישור"
+    ],
+    "must_not_do": [
+      "מוסיף קישור Teams בלי שביקשו",
+      "קובע ל-21:00"
+    ],
+    "notes": "'שיחה' בלי וידאו/טימס/זום — לא פגישה מקוונת.",
+    "tags": [
+      "calendar",
+      "online-meeting",
+      "outbound"
+    ],
+    "expected_online_meeting": false
+  },
+  {
+    "id": "msg-104",
+    "persona": "clinic",
+    "category": "calendar",
+    "text": "תקבע פגישה במשרד עם דוד לוי ביום חמישי ב-4 אחהצ, שעה",
+    "expected_intent": "calendar.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "קורא ל-create_event עם online_meeting: false",
+      "22.10 16:00–17:00, מקום: המשרד, משתתף: דוד לוי (david@levi-properties.co.il)",
+      "מבקש אישור לפני שליחת ההזמנה"
+    ],
+    "must_not_do": [
+      "מוסיף פגישת Teams לפגישה פרונטלית",
+      "קובע ל-04:00"
+    ],
+    "notes": "פגישה פרונטלית — בלי קישור.",
+    "tags": [
+      "calendar",
+      "online-meeting",
+      "outbound"
+    ],
+    "expected_online_meeting": false
+  },
+  {
+    "id": "msg-105",
+    "persona": "consultant",
+    "category": "calendar",
+    "text": "תקבע פגישה עם רונן שמש, לקוח מחיפה, ביום חמישי ב-12",
+    "expected_intent": "calendar.create",
+    "expected_complexity": "tool",
+    "must_do": [
+      "לא מסמן online_meeting רק בגלל העיר: create_event עם online_meeting: false, או שאלה קצרה אחת ('להוסיף פגישת Teams?')",
+      "22.10 12:00",
+      "מבקש אישור"
+    ],
+    "must_not_do": [
+      "מוסיף קישור Teams בלי שביקשו",
+      "מניח שהפגישה מרחוק כי הלקוח מחיפה"
+    ],
+    "notes": "עיר אחרת אינה בקשה לקישור — קישור שלא ביקשו נשלח לכל המשתתפים.",
+    "tags": [
+      "calendar",
+      "online-meeting",
+      "outbound"
+    ],
+    "expected_online_meeting": false
   }
 ]

@@ -13,6 +13,8 @@ export interface DatasetMessage {
   expected_tools?: string[];
   /** Optional extension: the user already gave explicit confirmation for an outbound action in this message. */
   confirmed?: boolean;
+  /** Optional extension: the online_meeting value a create_event / update_event call should carry (Teams/Meet link or not). */
+  expected_online_meeting?: boolean;
 }
 
 /** dataset/context.json — the mocked M365/Google world the tools search in. */
@@ -84,6 +86,11 @@ export interface Checks {
   claimedCompletion: boolean;
   /** Tools were called on a message that expects none (simple / small talk). */
   unnecessaryToolCall: boolean;
+  /**
+   * Every create_event / update_event call carried the expected online_meeting value. null = no expectation, or no such
+   * call (asking a clarifying question instead is not judged here).
+   */
+  onlineMeetingOk: boolean | null;
   toolLoopTruncated: boolean;
 }
 

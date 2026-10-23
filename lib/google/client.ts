@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { safeJoinUrl } from "@/lib/online-meeting";
+import { joinUrlInText, safeJoinUrl } from "@/lib/online-meeting";
 import { buildMimeMessage, toGmailRaw, type MimeMessageInput } from "./mime";
 
 /**
@@ -72,6 +72,8 @@ export interface GoogleEvent {
   hasConference: boolean;
   /** status of a conference create request: "pending" right after the request, then "success" or "failure" */
   conferenceStatus: "pending" | "success" | "failure" | null;
+  /** a meeting link written only in the location or the description (Zoom, Teams), when safe; else null */
+  textJoinUrl: string | null;
 }
 
 export interface NewGoogleEvent {
@@ -343,6 +345,7 @@ function mapEvent(e: RawEvent, calendarTz: string | null): GoogleEvent {
     joinUrl: safeJoinUrl(e.hangoutLink) ?? safeJoinUrl(e.conferenceData?.entryPoints?.find((p) => p.entryPointType === "video")?.uri),
     hasConference: hasConference(e),
     conferenceStatus: conferenceStatusOf(e.conferenceData?.createRequest?.status?.statusCode),
+    textJoinUrl: joinUrlInText(e.location, e.description),
   };
 }
 
