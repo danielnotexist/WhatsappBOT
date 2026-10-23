@@ -229,8 +229,11 @@ describe("/api/demo/chat — the same pipeline as WhatsApp", () => {
     const pain = business.replies.find((m) => m.kind === "list")!;
     expect(pain.list!.button).toBe("לבחירה");
     expect(pain.list!.sections[0]!.rows.map((r) => r.id)).toContain("pain_email");
-    const next = ok(await send(json({ reply: { id: "pain_email", title: "מיילים שמחכים לתשובה", list: true } })));
-    expect(next.user).toMatchObject({ kind: "choice", text: "מיילים שמחכים לתשובה" });
+    const more = ok(await send(json({ reply: { id: "pain_email", title: "מיילים שמחכים לתשובה", list: true } })));
+    expect(more.user).toMatchObject({ kind: "choice", text: "מיילים שמחכים לתשובה" });
+    // one choice per list: the rest comes back with "זהו, מספיק"
+    expect(more.replies.at(-1)).toMatchObject({ kind: "list", list: { sections: [{ rows: expect.arrayContaining([expect.objectContaining({ id: "pain_done", title: "זהו, מספיק" })]) }] } });
+    const next = ok(await send(json({ reply: { id: "pain_done", title: "זהו, מספיק", list: true } })));
     expect(next.replies.at(-1)).toMatchObject({ kind: "list", list: { sections: [{ rows: expect.arrayContaining([{ id: "mt_0730", title: "07:30" }]) }] } });
     // the list survives a reload (rows and the open button)
     const items = (await history()).items;
@@ -270,7 +273,9 @@ describe("/api/demo/chat — the same pipeline as WhatsApp", () => {
     expect((await db.getUser(userId))!.business_name).toBe("משרד לוי");
     expect(business.awaiting).toBe(true); // the pain list
     const pain = ok(await send(json({ reply: { id: "pain_email", title: "מיילים שמחכים לתשובה", list: true } })));
-    expect(pain.awaiting).toBe(true); // the morning-time list
+    expect(pain.awaiting).toBe(true); // the pain list again, with "זהו"
+    const done = ok(await send(json({ reply: { id: "pain_done", title: "זהו, מספיק", list: true } })));
+    expect(done.awaiting).toBe(true); // the morning-time list
     const morning = ok(await send(json({ reply: { id: "mt_none", title: "בלי סיכום", list: true } })));
     expect(morning.awaiting).toBe(false); // the connect nudge: free text is fine there
   });
