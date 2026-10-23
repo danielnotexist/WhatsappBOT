@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useMotionStopped } from "@/lib/a11y/store";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { Bubble } from "./bubble";
@@ -88,13 +89,18 @@ function subscribeReducedMotion(onChange: () => void): () => void {
   return () => mq.removeEventListener?.("change", onChange);
 }
 
-/** prefers-reduced-motion as an external store (server snapshot: motion allowed). */
+/**
+ * prefers-reduced-motion as an external store (server snapshot: motion allowed), or "עצירת אנימציות" from the
+ * accessibility menu.
+ */
 export function usePrefersReducedMotion(): boolean {
-  return useSyncExternalStore(
+  const device = useSyncExternalStore(
     subscribeReducedMotion,
     () => (typeof window !== "undefined" && window.matchMedia ? window.matchMedia(REDUCE_QUERY).matches : false),
     () => false,
   );
+  const stopped = useMotionStopped();
+  return device || stopped;
 }
 
 /** Everything a script shows, at once (reduced motion / tests). */

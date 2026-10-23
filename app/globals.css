@@ -267,3 +267,98 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * The accessibility menu (components/brand/accessibility-widget.tsx, settings in lib/a11y/settings.ts). Each setting
+ * is a data attribute on <html>, set before the first paint by the inline script in app/layout.tsx. Unlayered on
+ * purpose: these must win over every utility class.
+ */
+
+/* where the floating buttons sit: clear of the pinned "בואו נתחיל" bar (/start) and the chat composer (/demo/chat) */
+body {
+  --fab-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+}
+@media (width < 64rem) {
+  body:has([data-pinned-cta]) {
+    --fab-bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (width < 48rem) {
+  body:has([data-chat-page]) {
+    --fab-bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* הגדלת טקסט: the site is set in rem, so the root size scales text, spacing and controls together */
+html[data-a11y-text="1"] {
+  font-size: 112.5%;
+}
+html[data-a11y-text="2"] {
+  font-size: 125%;
+}
+html[data-a11y-text="3"] {
+  font-size: 150%;
+}
+
+/* ניגודיות גבוהה: the same palette pushed to the ends - pure black stage, white text, brighter accents and lines */
+html[data-a11y-contrast] {
+  --alze-night: #000000;
+  --alze-night2: #0A0A0A;
+  --alze-line: #8C8C8C;
+  --alze-cream: #FFFFFF;
+  --alze-cream-muted: #E6E6E6;
+  --alze-honey: #FFD27A;
+  --alze-sage: #BDEFCB;
+  --alze-ink: #000000;
+  --alze-ink-muted: #1A1A1A;
+  --alze-paper: #FFFFFF;
+  --alze-dust: #F6DDD6;
+  --alze-moss: #DCEBDD;
+  --wa-fg: #FFFFFF;
+  --wa-time: #D5DCE0;
+  --wa-meta-in: #D5DCE0;
+  --wa-meta-out: #EAF5F1;
+  --wa-link: #9BDFFF;
+}
+html[data-a11y-contrast] .stage {
+  background-image: none;
+}
+
+/* הדגשת קישורים */
+html[data-a11y-links] a[href],
+html[data-a11y-links] [role="link"] {
+  text-decoration-line: underline !important;
+  text-decoration-thickness: 2px !important;
+  text-underline-offset: 0.22em !important;
+}
+
+/* גופן קריא: a plain system sans instead of Varela Round (next/font sets --font-body on <html> with a class) */
+html[data-a11y-font] {
+  --font-body: Arial, Helvetica, sans-serif;
+}
+
+/* ריווח שורות (WCAG 1.4.12 values or more) */
+html[data-a11y-spacing] body {
+  word-spacing: 0.16em;
+}
+html[data-a11y-spacing] :where(p, li, dd, dt, td, th, blockquote, label, small) {
+  line-height: 1.9 !important;
+}
+html[data-a11y-spacing] :where(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.5 !important;
+}
+
+/* עצירת אנימציות: the same as the device's reduced-motion setting above */
+html[data-a11y-motion] *,
+html[data-a11y-motion] *::before,
+html[data-a11y-motion] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+html[data-a11y-motion] {
+  scroll-behavior: auto !important;
+}

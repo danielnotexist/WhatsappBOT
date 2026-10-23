@@ -1,6 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/hooks/use-reduced-motion";
 import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { cardTones, palette, type CardTone } from "@/lib/design/tokens";
 import { useHydrated } from "@/lib/hooks/use-hydrated";

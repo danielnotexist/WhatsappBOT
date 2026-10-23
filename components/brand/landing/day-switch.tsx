@@ -1,11 +1,12 @@
 "use client";
 
 import { lazy, Suspense, useSyncExternalStore, type ReactNode } from "react";
+import { useMotionStopped } from "@/lib/a11y/store";
 
 /**
  * Pinned scroll scene only where it reads well and is wanted: a large enough screen, motion allowed. Everywhere else
  * (and on the server, and until the chunk arrives) the server-rendered vertical sequence stays. The pinned scene and
- * the motion library are loaded only when this query matches.
+ * the motion library are loaded only when this query matches (and "עצירת אנימציות" in the accessibility menu is off).
  */
 export const PINNED_QUERY =
   "(min-width: 64rem) and (min-height: 40rem) and (prefers-reduced-motion: no-preference)";
@@ -20,7 +21,8 @@ function subscribe(onChange: () => void): () => void {
 }
 
 export function usePinnedScene(): boolean {
-  return useSyncExternalStore(
+  const stopped = useMotionStopped();
+  const wanted = useSyncExternalStore(
     subscribe,
     () =>
       typeof window !== "undefined" && window.matchMedia
@@ -28,6 +30,7 @@ export function usePinnedScene(): boolean {
         : false,
     () => false,
   );
+  return wanted && !stopped;
 }
 
 export function DaySwitch({ children }: { children: ReactNode }) {

@@ -27,7 +27,7 @@ export default function StartIntroPage() {
         </h1>
         <p className="mt-5 text-lede text-cream-muted">לוקח בערך דקה.</p>
         {/* on phones the call to action (and the sign-in line under it) stays pinned to the bottom */}
-        <div className="max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:bg-[linear-gradient(to_top,var(--alze-night)_72%,transparent)] max-lg:px-4 max-lg:pt-8 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:mt-9">
+        <div data-pinned-cta="" className="max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-20 max-lg:bg-[linear-gradient(to_top,var(--alze-night)_72%,transparent)] max-lg:px-4 max-lg:pt-8 max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:mt-9">
           <Cta href="/start/email" className="max-lg:w-full lg:min-w-56">
             בואו נתחיל
           </Cta>

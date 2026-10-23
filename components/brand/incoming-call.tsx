@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/hooks/use-reduced-motion";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { MascotAvatar } from "./mascot";
