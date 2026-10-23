@@ -1,0 +1,20 @@
+{
+  "file": "build/music.wav",
+  "duration": 102.12503401360544,
+  "bpm": 120.0,
+  "period": 0.4999999999999787,
+  "first_beat": 0.3681875000000674,
+  "downbeat_offset_in_bar": 3,
+  "bar_low_energy": [
+    206.7779998779297,
+    202.0717315673828,
+    219.5159149169922,
+    270.5282897949219
+  ],
+  "start": 63.86818749999736,
+  "start_bar_index": 31,
+  "window_bars": 10,
+  "window_rms_mean": 0.25372006595134733,
+  "beat_residual_ms_median": 2.6061507966588238,
+  "beat_residual_ms_p90": 5.4754818560780905
+}
