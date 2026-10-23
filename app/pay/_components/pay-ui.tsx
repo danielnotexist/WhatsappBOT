@@ -72,13 +72,38 @@ export function PayError({ text }: { text: string }) {
 
 /**
  * One paper with the hoopoe standing on its top edge (as on the signup papers and the subscription slip): the
- * invalid link, the payment result, the card update.
+ * invalid link, the payment result, the card update. `honey` is the pro paper (the upgrade and its result), the same
+ * honey as the pro plan on the choose-plan face.
  */
-export function PayPaper({ pose, mascotAlt = "", children, className }: { pose: MascotPoseName; mascotAlt?: string; children: ReactNode; className?: string }) {
+export function PayPaper({
+  pose,
+  mascotAlt = "",
+  tone = "paper",
+  children,
+  className,
+}: {
+  pose: MascotPoseName;
+  mascotAlt?: string;
+  tone?: "paper" | "honey";
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div className={cn("relative mt-28 max-w-[34rem] sm:mt-32", className)}>
       <Mascot pose={pose} alt={mascotAlt} eager sizes="(min-width: 640px) 112px, 88px" className="absolute end-6 bottom-full -mb-1 w-[5.5rem] sm:end-8 sm:w-28" />
-      <div className="surface-light rounded-card bg-paper p-6 text-ink shadow-stage sm:p-8">{children}</div>
+      <div className={cn("surface-light rounded-card p-6 text-ink shadow-stage sm:p-8", tone === "honey" ? "bg-honey" : "bg-paper")}>{children}</div>
+    </div>
+  );
+}
+
+/** A neutral line on the stage above the paper (role=status): what changed since the page was shown. */
+export function PayNotice({ text }: { text: string }) {
+  return (
+    <div role="status" className="mt-8 flex items-start gap-3 rounded-2xl border border-line bg-cream/[0.04] px-4 py-3.5 text-[0.9375rem] leading-relaxed text-cream sm:px-5">
+      <svg viewBox="0 0 24 24" aria-hidden="true" className="mt-0.5 size-5 flex-none fill-none stroke-current stroke-[2.2] text-sage">
+        <path d="M12 11v5.5M12 7.5v.5M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" strokeLinecap="round" />
+      </svg>
+      <p className="flex-1">{text}</p>
     </div>
   );
 }

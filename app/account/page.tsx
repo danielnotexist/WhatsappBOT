@@ -421,9 +421,17 @@ function SubscriptionSlip({
           </Cta>
         </div>
       ) : (
-        <Link href={payHref as Route} className="mt-5 inline-block rounded-sm text-[0.9375rem] font-semibold underline underline-offset-3">
-          עדכון אמצעי תשלום
-        </Link>
+        <>
+          {/* an active basic plan: the pay link opens on the upgrade (the prorated difference, the saved card) */}
+          {meter.plan === "basic" ? (
+            <Cta tone="ink" href={payHref} block className="mt-7">
+              לשדרוג לפרו
+            </Cta>
+          ) : null}
+          <Link href={`${payHref}?view=card` as Route} className="mt-5 inline-block rounded-sm text-[0.9375rem] font-semibold underline underline-offset-3">
+            עדכון אמצעי תשלום
+          </Link>
+        </>
       )}
 
       {!onTrial && subscription && subscription.status !== "cancelled" ? (

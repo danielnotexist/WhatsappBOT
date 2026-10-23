@@ -140,8 +140,12 @@ for (const vp of VIEWPORTS) {
       await page.waitForTimeout(600);
       await check(page, "pay", vp.width, problems, { dir: ACCOUNT_DIR, full: true });
       await payWithMock(page);
-      // the same link with the plan active: the card update face
+      // the same link with the basic plan active: the upgrade face; its card link: the card update face
       await page.goto(pay);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("שדרוג לפרו");
+      await page.waitForTimeout(600);
+      await check(page, "pay-upgrade", vp.width, problems, { dir: ACCOUNT_DIR, full: true });
+      await page.goto(`${pay}?view=card`);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("עדכון כרטיס");
       await page.waitForTimeout(600);
       await check(page, "pay-card", vp.width, problems, { dir: ACCOUNT_DIR, full: true });

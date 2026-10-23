@@ -13,67 +13,23 @@
  */
 import { copy } from "@/lib/copy/bot";
 import { OFFER_LABELS, billButtons, billCopy } from "@/lib/copy/bot-billing";
-import type { BillingApprovalKind, BillingApprovalRow, SubscriptionRow, UserRow } from "@/lib/db/types";
-import { classifyHypFailure, tokefExpired, tokenLast4 } from "@/lib/hyp/codes";
-import { HypPreflightError } from "@/lib/hyp/sign";
+import type { BillingApprovalRow, UserRow } from "@/lib/db/types";
 import { dayLabelHe, localDateOf } from "@/lib/time/zoned";
 import type { ReplyButton } from "@/lib/wa/types";
 import type { BillingContext } from "./context";
 import { billingCommandOf } from "./commands";
 import { cardLinkFor, invoiceLinkFor } from "./links";
-import { formatIls, quoteMonth, quoteUpgrade, vatOf } from "./money";
+import { formatIls, vatOf } from "./money";
 import { activePhone, sendInvoice, shortDateHe } from "./notify";
+import { executeClaimedCharge, finishApproval, quoteFor, savedCard, stateOf, type OfferKind, type Quote, type SavedCard } from "./one-tap";
 import { payLinkFor } from "./pay-link";
-import { PLANS, addOneMonth, isPaidPlan, type PaidPlan } from "./plans";
-import { loadCardToken, nextChargeRun, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
+import { PLANS, type PaidPlan } from "./plans";
+import { nextChargeRun, renewalPlan, scheduleCharge } from "./subscription";
 
-export type OfferKind = Exclude<BillingApprovalKind, "renewal">;
+export type { OfferKind } from "./one-tap";
 
 /** "יום ו׳ 20.11" (Israel time) */
 export const dayLabel = (d: Date | string) => dayLabelHe(localDateOf(new Date(d)));
-
-// ---------------------------------------------------------------------------------------------
-// state
-// ---------------------------------------------------------------------------------------------
-
-interface SubState {
-  sub: SubscriptionRow | null;
-  /** a paid plan that was ever activated (active / past_due / cancelled) */
-  paid: boolean;
-  /** past_due: renewal failed through day 7 */
-  paused: boolean;
-  /** active, the current renewal failed and is being retried */
-  inGrace: boolean;
-  cancelled: boolean;
-  /** next_charge_at is in the past (or missing) */
-  periodOver: boolean;
-}
-
-function stateOf(sub: SubscriptionRow | null, now: Date): SubState {
-  const paid = Boolean(sub && isPaidPlan(sub.plan) && sub.status !== "trial");
-  const periodOver = !sub?.next_charge_at || Date.parse(sub.next_charge_at) <= now.getTime();
-  return {
-    sub,
-    paid,
-    paused: paid && sub!.status === "past_due",
-    inGrace: paid && sub!.status === "active" && !sub!.cancelled_at && sub!.charge_failures > 0,
-    cancelled: paid && sub!.status === "cancelled",
-    periodOver,
-  };
-}
-
-interface SavedCard {
-  token: string;
-  tokef: string;
-  last4: string;
-  expired: boolean;
-}
-
-async function savedCard(ctx: BillingContext, userId: string): Promise<SavedCard | null> {
-  const card = await loadCardToken(ctx.db, userId).catch(() => null);
-  if (!card) return null;
-  return { ...card, last4: tokenLast4(card.token) ?? "????", expired: tokefExpired(card.tokef, ctx.now()) };
-}
 
 /** Reply inside the open window (the user just wrote or pressed) and store the outbound row. */
 async function reply(ctx: BillingContext, user: UserRow, to: string, text: string, buttons?: ReplyButton[]): Promise<void> {
@@ -85,40 +41,6 @@ async function reply(ctx: BillingContext, user: UserRow, to: string, text: strin
 // ---------------------------------------------------------------------------------------------
 // quotes and approvals
 // ---------------------------------------------------------------------------------------------
-
-interface Quote {
-  plan: PaidPlan;
-  amountIls: number;
-  details: Record<string, unknown>;
-}
-
-/** What a charge offer of `kind` costs right now (null when the state does not allow it). */
-function quoteFor(kind: OfferKind, st: SubState, now: Date, last4: string): Quote | null {
-  const sub = st.sub;
-  if (!sub || !st.paid) return null;
-  if (kind === "upgrade") {
-    if (sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0 || !sub.next_charge_at) return null;
-    const q = quoteUpgrade(sub.next_charge_at, now);
-    if (!q) return null;
-    const item = `שדרוג למסלול פרו — יתרת התקופה עד ${shortDateHe(q.periodEnd)}`;
-    return { plan: "pro", amountIls: q.amountIls, details: { item, vat: q.vatIls, days_left: q.daysLeft, cycle_days: q.cycleDays, period_end: q.periodEnd.toISOString(), next_amount: q.nextAmountIls, last4 } };
-  }
-  const plan = renewalPlan(sub);
-  if (!plan) return null;
-  if (kind === "retry") {
-    if (!(st.inGrace || st.paused) || !sub.next_charge_at) return null;
-    const from = st.paused ? now : new Date(sub.next_charge_at);
-    const to = addOneMonth(from);
-    // `due` + `paused`: the overdue cycle this offer settles — a press after it changed is stale
-    return { plan, amountIls: PLANS[plan].priceIls, details: { item: renewalItem(plan, from, to), vat: vatOf(PLANS[plan].priceIls), period_end: to.toISOString(), due: sub.next_charge_at, paused: st.paused, last4 } };
-  }
-  if (kind === "renew") {
-    if (!(st.paused || (st.cancelled && st.periodOver))) return null;
-    const q = quoteMonth(plan, now);
-    return { plan, amountIls: q.amountIls, details: { item: renewalItem(plan, now, q.periodEnd), vat: q.vatIls, period_end: q.periodEnd.toISOString(), last4 } };
-  }
-  return null;
-}
 
 async function createApproval(ctx: BillingContext, user: UserRow, to: string, kind: OfferKind, plan: PaidPlan, amountIls: number, details: Record<string, unknown>): Promise<BillingApprovalRow> {
   const a = await ctx.db.createBillingApproval({ user_id: user.id, kind, plan, amount_ils: amountIls, details, phone_e164: to });
@@ -333,44 +255,13 @@ export async function handleBillingButton(ctx: BillingContext, user: UserRow, fr
 // execution (after a successful claim — status processing)
 // ---------------------------------------------------------------------------------------------
 
-async function finish(ctx: BillingContext, a: BillingApprovalRow, patch: Partial<Pick<BillingApprovalRow, "status" | "hyp_trans_id" | "ccode" | "error">>): Promise<void> {
-  await ctx.db.updateBillingApproval(a.id, patch, ["processing"]);
-}
-
-const sameInstant = (a: unknown, b: string | null | undefined): boolean => typeof a === "string" && typeof b === "string" && Date.parse(a) === Date.parse(b);
-
-/**
- * Why a claimed charge approval no longer matches the subscription (null = charge it). An offer is priced for one
- * billing cycle: an upgrade for the days left until `period_end`, a retry for the overdue cycle `due`. A renewal, a
- * pause or a plan change since the offer makes it stale — the user asks again and gets a fresh quote.
- */
-function chargeStaleReason(a: BillingApprovalRow, st: SubState, now: Date): string | null {
-  const sub = st.sub;
-  if (!sub) return "no subscription";
-  if (a.kind === "upgrade") {
-    if (sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0) return "not an active basic plan";
-    if (!sameInstant(a.details.period_end, sub.next_charge_at)) return "another billing cycle";
-    if (Date.parse(sub.next_charge_at!) <= now.getTime()) return "the billing cycle ended";
-    return null;
-  }
-  if (a.kind === "retry") {
-    if (!st.inGrace && !st.paused) return "nothing overdue";
-    if (!sameInstant(a.details.due, sub.next_charge_at) || a.details.paused !== st.paused) return "another billing cycle";
-    if (a.plan !== renewalPlan(sub)) return "the plan changed";
-    return null;
-  }
-  if (!st.paused && !(st.cancelled && st.periodOver)) return "nothing to renew";
-  if (a.plan !== renewalPlan(sub)) return "the plan changed";
-  return null;
-}
-
 async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a: BillingApprovalRow, waMessageId: string): Promise<void> {
   const now = ctx.now();
   const st = stateOf(await ctx.db.getSubscription(user.id), now);
   const sub = st.sub;
   const audit = (result: string, action = `billing.approve.${a.kind}`) => ctx.db.addAudit({ user_id: user.id, action, target: a.id, approved_by_msg_id: waMessageId, result });
   const stale = async (why: string) => {
-    await finish(ctx, a, { status: "failed", error: `stale: ${why}` });
+    await finishApproval(ctx, a, { status: "failed", error: `stale: ${why}` });
     await audit(`stale:${why}`);
     await reply(ctx, user, to, billCopy["bill.offer_stale"]());
   };
@@ -381,7 +272,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     await ctx.db.cancelSubscription(user.id);
     if (sub.scheduled_plan) await ctx.db.upsertSubscription(user.id, { scheduled_plan: null });
     await ctx.db.cancelJobs(user.id, "charge");
-    await finish(ctx, a, { status: "succeeded" });
+    await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.cancel");
     await reply(ctx, user, to, copy["bill.cancelled"](st.periodOver ? dayLabel(now) : periodEnd));
     return;
@@ -389,7 +280,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
   if (a.kind === "downgrade") {
     if (!sub || sub.plan !== "pro" || st.cancelled) return stale("not a pro plan");
     await ctx.db.upsertSubscription(user.id, { scheduled_plan: "basic" });
-    await finish(ctx, a, { status: "succeeded" });
+    await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.downgrade_scheduled");
     await reply(ctx, user, to, billCopy["bill.downgrade_scheduled"](periodEnd));
     return;
@@ -397,7 +288,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
   if (a.kind === "keep_pro") {
     if (!sub || sub.plan !== "pro" || sub.scheduled_plan !== "basic" || st.cancelled) return stale("no downgrade scheduled");
     await ctx.db.upsertSubscription(user.id, { scheduled_plan: null });
-    await finish(ctx, a, { status: "succeeded" });
+    await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.downgrade_cleared");
     await reply(ctx, user, to, billCopy["bill.downgrade_cleared"]());
     return;
@@ -408,126 +299,60 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     const run = nextChargeRun(sub, now);
     // a key of its own per resume: cancel → resume → cancel → resume in one cycle must still leave a queued job
     if (run) await scheduleCharge(ctx.db, user.id, run, `resume:${a.id}`);
-    await finish(ctx, a, { status: "succeeded" });
+    await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.resume");
     await reply(ctx, user, to, billCopy["bill.resumed"]({ periodEnd, amount: formatIls(PLANS[renewalPlan(sub) ?? "basic"].priceIls) }));
     return;
   }
 
-  // ---- charges: upgrade / retry / renew ----
-  const staleReason = chargeStaleReason(a, st, now);
-  if (staleReason || !sub) return stale(staleReason ?? "no subscription");
-
-  const card = await savedCard(ctx, user.id);
-  if (!card || card.expired) {
-    await finish(ctx, a, { status: "failed", error: card ? "card expired" : "no card" });
-    await audit(card ? "failed:card_expired" : "failed:no_card");
-    if (card) await reply(ctx, user, to, billCopy["bill.card_expired"](card.last4), billButtons.card);
-    else await reply(ctx, user, to, billCopy["bill.no_saved_card"](payLinkFor(ctx.appUrl, user.id)));
-    return;
-  }
-
-  const [first, ...rest] = (user.name ?? "").trim().split(/\s+/);
-  const item = typeof a.details.item === "string" ? a.details.item : `מנוי ${PLANS[a.plan].nameHe}`;
-  let result;
-  try {
-    result = await ctx.hyp.chargeToken({
-      amount: a.amount_ils, // exactly what was shown
-      token: card.token,
-      tokef: card.tokef,
-      email: user.email,
-      clientName: first || undefined,
-      clientLName: rest.join(" ") || undefined,
-      info: `${a.kind}:${a.id}`,
-      order: a.id,
-      items: [{ description: item, quantity: 1, price: a.amount_ils }],
-    });
-  } catch (e) {
-    if (e instanceof HypPreflightError) {
-      // nothing was sent to HYP (gateway not configured / invalid request) — a plain failure, not "unknown"
-      await finish(ctx, a, { status: "failed", error: e.message.slice(0, 300) });
-      await audit("failed:preflight");
-      console.error(`[billing] ${a.kind} ${a.id}: HYP preflight failed:`, e.message);
+  // ---- charges: upgrade / retry / renew — the shared charge code (lib/billing/one-tap.ts), then the chat reply ----
+  const out = await executeClaimedCharge(ctx, user, a, waMessageId);
+  switch (out.kind) {
+    case "stale":
+      await reply(ctx, user, to, billCopy["bill.offer_stale"]());
+      return;
+    case "no_card":
+      await reply(ctx, user, to, billCopy["bill.no_saved_card"](payLinkFor(ctx.appUrl, user.id)));
+      return;
+    case "card_expired":
+      await reply(ctx, user, to, billCopy["bill.card_expired"](out.last4), billButtons.card);
+      return;
+    case "preflight":
       await reply(ctx, user, to, billCopy["bill.charge_failed_config"]());
       return;
+    case "unknown":
+      await reply(ctx, user, to, billCopy["bill.charge_unknown"]());
+      return;
+    case "failed": {
+      if (out.failure === "card") {
+        await reply(ctx, user, to, billCopy["bill.charge_failed_card"](out.ccode), billButtons.card);
+      } else if (out.failure === "config") {
+        await reply(ctx, user, to, billCopy["bill.charge_failed_config"]());
+      } else {
+        // a fresh approval (new 10 minutes, re-quoted) behind [ניסיון חוזר]
+        const fresh = await ctx.db.getSubscription(user.id);
+        const q = quoteFor(a.kind as OfferKind, stateOf(fresh, ctx.now()), ctx.now(), out.last4);
+        const again = q ? await createApproval(ctx, user, to, a.kind as OfferKind, q.plan, q.amountIls, q.details) : null;
+        const amount = formatIls(q?.amountIls ?? a.amount_ils);
+        const text = out.failure === "temporary" ? billCopy["bill.charge_failed_temporary"](amount) : billCopy["bill.charge_failed_declined"]({ code: out.ccode, amount });
+        await reply(ctx, user, to, text, again ? billButtons.retryOrCard(again.id) : billButtons.card);
+      }
+      return;
     }
-    // No answer from HYP: the charge may or may not exist. "unknown" blocks every further charge of this user until
-    // reconciled in the HYP portal (Order / Info = approval id) — never risk a double charge.
-    await finish(ctx, a, { status: "unknown", error: (e as Error).message.slice(0, 300) });
-    await audit("unknown");
-    console.error(`[billing] ${a.kind} ${a.id}: no answer from HYP — reconcile manually:`, (e as Error).message);
-    await reply(ctx, user, to, billCopy["bill.charge_unknown"]());
-    return;
-  }
-
-  if (result.ok && !result.transId) {
-    // approved without a transaction id: it cannot be matched to a receipt or told apart from a decline — treat it as
-    // "unknown" (blocks further charges until reconciled), never as a decline that invites another charge
-    await finish(ctx, a, { status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
-    await audit("unknown:no_trans_id");
-    console.error(`[billing] ${a.kind} ${a.id}: HYP approved without a transaction id — reconcile manually`);
-    await reply(ctx, user, to, billCopy["bill.charge_unknown"]());
-    return;
-  }
-
-  if (result.transId) {
-    await ctx.db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: a.amount_ils, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: a.id });
-  }
-
-  if (!result.ok || !result.transId) {
-    const ccode = result.ccode || "?";
-    const fk = classifyHypFailure(ccode);
-    await finish(ctx, a, { status: "failed", ccode, hyp_trans_id: result.transId });
-    await audit(`failed:${ccode}:${fk}`);
-    if (fk === "card") {
-      await reply(ctx, user, to, billCopy["bill.charge_failed_card"](ccode), billButtons.card);
-    } else if (fk === "config") {
-      console.error(`[billing] HYP configuration error ${ccode} on ${a.kind} — see docs/hyp-setup.md`);
-      await reply(ctx, user, to, billCopy["bill.charge_failed_config"]());
-    } else {
-      // a fresh approval (new 10 minutes, re-quoted) behind [ניסיון חוזר]
-      const fresh = await ctx.db.getSubscription(user.id);
-      const q = quoteFor(a.kind as OfferKind, stateOf(fresh, ctx.now()), ctx.now(), card.last4);
-      const again = q ? await createApproval(ctx, user, to, a.kind as OfferKind, q.plan, q.amountIls, q.details) : null;
-      const amount = formatIls(q?.amountIls ?? a.amount_ils);
-      const text = fk === "temporary" ? billCopy["bill.charge_failed_temporary"](amount) : billCopy["bill.charge_failed_declined"]({ code: ccode, amount });
-      await reply(ctx, user, to, text, again ? billButtons.retryOrCard(again.id) : billButtons.card);
+    case "charged": {
+      const amount = formatIls(out.amountIls);
+      const nextDate = dayLabel(out.nextChargeAt);
+      const text =
+        a.kind === "upgrade"
+          ? billCopy["bill.upgrade_done"]({ amount, nextAmount: formatIls(PLANS.pro.priceIls), nextDate, resendHint: out.resendHint })
+          : a.kind === "renew"
+            ? billCopy["bill.renewed"]({ plan: PLANS[a.plan].nameHe, amount, nextDate })
+            : billCopy["bill.charge_ok_resumed"]({ amount, nextDate });
+      await reply(ctx, user, to, text);
+      await sendInvoice(ctx, user, { transId: out.transId, amountIls: out.amountIls, date: now, plan: out.plan, nextChargeAt: out.nextChargeAt }, { phone: to, windowOpen: true });
+      return;
     }
-    return;
   }
-
-  // ---- success: the subscription first, then the approval leaves `processing` (that releases the charge lock) ----
-  const amount = formatIls(a.amount_ils);
-  let nextChargeAt: Date;
-  if (a.kind === "upgrade") {
-    nextChargeAt = new Date(sub.next_charge_at!);
-    await ctx.db.upsertSubscription(user.id, { plan: "pro", scheduled_plan: null });
-    await ctx.db.raiseUsageLimit(user.id, PLANS.pro.messages);
-    await finish(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
-    await audit("ok", "subscription.upgrade");
-    // the upgrade came from the 750 limit within the last day → the message that hit it was not handled
-    const offerAt = typeof user.profile.limit_offer_at === "string" ? Date.parse(user.profile.limit_offer_at) : 0;
-    const resendHint = now.getTime() - offerAt < 24 * 3_600_000 && typeof user.profile.pending_input === "string";
-    if (resendHint) await ctx.db.mergeUserProfile(user.id, { pending_input: null, limit_offer_at: null });
-    await reply(ctx, user, to, billCopy["bill.upgrade_done"]({ amount, nextAmount: formatIls(PLANS.pro.priceIls), nextDate: dayLabel(nextChargeAt), resendHint }));
-  } else {
-    // retry in grace → the cycle continues from its due date; paused / ended → a new month from today
-    nextChargeAt = a.kind === "retry" && st.inGrace ? addOneMonth(new Date(sub.next_charge_at!)) : addOneMonth(now);
-    await ctx.db.upsertSubscription(user.id, {
-      status: "active",
-      plan: a.plan,
-      scheduled_plan: null,
-      charge_failures: 0,
-      next_charge_at: nextChargeAt.toISOString(),
-      cancelled_at: null,
-      started_at: sub.started_at ?? now.toISOString(),
-    });
-    await scheduleCharge(ctx.db, user.id, nextChargeAt);
-    await finish(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
-    await audit("ok", a.kind === "retry" ? "subscription.charge" : "subscription.renew");
-    await reply(ctx, user, to, a.kind === "renew" ? billCopy["bill.renewed"]({ plan: PLANS[a.plan].nameHe, amount, nextDate: dayLabel(nextChargeAt) }) : billCopy["bill.charge_ok_resumed"]({ amount, nextDate: dayLabel(nextChargeAt) }));
-  }
-  await sendInvoice(ctx, user, { transId: result.transId, amountIls: a.amount_ils, date: now, plan: a.plan, nextChargeAt }, { phone: to, windowOpen: true });
 }
 
 // ---------------------------------------------------------------------------------------------
