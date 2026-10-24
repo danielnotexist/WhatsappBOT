@@ -12,7 +12,7 @@
 // Playwright comes from /opt/node-tools (browsers in /opt/pw-browsers); nothing is installed.
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -144,13 +144,15 @@ async function main() {
         rmSync(dir, { recursive: true, force: true });
         mkdirSync(dir, { recursive: true });
       }
-      const per = Math.ceil(total / WORKERS);
+      const cycle = T * FPS * SUB;
+      const per = Math.ceil(cycle / WORKERS);
       const t0 = Date.now();
       let done = 0;
       if (!encodeOnly) await Promise.all(
         Array.from({ length: WORKERS }, async (_, w) => {
           const p = await openPage(browser, port);
-          for (let k = w * per; k < Math.min(total, (w + 1) * per); k++) {
+          // the closing frame's sub-frames are the first frame's (seek is periodic): copied below, not re-shot
+          for (let k = w * per; k < Math.min(cycle, (w + 1) * per); k++) {
             const t = (k - lead) / (FPS * SUB);
             await shot(p, t, join(dir, `f${String(k).padStart(5, "0")}.png`));
             if (++done % 800 === 0) console.log(`${done}/${total} sub-frames, ${(done / ((Date.now() - t0) / 1000)).toFixed(1)}/s`);
@@ -158,6 +160,9 @@ async function main() {
           await p.page.close();
         }),
       );
+      for (let k = cycle; k < total; k++) {
+        copyFileSync(join(dir, `f${String(k - cycle).padStart(5, "0")}.png`), join(dir, `f${String(k).padStart(5, "0")}.png`));
+      }
       if (readdirSync(dir).length !== total) throw new Error("missing sub-frames");
 
       const audio = join(HERE, "assets/audio/mix.wav");
@@ -175,9 +180,11 @@ async function main() {
         `[0:v]tmix=frames=${SUB}:weights='${Array(SUB).fill(1).join(" ")}',select='eq(mod(n\\,${SUB})\\,${lead})',setpts=N/${FPS}/TB,format=yuv420p[v]`,
         "-map", "[v]", "-map", "1:a",
         "-r", String(FPS),
-        "-c:v", "libx264", "-preset", "slow", "-crf", "14", "-profile:v", "high", "-pix_fmt", "yuv420p",
-        // the first and the closing frame are the same picture: both intra-coded, so they decode alike
+        "-c:v", "libx264", "-preset", "slow", "-qp", "16", "-profile:v", "high", "-pix_fmt", "yuv420p",
+        // the first and the closing frame are the same picture: both intra-coded at one constant quantiser, so they
+        // decode to the same pixels
         "-force_key_frames", `expr:eq(n,0)+eq(n,${frames - 1})`,
+        "-x264-params", "scenecut=0",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         "-frames:v", String(frames),

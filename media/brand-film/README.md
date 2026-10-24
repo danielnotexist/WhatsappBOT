@@ -56,7 +56,9 @@ messages. The persona's dates follow the landing (Wednesday 21.10 → Thursday 2
 - **Hoopoe**: one pose per scene, swapped on the bar: spring in from 16 px below at 96 % scale, a 0.14 s blur out.
 - **Words**: per word (blur + rise), per letter for the brand line; content leaves 30 ms before its container changes.
 - **Motion blur**: 8 sub-frames per frame (480 fps) blended by ffmpeg `tmix` (a trailing 7/480 s shutter), 60 fps out.
-- **Loop**: 961 frames, frames 0 and 960 identical; the soundtrack is circular and carries one extra frame.
+- **Loop**: 961 frames, frames 0 and 960 identical: the closing frame's sub-frames are copies of the first frame's,
+  and both are intra-coded at one constant quantiser, so they decode to the same pixels. The soundtrack is circular
+  and carries one extra frame.
 
 ## Re-render
 
