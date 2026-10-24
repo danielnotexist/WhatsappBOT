@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
-import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import { usageView } from "@/app/account/view";
 import { Cta } from "@/components/brand/cta";
 import { UsageMeter } from "@/components/brand/usage-meter";
-import { ownerState } from "@/lib/admin/auth";
+import { JOB_LABEL, mergeTimeline } from "@/lib/admin/audit-labels";
+import { toChatMessage } from "@/lib/admin/conversation";
 import { sourceLabel } from "@/lib/admin/source";
+import { openUserView } from "@/lib/admin/user-view";
 import {
   ONBOARDING_LABEL,
   PLAN_LABEL,
@@ -24,14 +25,16 @@ import {
   formatUsd,
   problemsOf,
   stageOf,
+  userDetails,
   waLink,
 } from "@/lib/admin/view";
 import { loadAgents } from "@/lib/agents/service";
 import { BRAND } from "@/lib/brand";
 import { connectionServices } from "@/lib/connections/services";
 import { getDb } from "@/lib/db";
-import type { AdminUserRow, MessageRow } from "@/lib/db/types";
+import type { AdminUserRow } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
+import { ActivityCard } from "../../_components/activity-card";
 import { ChatList, ErrorTable } from "../../_components/inbox";
 import { Empty, Ltr, Panel, Pill } from "../../_components/parts";
 import { AdminHeader } from "../../_components/shell";
@@ -44,8 +47,9 @@ export const metadata: Metadata = { title: "ניהול - משתמש", robots: { 
 /**
  * /admin/users/<id> — everything about one user, to help them: the profile and where they came from, the way in so far,
  * WhatsApp, the connected systems, the plan and the payments, the usage, the agents, reminders and failed work, alerts and
- * meeting summaries, the whole WhatsApp conversation (Daniel's decision: the content is always shown), the action
- * timeline, the errors, their tickets and website chats. Every view is written to the audit log (admin.view_user).
+ * meeting summaries, a compact "פעילות" card (the last messages and actions, with the full conversation and the full
+ * timeline one click away in their own tabs: ./conversation, ./activity), the errors, their tickets and website chats.
+ * Every view is written to the audit log (admin.view_user).
  */
 export default function AdminUserPage(props: PageProps<"/admin/users/[id]">) {
   return (
@@ -57,7 +61,7 @@ export default function AdminUserPage(props: PageProps<"/admin/users/[id]">) {
           </p>
         }
       >
-        <UserView params={props.params} searchParams={props.searchParams} />
+        <UserView params={props.params} />
       </Suspense>
     </div>
   );
@@ -65,32 +69,15 @@ export default function AdminUserPage(props: PageProps<"/admin/users/[id]">) {
 
 const CONN_TONE = { active: "ok", expired: "warn", error: "error", revoked: "off" } as const;
 const CONN_LABEL = { active: "מחובר", expired: "פג תוקף", error: "נכשל", revoked: "נותק" } as const;
-const JOB_LABEL: Record<string, string> = {
-  morning_summary: "סיכום בוקר",
-  reminder: "תזכורת",
-  renew_subscription: "חידוש מנוי",
-  charge: "חיוב",
-  retry: "ניסיון חוזר",
-  proactive_scan: "סריקת התראות",
-  meeting_plan: "תכנון פגישות",
-  meeting_summary: "סיכום פגישה",
-};
 const AGENT_STATUS = { active: "פעיל", disabled: "כבוי", locked: "נעול", not_in_plan: "לא בתוכנית" } as const;
-const MESSAGE_PAGE = 60;
+const PREVIEW_MESSAGES = 4;
 
-async function UserView({ params, searchParams }: { params: PageProps<"/admin/users/[id]">["params"]; searchParams: PageProps<"/admin/users/[id]">["searchParams"] }) {
+async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["params"] }) {
   await connection();
   const db = getDb();
-  const s = await ownerState(db);
-  if (s.state !== "ok") notFound();
-  const owner = s.user;
-  const [{ id }, sp] = await Promise.all([params, searchParams]);
-  if (!/^[0-9a-f-]{36}$/.test(id)) notFound();
-  const user = await db.adminGetUser(id);
-  if (!user) notFound();
-  await db.addAudit({ user_id: owner.id, action: "admin.view_user", target: user.id, result: "ok" });
+  const { id } = await params;
+  const { user } = await openUserView(db, id, "admin.view_user");
 
-  const before = typeof sp.before === "string" && !Number.isNaN(Date.parse(sp.before)) ? sp.before : undefined;
   const now = new Date();
   const tz = user.timezone || "Asia/Jerusalem";
   const [overview, phones, connections, subscription, usage, payments, approvals, reminders, jobs, alerts, meetings, messages, audit, errors, tickets, chats] = await Promise.all([
@@ -105,8 +92,8 @@ async function UserView({ params, searchParams }: { params: PageProps<"/admin/us
     db.adminJobs(user.id, 30),
     db.adminProactiveAlerts(user.id, 20),
     db.adminMeetingSummaries(user.id, 10),
-    db.adminMessages(user.id, { before, limit: MESSAGE_PAGE }),
-    db.adminAudit(user.id, 60),
+    db.adminMessages(user.id, { limit: PREVIEW_MESSAGES }),
+    db.adminAudit(user.id, 200),
     db.listAppErrors({ userId: user.id, limit: 30 }),
     db.listSupportTickets({ userId: user.id, limit: 30 }),
     db.listSupportChats({ userId: user.id, limit: 30 }),
@@ -121,8 +108,8 @@ async function UserView({ params, searchParams }: { params: PageProps<"/admin/us
   const optIn = user.profile.marketing_opt_in as { value?: boolean; at?: string } | undefined;
   const src = user.signup_source ?? null;
   const back = `/admin/users/${user.id}`;
-  const details = [`שם: ${user.name ?? "-"}`, `עסק: ${user.business_name ?? "-"}`, `מייל: ${user.email}`, `טלפון: ${phone ? formatPhoneIl(phone.phone_e164) : "-"}`, `תוכנית: ${PLAN_LABEL[plan]}`, `מזהה: ${user.id}`].join("\n");
-  const oldest = messages.at(-1)?.created_at;
+  const details = userDetails(user, phone?.phone_e164 ?? null, PLAN_LABEL[plan]);
+  const timeline = mergeTimeline({ audit, errors, jobs, approvals });
 
   return (
     <>
@@ -368,7 +355,7 @@ async function UserView({ params, searchParams }: { params: PageProps<"/admin/us
                   .map((j) => (
                     <li key={j.id} className="text-[0.875rem]">
                       <Pill tone="error">
-                        {JOB_LABEL[j.kind] ?? j.kind} נכשלה, {formatDateTime(j.run_at)}
+                        {JOB_LABEL[j.kind]} נכשלה, {formatDateTime(j.run_at)}
                       </Pill>
                       {j.last_error ? (
                         <Ltr className="mt-1 block text-[0.8125rem] break-words text-cream-muted">{j.last_error}</Ltr>
@@ -407,56 +394,14 @@ async function UserView({ params, searchParams }: { params: PageProps<"/admin/us
           </Panel>
         </div>
 
-        <div className="mt-16 grid gap-x-12 gap-y-14 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-          <Panel id="conversation" title="השיחה בוואטסאפ" lead={`${BRAND.name} מימין, המשתמש משמאל. עם התמלול, הכלים שהופעלו והעלות של כל תשובה.`}>
-            {messages.length ? (
-              <>
-                {messages.length === MESSAGE_PAGE && oldest ? (
-                  <p className="mb-4">
-                    <Link href={`/admin/users/${user.id}?before=${encodeURIComponent(oldest)}#conversation` as Route} className="text-[0.875rem] text-honey underline-offset-4 hover:underline">
-                      הודעות קודמות
-                    </Link>
-                  </p>
-                ) : null}
-                <ol className="grid gap-2.5 rounded-card border border-line bg-[var(--wa-bg)] p-3 sm:p-5">
-                  {messages
-                    .slice()
-                    .reverse()
-                    .map((m) => (
-                      <Message key={m.id} m={m} tz={tz} />
-                    ))}
-                </ol>
-                {before ? (
-                  <p className="mt-4">
-                    <Link href={`/admin/users/${user.id}#conversation` as Route} className="text-[0.875rem] text-honey underline-offset-4 hover:underline">
-                      להודעות האחרונות
-                    </Link>
-                  </p>
-                ) : null}
-              </>
-            ) : (
-              <Empty>עוד אין הודעות.</Empty>
-            )}
-          </Panel>
-
-          <Panel id="timeline" title="ציר הפעולות" lead="מה קרה בחשבון, מהחדש לישן.">
-            {audit.length ? (
-              <ol className="relative grid gap-3 border-s border-line ps-5">
-                {audit.map((a, i) => (
-                  <li key={i} className="relative text-[0.9375rem]">
-                    <span aria-hidden="true" className={cn("absolute -start-[1.6rem] top-1.5 size-2.5 rounded-full ring-4 ring-night", a.result?.startsWith("error") ? "bg-destructive" : "bg-cream-muted")} />
-                    <Ltr className="text-cream">{a.action}</Ltr>
-                    {a.result ? <span className="text-cream-muted"> {a.result}</span> : null}
-                    {a.agent_name ? <span className="text-cream-muted"> ({a.agent_name})</span> : null}
-                    <span className="block text-[0.8125rem] text-cream-muted">{formatDateTime(a.created_at, tz)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <Empty>אין פעולות ביומן.</Empty>
-            )}
-          </Panel>
-        </div>
+        <ActivityCard
+          userId={user.id}
+          messages={messages.map(toChatMessage)}
+          inbound30d={overview?.messages_30d ?? 0}
+          cost30d={overview?.ai_cost_30d ?? 0}
+          timeline={timeline}
+          now={now}
+        />
 
         <div className="mt-16 grid gap-14">
           <Panel
@@ -502,30 +447,5 @@ function Facts({ rows }: { rows: [string, ReactNode][] }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-const TYPE_LABEL: Partial<Record<MessageRow["type"], string>> = { audio: "הודעה קולית", image: "תמונה", doc: "קובץ", button: "כפתורים", template: "תבנית" };
-
-/** One WhatsApp message as WhatsApp shows it (the dark chrome), with what the admin needs under it. */
-function Message({ m, tz }: { m: MessageRow; tz: string }) {
-  const out = m.direction === "out";
-  const text = m.text?.trim() || "";
-  return (
-    <li className={cn("flex", out ? "justify-start" : "justify-end")}>
-      <div className={cn("max-w-[88%] rounded-2xl px-3.5 py-2 text-[0.9375rem] leading-relaxed text-[var(--wa-fg)] sm:max-w-[80%]", out ? "rounded-ss-md bg-[var(--wa-out)]" : "rounded-se-md bg-[var(--wa-in)]")}>
-        <span className="sr-only">{out ? `${BRAND.name}: ` : "המשתמש: "}</span>
-        {m.type !== "text" && TYPE_LABEL[m.type] ? <span className="block text-[0.8125rem] text-[var(--wa-meta-in)]">{TYPE_LABEL[m.type]}</span> : null}
-        {text ? <p className="whitespace-pre-line">{text}</p> : null}
-        {m.transcript ? <p className="mt-1 border-s-2 border-cream/30 ps-2 whitespace-pre-line">תמלול: {m.transcript}</p> : null}
-        <p className={cn("mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[0.75rem]", out ? "text-[var(--wa-meta-out)]" : "text-[var(--wa-meta-in)]")}>
-          <span className="tabular">{formatDateTime(m.created_at, tz)}</span>
-          {m.tools?.length ? <Ltr>{m.tools.join(", ")}</Ltr> : null}
-          {m.model_used ? <Ltr>{m.model_used}</Ltr> : null}
-          {typeof m.cost_usd === "number" && m.cost_usd > 0 ? <span className="tabular">{formatUsd(m.cost_usd)}</span> : null}
-          {m.hidden_from_model ? <span>מחוץ לזיכרון</span> : null}
-        </p>
-      </div>
-    </li>
   );
 }

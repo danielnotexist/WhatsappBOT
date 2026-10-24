@@ -92,6 +92,11 @@ export function formatPhoneIl(e164: string | null | undefined): string {
   return e164;
 }
 
+/** "העתקת פרטים": who the user is, as plain lines to paste into a reply or a note. */
+export function userDetails(user: { id: string; name: string | null; business_name: string | null; email: string }, phone: string | null, plan?: string): string {
+  return [`שם: ${user.name ?? "-"}`, `עסק: ${user.business_name ?? "-"}`, `מייל: ${user.email}`, `טלפון: ${phone ? formatPhoneIl(phone) : "-"}`, ...(plan ? [`תוכנית: ${plan}`] : []), `מזהה: ${user.id}`].join("\n");
+}
+
 /** wa.me link for a number (digits only). */
 export function waLink(e164: string): string {
   return `https://wa.me/${e164.replace(/\D/g, "")}`;

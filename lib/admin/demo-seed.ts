@@ -49,14 +49,108 @@ const SOURCES: (SignupSource | null)[] = [
 ];
 
 const CONVERSATION: { in: string; out: string; tools: string[]; model: string; cost: number }[] = [
-  { in: "מה יש לי מחר ביומן?", out: "מחר שלוש פגישות: 09:30 עם משפחת לוי (Teams), 12:00 ארוחת צהריים עם רו״ח כהן, ו-16:00 שיחה עם הבנק.", tools: ["calendar_list_events"], model: "claude-sonnet-5-5", cost: 0.0142 },
+  { in: "מה יש לי מחר ביומן?", out: "מחר שלוש פגישות: 09:30 עם משפחת לוי (Teams), 12:00 ארוחת צהריים עם רו״ח כהן, ו-16:00 שיחה עם הבנק.", tools: ["list_events"], model: "claude-sonnet-5-5", cost: 0.0142 },
   { in: "תזכירי לי מחר בשמונה להתקשר לעו״ד שמעוני", out: "קבעתי תזכורת למחר ב-08:00: להתקשר לעו״ד שמעוני.", tools: ["create_reminder"], model: "claude-haiku-5-5", cost: 0.0021 },
-  { in: "יש מיילים חשובים מהבוקר?", out: "שניים שכדאי לראות: הצעת מחיר מספק ההדפסה (ממתינה לתשובה עד חמישי), ותזכורת מהבנק על חתימה על מסמכים.", tools: ["mail_search", "mail_read"], model: "claude-sonnet-5-5", cost: 0.0213 },
-  { in: "תכיני תשובה לספק שאנחנו מאשרים", out: "הכנתי טיוטה לספק ההדפסה. אפשר לשלוח, לערוך או לבטל.", tools: ["mail_draft_reply"], model: "claude-sonnet-5-5", cost: 0.0187 },
+  { in: "יש מיילים חשובים מהבוקר?", out: "שניים שכדאי לראות: הצעת מחיר מספק ההדפסה (ממתינה לתשובה עד חמישי), ותזכורת מהבנק על חתימה על מסמכים.", tools: ["search_emails", "get_email"], model: "claude-sonnet-5-5", cost: 0.0213 },
+  { in: "תכיני תשובה לספק שאנחנו מאשרים", out: "הכנתי טיוטה לספק ההדפסה. אפשר לשלוח, לערוך או לבטל.", tools: ["draft_email"], model: "claude-sonnet-5-5", cost: 0.0187 },
   { in: "תודה!", out: "בשמחה.", tools: [], model: "claude-haiku-5-5", cost: 0.0006 },
 ];
 
 const iso = (ms: number) => new Date(ms).toISOString();
+
+/** A long link as the bot really sends it (the sign-in link to connect Google) — it must wrap inside the bubble. */
+const LONG_LINK = "http://localhost:3000/api/auth/google/start?t=OTI0YjkyZjEtM2E0Yy00ZDFhLWI2ZGQtN2UxYjQ1ZTkwYzAyLjE3NjEzMDQ4MDAuYTlmM2U4ZDJjNzFiNGE2ZTkwZjNkMmM3YjFhNGU2ZjBkOGMzYjJhMWU5ZjBhN2Q2YzViNGUz";
+
+/** More of a working month, for the first person's conversation reader and timeline. */
+const MORE: { in: string; out: string; tools: string[]; model: string; cost: number; voice?: boolean; buttons?: boolean; hidden?: boolean }[] = [
+  { in: "מה הזמנים הפנויים שלי ביום חמישי?", out: "ביום חמישי פנוי בין 10:00 ל-12:00 ואחרי 15:30.", tools: ["list_events"], model: "claude-sonnet-5-5", cost: 0.0118 },
+  { in: "תקבעי פגישה עם משפחת כהן ביום חמישי בעשר", out: "הכנתי פגישה ביום חמישי ב-10:00 עם משפחת כהן, שעה אחת. לקבוע?", tools: ["create_event"], model: "claude-sonnet-5-5", cost: 0.0164, buttons: true },
+  { in: "תחפשי את החוזה של שמעוני בקבצים", out: "מצאתי שני קבצים: ״חוזה שכירות - שמעוני.docx״ מ-12.10 ו״נספח א׳.pdf״. לקרוא לך את עיקרי החוזה?", tools: ["search_files"], model: "claude-sonnet-5-5", cost: 0.0156, voice: true },
+  { in: "כן, מה תקופת ההתחייבות?", out: "החוזה ל-24 חודשים מ-1.11.2026, עם אופציה להארכה ב-12 חודשים בהודעה של 60 יום מראש.", tools: ["get_file_text"], model: "claude-sonnet-5-5", cost: 0.0342 },
+  { in: "תזכירי לי כל יום ראשון בתשע לשלוח דוח שבועי", out: "קבעתי תזכורת קבועה: כל יום ראשון ב-09:00, לשלוח דוח שבועי.", tools: ["create_reminder"], model: "claude-haiku-5-5", cost: 0.0024 },
+  { in: "איך מחברים גם את Google?", out: `כדי לחבר את Google, אפשר להיכנס לקישור הזה (בתוקף ל-30 דקות): ${LONG_LINK}`, tools: [], model: "claude-haiku-5-5", cost: 0.0019 },
+  { in: "תעבירי את המייל מהבנק לרואה החשבון", out: "הכנתי העברה של ״מסמכים לחתימה - בנק הפועלים״ ליוסי כהן. לשלוח?", tools: ["search_emails", "forward_email"], model: "claude-sonnet-5-5", cost: 0.0201, buttons: true },
+  { in: "סוכנים", out: "הסוכנים שלך: מנהלת חשבונות (פעילה), עוזרת משפטית (כבויה). אפשר להפעיל, לכבות או ליצור חדש.", tools: [], model: "claude-haiku-5-5", cost: 0, buttons: true, hidden: true },
+  { in: "תוסיפי משימה להכין הצעת מחיר ללנדאו", out: "הוספתי משימה ב-To Do: להכין הצעת מחיר ללנדאו.", tools: ["todo_create_task"], model: "claude-haiku-5-5", cost: 0.0031 },
+  { in: "מה עם המייל של הספק? ענו?", out: "עוד לא. שלחת להם ביום שני, ושני מיילים נוספים מחכים לתשובה מהם מאז שבוע שעבר.", tools: ["search_emails"], model: "claude-sonnet-5-5", cost: 0.0133, voice: true },
+];
+
+type Exchange = (typeof MORE)[number];
+
+/**
+ * The first person: a varied month — about two hundred messages, the long link (the last message, so the reader opens
+ * on it), voice notes, buttons, agent management, and a timeline across every category with errors, a failed job and
+ * billing approvals.
+ */
+function richActivity(db: MemoryDb, id: string, created: number, t: number): void {
+  const day = 86_400_000;
+  const days = Math.max(1, Math.floor((t - created) / day));
+  const script: Exchange[] = [...CONVERSATION, ...MORE];
+  const msgs: MemoryDb["messages"] = [];
+  const audit: MemoryDb["audit"] = [];
+  const add = (action: string, at: number, result = "ok", target: string | null = null, extra: Partial<MemoryDb["audit"][number]> = {}) => {
+    if (at <= t) audit.push({ user_id: id, action, target, result, created_at: iso(at), ...extra });
+  };
+  for (let d = 0; d <= days; d++) {
+    const dayStart = created + d * day;
+    const perDay = 2 + ((d * 7) % 4);
+    if (d % 2 === 0) add("login", dayStart + 8 * 3_600_000);
+    add("morning_summary.send", dayStart + 7.5 * 3_600_000, "text");
+    for (let k = 0; k < perDay; k++) {
+      const ex = d === days && k === perDay - 1 ? MORE[5]! : script[(d * 3 + k) % script.length]!;
+      const at = Math.min(t - (perDay - k) * 120_000, dayStart + (9 + k * 2) * 3_600_000 + ((d * 13) % 50) * 60_000);
+      const hidden = Boolean(ex.hidden);
+      msgs.push({ id: randomUUID(), user_id: id, wa_message_id: `wamid.demo.rich.${d}.${k}`, direction: "in", type: ex.voice ? "audio" : "text", text: ex.voice ? null : ex.in, media_url: null, transcript: ex.voice ? ex.in : null, model_used: null, tokens_in: null, tokens_out: null, cost_usd: null, agent_key: null, hidden_from_model: hidden, tools: [], created_at: iso(at) });
+      msgs.push({ id: randomUUID(), user_id: id, wa_message_id: null, direction: "out", type: ex.buttons ? "button" : "text", text: ex.out, media_url: null, transcript: null, model_used: ex.cost ? ex.model : null, tokens_in: ex.cost ? 2600 : null, tokens_out: ex.cost ? 140 : null, cost_usd: ex.cost || null, agent_key: null, hidden_from_model: hidden, tools: ex.tools, created_at: iso(at + 5000) });
+      if (ex.tools.includes("create_reminder")) add("reminder.create", at + 6000, "ok", randomUUID());
+      if (ex.tools.includes("create_event")) add(d % 3 ? "create_event.execute" : "create_event.cancel", at + 60_000, d % 3 ? "ok" : "cancelled", randomUUID());
+      if (ex.tools.includes("forward_email")) add("forward_mail.execute", at + 90_000, d % 4 === 1 ? "failed" : "ok", randomUUID());
+      if (ex.tools.includes("draft_email")) add("send_mail.execute", at + 120_000, "ok", randomUUID());
+      if (ex.tools.includes("todo_create_task")) add("ms.todo.create", at + 6000, "ok", randomUUID());
+    }
+    if (d % 3 === 1) add("reminder.fire", dayStart + 8 * 3_600_000 + 60_000, "text", randomUUID());
+    if (d % 5 === 2) add("reminder.done", dayStart + 8 * 3_600_000 + 20 * 60_000, "ok", randomUUID());
+    if (d % 6 === 3) add("proactive.alert", dayStart + 13 * 3_600_000, "sent", "invoice_due");
+    if (d % 9 === 4) add("reminder.snooze", dayStart + 15 * 3_600_000, "1h", randomUUID());
+  }
+  // account moments over the month
+  const ago = (daysAgo: number, hour: number) => Math.max(created + 60_000, t - daysAgo * day + (hour - 12) * 3_600_000);
+  add("wa.unlink", ago(25, 9), "ok", randomUUID());
+  add("wa.link", ago(25, 9.3), "ok", "+97250•••4567");
+  add("google.connect", ago(20, 11), "ok", "dana@example.co.il");
+  add("agent.create", ago(18, 14), "ok", "accountant", { agent_key: "accountant", agent_name: "מנהלת חשבונות", reason: "account" });
+  add("payment.return", ago(15, 11.9), "declined:6", "DEMO");
+  add("billing.offer.upgrade", ago(15, 12), "amount:353 ₪", randomUUID());
+  add("billing.approve.upgrade", ago(15, 12.1), "ok", randomUUID());
+  add("subscription.upgrade", ago(15, 12.1), "ok", "pro");
+  add("agent.create", ago(12, 16), "ok", "custom_1", { agent_key: "custom_1", agent_name: "עוזרת משפטית", reason: "whatsapp" });
+  add("connection.expired", ago(9, 3), "google:invalid_grant");
+  add("google.revoke", ago(9, 10), "ok");
+  add("google.connect", ago(9, 10.2), "error:access_denied");
+  add("mail.mark_suspicious", ago(6, 10), "ok", "fake-invoice");
+  add("meeting.summary.ask", ago(5, 9.5), "queued", "teams");
+  add("meeting.summary", ago(5, 11), "sent_text", "teams");
+  add("meeting.tasks", ago(5, 11.2), "3/3", randomUUID());
+  add("agent.disable", ago(4, 9), "ok", "custom_1", { agent_key: "custom_1", agent_name: "עוזרת משפטית", reason: "whatsapp" });
+  add("auth.login_whatsapp", ago(3, 21), "ok");
+  add("subscription.charge", ago(2, 6), "failed:33:card", randomUUID());
+  add("billing.card_link", ago(2, 6.1), "sent");
+  add("billing.card_update", ago(1, 18), "ok");
+  add("subscription.charge", ago(1, 18.1), "ok", "DEMO-0-2");
+  msgs.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  audit.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  db.messages.push(...msgs);
+  db.audit.push(...audit);
+  db.billingApprovals.push(
+    { id: randomUUID(), user_id: id, kind: "upgrade", plan: "pro", amount_ils: 352.82, details: {}, phone_e164: "+972501234567", status: "succeeded", expires_at: iso(ago(15, 12.2)), approved_msg_id: "wamid.demo.rich.approve", approved_at: iso(ago(15, 12.1)), hyp_trans_id: "DEMO-0-UP", ccode: "0", error: null, created_at: iso(ago(15, 12)) },
+    { id: randomUUID(), user_id: id, kind: "retry", plan: "pro", amount_ils: 352.82, details: {}, phone_e164: "+972501234567", status: "expired", expires_at: iso(ago(2, 6.3)), approved_msg_id: null, approved_at: null, hyp_trans_id: null, ccode: null, error: null, created_at: iso(ago(2, 6.1)) },
+  );
+  db.jobs.push({ id: randomUUID(), user_id: id, kind: "proactive_scan", run_at: iso(ago(7, 4)), payload: {}, status: "failed", attempts: 3, max_attempts: 3, last_error: "Graph 429: too many requests (retry-after 120)", dedupe_key: null });
+  db.appErrors.push(
+    { id: randomUUID(), at: iso(ago(9, 3)), user_id: id, source: "oauth.google", message: "GoogleOAuthError: invalid_grant (token revoked by the user)", context: {} },
+    { id: randomUUID(), at: iso(ago(2, 6)), user_id: id, source: "billing", message: "HYP CCode 33: card declined", context: { kind: "renewal" } },
+  );
+}
 
 export function seedAdminDemo(db: MemoryDb, now: Date = new Date()): { users: number } {
   const t = now.getTime();
@@ -129,8 +223,9 @@ export function seedAdminDemo(db: MemoryDb, now: Date = new Date()): { users: nu
     const used = paidPlan === "trial" ? (i === 3 ? 10 : (i * 3) % 9) : (i * 37) % (limit / 3);
     if (linked) db.usage.push({ user_id: id, period_start: paidPlan === "trial" ? iso(created).slice(0, 10) : `${iso(t).slice(0, 7)}-01`, counted_messages: used, free_remaining: Math.max(0, limit - used), plan_limit: limit });
 
-    // the conversation: a few exchanges a day since signing up
-    if (linked) {
+    // the conversation: a few exchanges a day since signing up (the first person: a long, varied month — richActivity)
+    if (i === 0) richActivity(db, id, created, t);
+    else if (linked) {
       const days = Math.max(1, Math.floor((t - created) / day));
       for (let d = Math.max(0, days - 12); d <= days; d++) {
         const perDay = (i + d) % 3;
@@ -138,7 +233,7 @@ export function seedAdminDemo(db: MemoryDb, now: Date = new Date()): { users: nu
           const ex = CONVERSATION[(i + d + k) % CONVERSATION.length]!;
           const at = Math.min(t - 60_000, created + d * day + (9 + k * 3) * 3_600_000);
           db.messages.push({ id: randomUUID(), user_id: id, wa_message_id: `wamid.demo.${i}.${d}.${k}`, direction: "in", type: i % 4 === 1 && k === 0 ? "audio" : "text", text: i % 4 === 1 && k === 0 ? null : ex.in, media_url: null, transcript: i % 4 === 1 && k === 0 ? ex.in : null, model_used: null, tokens_in: null, tokens_out: null, cost_usd: null, agent_key: null, hidden_from_model: false, tools: [], created_at: iso(at) });
-          db.messages.push({ id: randomUUID(), user_id: id, wa_message_id: null, direction: "out", type: ex.tools.includes("mail_draft_reply") ? "button" : "text", text: ex.out, media_url: null, transcript: null, model_used: ex.model, tokens_in: 2400, tokens_out: 120, cost_usd: ex.cost, agent_key: null, hidden_from_model: false, tools: ex.tools, created_at: iso(at + 4000) });
+          db.messages.push({ id: randomUUID(), user_id: id, wa_message_id: null, direction: "out", type: ex.tools.includes("draft_email") ? "button" : "text", text: ex.out, media_url: null, transcript: null, model_used: ex.model, tokens_in: 2400, tokens_out: 120, cost_usd: ex.cost, agent_key: null, hidden_from_model: false, tools: ex.tools, created_at: iso(at + 4000) });
         }
       }
     }

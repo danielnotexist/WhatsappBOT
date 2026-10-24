@@ -3,6 +3,8 @@
 import type { Route } from "next";
 import { notFound, redirect } from "next/navigation";
 import { closeAdmin, recognisedOwner, requireOwner, sendAdminCode, verifyAdminCode, type AdminCodeResult } from "@/lib/admin/auth";
+import { CHAT_PAGE, toChatMessage, type ChatMessage } from "@/lib/admin/conversation";
+import { USER_ID_RE } from "@/lib/admin/user-view";
 import { getDb } from "@/lib/db";
 import type { SupportTicketStatus } from "@/lib/db/types";
 
@@ -45,6 +47,17 @@ export async function setTicketStatusAction(form: FormData): Promise<void> {
   if (!row) redirect(withNotice(back, "error", "הפנייה לא נמצאה.") as Route);
   await db.addAudit({ user_id: owner.id, action: "admin.ticket_status", target: id, result: status });
   redirect(withNotice(back, "notice", "הפנייה עודכנה.") as Route);
+}
+
+/**
+ * "טעינת הודעות קודמות" in the conversation reader: the page of messages before `before`, oldest first, shaped for the
+ * reader only (no media URLs or WhatsApp ids). The owner only, like every page here.
+ */
+export async function olderMessagesAction(userId: string, before: string): Promise<{ messages: ChatMessage[]; more: boolean }> {
+  await requireOwner();
+  if (typeof userId !== "string" || !USER_ID_RE.test(userId) || typeof before !== "string" || Number.isNaN(Date.parse(before))) return { messages: [], more: false };
+  const rows = await getDb().adminMessages(userId, { before, limit: CHAT_PAGE + 1 });
+  return { messages: rows.slice(0, CHAT_PAGE).map(toChatMessage).reverse(), more: rows.length > CHAT_PAGE };
 }
 
 /** "סגירת הפאנל": the panel's cookies go, the session stays. */
