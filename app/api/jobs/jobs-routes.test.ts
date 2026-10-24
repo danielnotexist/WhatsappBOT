@@ -71,11 +71,27 @@ describe("/api/jobs/run (Milestone 5 kinds) and /api/jobs/tick", () => {
     expect(db.jobs.find((j) => j.id === job.id)!.status).toBe("done");
   });
 
+  it("runs the owner_alerts job (the spike check and the digest) and finishes it", async () => {
+    const job = (await db.createJob({ kind: "owner_alerts", user_id: null, run_at: new Date(), payload: {}, dedupe_key: "owner_alerts:test" }))!;
+    const body = JSON.stringify({ job_id: job.id, kind: "owner_alerts", user_id: null, attempts: 1, run_at: job.run_at, payload: {} });
+    const res = await runPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body, headers: { [INTERNAL_SECRET_HEADER]: internalSecret() } }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, result: { spike: "none", digest: expect.stringMatching(/^skipped: (quiet time|nothing queued)$/) } });
+    expect(db.jobs.find((j) => j.id === job.id)!.status).toBe("done");
+  });
+
   it("tick claims due jobs and publishes them to /api/jobs/run (memory mode needs no secret)", async () => {
     const { job } = await dueReminder();
     const res = await tickPost(new Request("https://app.example.co.il/api/jobs/tick", { method: "POST" }));
-    expect(await res.json()).toEqual({ ok: true, dispatched: 1, failed: 0 });
-    expect(queue.jobs[0]).toMatchObject({ url: "https://app.example.co.il/api/jobs/run", dedupeId: `${job.id}:1`, body: { job_id: job.id, kind: "reminder" } });
+    // the reminder, and the owner alerts' job of this quarter-hour (lib/admin/alerts.ts) that the tick makes sure exists
+    expect(await res.json()).toEqual({ ok: true, dispatched: 2, failed: 0 });
+    expect(queue.jobs.find((j) => (j.body as { kind: string }).kind === "reminder")).toMatchObject({ url: "https://app.example.co.il/api/jobs/run", dedupeId: `${job.id}:1`, body: { job_id: job.id, kind: "reminder" } });
+    const ownerJob = db.jobs.find((j) => j.kind === "owner_alerts")!;
+    expect(ownerJob).toMatchObject({ user_id: null, dedupe_key: expect.stringMatching(/^owner_alerts:\d{4}-\d\d-\d\dT\d\d:(00|15|30|45)$/) });
+    expect(queue.jobs.find((j) => (j.body as { kind: string }).kind === "owner_alerts")).toMatchObject({ body: { job_id: ownerJob.id, user_id: null } });
+    // the next tick in the same quarter-hour adds no second job
+    await tickPost(new Request("https://app.example.co.il/api/jobs/tick", { method: "POST" }));
+    expect(db.jobs.filter((j) => j.kind === "owner_alerts")).toHaveLength(1);
 
     vi.stubEnv("DATA_MODE", "supabase");
     expect((await tickPost(new Request("https://app.example.co.il/api/jobs/tick", { method: "POST" }))).status).toBe(401);

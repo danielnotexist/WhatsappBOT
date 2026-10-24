@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { PRODUCT_NAME } from "@/lib/brand";
-import { meetingSummaryReadyTemplate, morningSummaryTemplate, proactiveAlertTemplate, registerTemplates, reminderTemplate, templateDefinitions, templateParam } from "./templates";
+import { meetingSummaryReadyTemplate, morningSummaryTemplate, ownerAlertTemplate, proactiveAlertTemplate, registerTemplates, reminderTemplate, templateDefinitions, templateParam } from "./templates";
 
 describe("WhatsApp templates", () => {
   it("flattens parameters the way Meta accepts them (no new lines / tabs / 5+ spaces, never empty)", () => {
@@ -48,6 +48,13 @@ describe("WhatsApp templates", () => {
     expect(body("proactive_alert")).toBe(`התראה: {{1}}\n\nאפשר לענות כאן, ו${PRODUCT_NAME} תטפל בזה.`);
     expect(body("meeting_summary_ready")).toContain("שום דבר לא נשלח בלי אישור.");
     for (const d of defs) for (const b of ((d.components.find((c) => c.type === "BUTTONS") as { buttons?: { text: string }[] } | undefined)?.buttons ?? [])) expect(b.text.length, b.text).toBeLessThanOrEqual(20);
+  });
+
+  it("builds owner_alert (the owner's own alerts, off until approved): the alert in one line, no buttons", () => {
+    expect(ownerAlertTemplate({ line: "תשלום נכשל:\n99 ₪" })).toEqual({ name: "owner_alert", params: ["תשלום נכשל:  99 ₪"], buttons: [] });
+    const def = templateDefinitions("https://app.example.co.il").find((d) => d.name === "owner_alert")!;
+    expect((def.components.find((c) => c.type === "BODY") as { text: string }).text).toBe(`התראה לבעלים ב${PRODUCT_NAME}: {{1}}\n\nהפרטים המלאים במייל ובפאנל הניהול.`);
+    expect(def.components.find((c) => c.type === "BUTTONS")).toBeUndefined();
   });
 
   it("matches the template JSON in docs/copy/wa-templates.md (body text, category, buttons)", () => {

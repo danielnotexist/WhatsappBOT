@@ -1,3 +1,4 @@
+import { connectionExpiredAlert } from "@/lib/admin/alerts";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import type { ConnectionRow, Db } from "@/lib/db/types";
 import { GoogleOAuthError, refreshGoogleTokens, type GoogleOAuthConfig, type GoogleTokens } from "./oauth";
@@ -46,5 +47,6 @@ export async function getGoogleAccessToken(db: Db, cfg: GoogleOAuthConfig, conne
 async function markExpired(db: Db, connection: ConnectionRow, e: GoogleOAuthError): Promise<GoogleOAuthError> {
   await db.setConnectionStatus(connection.id, "expired");
   await db.addAudit({ user_id: connection.user_id, action: "connection.expired", target: connection.id, result: `google:${e.code}` });
+  connectionExpiredAlert(db, connection);
   return e;
 }

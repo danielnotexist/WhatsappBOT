@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
+import { captureOwnerAlerts, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { billingCtxOf } from "@/lib/bot/billing";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
@@ -117,5 +118,26 @@ describe("one charge code for both callers (executeClaimedCharge)", () => {
     }
     expect(await x.h.db.getSubscription(x.user.id)).toMatchObject({ plan: "basic", charge_failures: 0 });
     expect(PLANS.basic.messages).toBe(750);
+  });
+
+  it("tells the owner (lib/admin/alerts.ts): a declined charge → payment_failed, no answer from HYP → charge_unknown", async () => {
+    const seen = captureOwnerAlerts();
+    try {
+      const x = await basicUser();
+      x.hyp.chargeScript.push("6", new Error("socket hang up"));
+      const now = x.billing.now();
+      const q = quoteFor("upgrade", stateOf(await x.h.db.getSubscription(x.user.id), now), now, "4580")!;
+      const open = async () => (await x.h.db.openWebCharge({ id: randomUUID(), user_id: x.user.id, kind: "upgrade", plan: "pro", amount_ils: q.amountIls, details: q.details }))!;
+      const a1 = await open();
+      await executeClaimedCharge(x.billing, x.user, a1, `web:${a1.id}`);
+      const a2 = await open();
+      expect(await executeClaimedCharge(x.billing, x.user, a2, `web:${a2.id}`)).toEqual({ kind: "unknown" });
+      expect(seen.map((s) => s.event)).toEqual([
+        { type: "payment_failed", userId: x.user.id, email: x.user.email, name: "דנה לוי", amountIls: q.amountIls, reason: "חיוב בדף התשלום (שדרוג לפרו): הכרטיס לא אושר לחיוב (חסום, פג תוקף או לא תקף) (קוד 6).", ref: a1.id },
+        { type: "charge_unknown", userId: x.user.id, email: x.user.email, name: "דנה לוי", amountIls: q.amountIls, reason: "חיוב בדף התשלום (שדרוג לפרו): לא התקבלה תשובה מ-HYP.", ref: a2.id },
+      ]);
+    } finally {
+      stopCapturingOwnerAlerts();
+    }
   });
 });

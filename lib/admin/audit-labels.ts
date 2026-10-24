@@ -66,6 +66,7 @@ export const JOB_LABEL: Record<JobKind, string> = {
   proactive_scan: "סריקת התראות",
   meeting_plan: "תכנון פגישות",
   meeting_summary: "סיכום פגישה",
+  owner_alerts: "התראות לבעלים",
 };
 
 // ---------- every action name ----------
@@ -154,6 +155,8 @@ const STATIC: Record<string, Entry> = {
   "admin.view_conversation": ["צפה בשיחה בוואטסאפ", "admin"],
   "admin.view_activity": ["צפה בציר הפעולות", "admin"],
   "admin.ticket_status": ["עדכן פנייה", "admin"],
+  "admin.alerts_update": ["עדכן את הגדרות ההתראות", "admin"],
+  "admin.alerts_test": ["מייל בדיקה של ההתראות נשלח", "admin"],
   "demo.restore_user": ["משתמש ההדגמה שוחזר", "admin"],
 };
 

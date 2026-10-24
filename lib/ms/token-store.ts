@@ -1,3 +1,4 @@
+import { connectionExpiredAlert } from "@/lib/admin/alerts";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import type { ConnectionRow, Db } from "@/lib/db/types";
 import { MsOAuthError, msRefreshScopes, refreshTokens, type MsOAuthConfig, type MsTokens } from "./oauth";
@@ -30,6 +31,7 @@ export async function getAccessToken(db: Db, cfg: MsOAuthConfig, connection: Con
     if (e instanceof MsOAuthError && e.needsReconnect) {
       await db.setConnectionStatus(connection.id, "expired");
       await db.addAudit({ user_id: connection.user_id, action: "connection.expired", target: connection.id, result: e.code });
+      connectionExpiredAlert(db, connection);
     }
     throw e;
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
-import { EnvError, SERVER_ENV_KEYS, checkServerEnv, dataMode, parseServerEnv, requireEnv } from "./env";
+import { EnvError, SERVER_ENV_KEYS, checkServerEnv, dataMode, ownerAlertWhatsapp, parseServerEnv, requireEnv } from "./env";
 
 const validEnv: Record<string, string> = {
   NODE_ENV: "test",
@@ -110,5 +110,18 @@ describe("lib/env", () => {
     expect(dataMode({ DATA_MODE: "memory", NODE_ENV: "test" })).toBe("memory");
     expect(() => dataMode({ DATA_MODE: "memory", NODE_ENV: "production" })).toThrow(/production/);
     expect(() => dataMode({ DATA_MODE: "redis" })).toThrow();
+  });
+
+  it("the owner's WhatsApp alerts: off by default; OWNER_ALERT_WA=1 needs a valid ADMIN_PHONE (a Hebrew EnvError names it)", () => {
+    expect(ownerAlertWhatsapp({})).toBeNull();
+    expect(ownerAlertWhatsapp({ ADMIN_PHONE: "972501234567" })).toBeNull();
+    expect(ownerAlertWhatsapp({ OWNER_ALERT_WA: "1", ADMIN_PHONE: "+972501234567" })).toEqual({ phone: "972501234567" });
+    expect(() => ownerAlertWhatsapp({ OWNER_ALERT_WA: "1" })).toThrow(/ADMIN_PHONE/);
+    try {
+      ownerAlertWhatsapp({ OWNER_ALERT_WA: "true", ADMIN_PHONE: "050-1234567" });
+    } catch (e) {
+      expect((e as EnvError).missing).toEqual(["ADMIN_PHONE"]);
+      expect((e as EnvError).message).toContain("ספרות בלבד");
+    }
   });
 });

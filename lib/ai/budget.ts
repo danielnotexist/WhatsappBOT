@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { aiBudgetAlert } from "@/lib/admin/alerts";
 import type { Db } from "@/lib/db/types";
 import { isDemo } from "@/lib/demo";
 import { EnvError, dataMode, liveAiInDemo } from "@/lib/env";
@@ -163,11 +164,17 @@ export interface SpendGuardOptions {
   now?: () => Date;
   /** one message's calls share this much time (an AbortSignal on each call); unset = no deadline */
   turnMs?: number;
+  /**
+   * The day's total after each reservation / settle (a refused one reports the full budget). Synchronous and cheap:
+   * the owner's 80% / 100% alert (lib/admin/alerts.ts aiBudgetAlert), never awaited on the paid call's path.
+   */
+  onSpend?: (day: string, totalUsd: number, budgetUsd: number) => void;
 }
 
 export class SpendGuard {
   private readonly now: () => Date;
   readonly turnMs: number | null;
+  private readonly onSpend: ((day: string, totalUsd: number, budgetUsd: number) => void) | null;
 
   constructor(
     private readonly db: Db,
@@ -177,6 +184,17 @@ export class SpendGuard {
     const o = typeof opts === "function" ? { now: opts } : opts;
     this.now = o.now ?? (() => new Date());
     this.turnMs = o.turnMs ?? null;
+    this.onSpend = o.onSpend ?? null;
+  }
+
+  /** Tells the spend hook, if any; a hook that throws never fails the call. */
+  private spent(day: string, totalUsd: number): void {
+    if (!this.onSpend) return;
+    try {
+      this.onSpend(day, totalUsd, this.limits.dailyBudgetUsd);
+    } catch {
+      // the alert is best effort
+    }
   }
 
   /** The current calendar day in Asia/Jerusalem, "YYYY-MM-DD" (the ai_spend key). */
@@ -210,8 +228,13 @@ export class SpendGuard {
     const day = this.day();
     if (!(this.limits.dailyBudgetUsd > 0)) throw new BudgetExceededError("budget", this.limits.demo);
     const carried = unsettledUsd;
-    if ((await this.db.reserveAiSpend(day, estimate + carried, this.limits.dailyBudgetUsd)) < 0) throw new BudgetExceededError("budget", this.limits.demo);
+    const total = await this.db.reserveAiSpend(day, estimate + carried, this.limits.dailyBudgetUsd);
+    if (total < 0) {
+      this.spent(day, this.limits.dailyBudgetUsd);
+      throw new BudgetExceededError("budget", this.limits.demo);
+    }
     unsettledUsd = Math.max(unsettledUsd - carried, 0);
+    this.spent(day, total);
     return day;
   }
 
@@ -220,7 +243,8 @@ export class SpendGuard {
     const delta = actual - estimate;
     if (delta === 0) return;
     try {
-      await this.db.adjustAiSpend(day, delta);
+      const total = await this.db.adjustAiSpend(day, delta);
+      if (delta > 0) this.spent(day, total);
     } catch (e) {
       if (delta > 0) unsettledUsd += delta; // the next reservation carries it
       console.error("[budget] could not settle the spend:", (e as Error).message);
@@ -349,5 +373,5 @@ export class SpendTurn {
 /** The guard for this deployment's env, or null when nothing paid is guarded (see `spendLimits`). */
 export function spendGuardFromEnv(db: Db, source: Record<string, string | undefined> = process.env): SpendGuard | null {
   const limits = spendLimits(source);
-  return limits ? new SpendGuard(db, limits, { turnMs: limits.demo ? DEMO_TURN_MS : undefined }) : null;
+  return limits ? new SpendGuard(db, limits, { turnMs: limits.demo ? DEMO_TURN_MS : undefined, onSpend: (day, total, budget) => aiBudgetAlert(db, day, total, budget) }) : null;
 }

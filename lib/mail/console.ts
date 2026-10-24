@@ -1,10 +1,11 @@
-import type { Mailer, OperatorAlertMail, OtpMail, SupportTicketMail } from "./types";
+import type { Mailer, OperatorAlertMail, OtpMail, OwnerAlertMail, SupportTicketMail } from "./types";
 
 /** Dev/test mailer: prints the code instead of sending. Never used in production. */
 export class ConsoleMailer implements Mailer {
   sent: OtpMail[] = [];
   alerts: OperatorAlertMail[] = [];
   tickets: SupportTicketMail[] = [];
+  ownerAlerts: OwnerAlertMail[] = [];
 
   async sendOtp(mail: OtpMail): Promise<{ id: string | null }> {
     this.sent.push(mail);
@@ -24,6 +25,13 @@ export class ConsoleMailer implements Mailer {
   async sendSupportTicket(mail: SupportTicketMail): Promise<{ id: string | null }> {
     this.tickets.push(mail);
     if (process.env.NODE_ENV !== "test") console.info(`[mail] פנייה חדשה מהאתר ל-${mail.to}`);
+    return { id: null };
+  }
+
+  /** The subject only in the log (the body may name a customer). */
+  async sendOwnerAlert(mail: OwnerAlertMail): Promise<{ id: string | null }> {
+    this.ownerAlerts.push(mail);
+    if (process.env.NODE_ENV !== "test") console.info(`[mail] התראה לבעלים ל-${mail.to.join(", ")}: ${mail.subject}`);
     return { id: null };
   }
 }

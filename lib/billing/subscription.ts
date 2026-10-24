@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { ownerAlert } from "@/lib/admin/alerts";
+import { chargeReason, renewalNext } from "@/lib/copy/owner-alerts";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import type { BillingApprovalRow, Db, SubscriptionRow, UserRow } from "@/lib/db/types";
 import type { HypGateway } from "@/lib/hyp/client";
@@ -186,6 +188,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   if (sub.charge_failures >= MAX_CHARGE_FAILURES) {
     const out = await pause(db, user.id, sub.charge_failures, amountIls);
     await release({ status: "failed", error: "not charged: paused (no card update)" });
+    ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: הכרטיס לא עודכן אחרי חיוב שנדחה, והחשבון הושהה.", ref: lock.id }, { db });
     return out;
   }
 
@@ -214,6 +217,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
     // of this user until someone reconciles it in the HYP portal (Order = lock id) — docs/hyp-setup.md.
     await release({ status: "unknown", error: (e as Error).message.slice(0, 300) });
     await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown" });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: לא התקבלה תשובה מ-HYP.", ref: lock.id }, { db });
     throw e;
   }
 
@@ -222,6 +226,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
     // automatically; "unknown" blocks further charges until reconciled in the HYP portal (Order = lock id)
     await release({ status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
     await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown:no_trans_id" });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: HYP אישר בלי מספר עסקה.", ref: lock.id }, { db });
     throw new Error(`HYP approved the monthly charge ${lock.id} without a transaction id — reconcile manually (docs/hyp-setup.md §7)`);
   }
 
@@ -245,6 +250,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   const outcome = await applyFailure(db, user.id, sub, { ccode, failureKind, amountIls, due, pauseAt, now });
   await release({ status: "failed", hyp_trans_id: result.transId, ccode: result.ccode || null });
   await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId ?? lock.id, result: `failed:${ccode}:${failureKind}` });
+  ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: chargeReason("חיוב חודשי", failureKind, ccode, renewalNext(outcome)), ref: lock.id }, { db });
   return outcome;
 }
 

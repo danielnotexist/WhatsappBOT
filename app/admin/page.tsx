@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
+import { alertChannelsSummary, loadAlertSettings } from "@/lib/admin/alerts";
 import { ownerState } from "@/lib/admin/auth";
 import { helpItems, kpis, userQueryFrom } from "@/lib/admin/view";
 import { spendLimits } from "@/lib/ai/budget";
 import { getDb } from "@/lib/db";
 import type { SupportTicketStatus } from "@/lib/db/types";
 import { addDays, dateKey, localDateOf } from "@/lib/time/zoned";
+import { AlertsTab } from "./_components/alerts-tab";
 import { CodeStep } from "./_components/code-step";
 import { HelpTab, OverviewTab, UsersTab } from "./_components/dashboard";
 import { ChatsTab, ErrorsTab, TicketsTab } from "./_components/inbox";
@@ -82,6 +84,9 @@ async function Admin({ searchParams }: { searchParams: PageProps<"/admin">["sear
     body = <TicketsTab tickets={await db.listSupportTickets({ status: status ?? undefined, limit: 200 })} status={status} now={now} />;
   } else if (tab === "chats") {
     body = <ChatsTab chats={await db.listSupportChats({ limit: 150 })} now={now} names={names} />;
+  } else if (tab === "alerts") {
+    const [settings, recent] = await Promise.all([loadAlertSettings(db), db.listOwnerAlerts(20)]);
+    body = <AlertsTab settings={settings} recent={recent} channels={alertChannelsSummary()} now={now} />;
   } else {
     const source = one("source")?.slice(0, 60) || null;
     const userId = one("user") && /^[0-9a-f-]{36}$/.test(one("user")!) ? one("user") : null;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { captureOwnerAlerts, resetBudgetAlertsForTests, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
 import { liveCopy } from "@/lib/copy/bot-live";
@@ -360,5 +361,44 @@ describe("MemoryDb mirror of migration 0009", () => {
     await db.deleteUser(user.id);
     expect(await db.getAiUserMessages("2026-10-22", user.id)).toBe(0);
     expect(await db.getAiSpend("2026-10-22")).toBe(0.5123);
+  });
+});
+
+describe("SpendGuard → the owner's 80% / 100% alert (lib/admin/alerts.ts)", () => {
+  it("reports the day's total after each reservation and settle, and the full budget when a call is refused", async () => {
+    const db = new MemoryDb();
+    const totals: [string, number, number][] = [];
+    const now = () => new Date("2026-10-21T09:00:00Z");
+    const guard = new SpendGuard(db, { dailyBudgetUsd: 1, userDailyMessages: null, demo: false }, { now, onSpend: (day, total, budget) => totals.push([day, total, budget]) });
+    const day = await guard.reserve(0.5);
+    await guard.settle(day, 0.5, 0.85);
+    await guard.settle(day, 0.1, 0.05); // a settle down is not a crossing
+    await expect(guard.reserve(0.5)).rejects.toBeInstanceOf(BudgetExceededError);
+    expect(totals).toEqual([
+      ["2026-10-21", 0.5, 1],
+      ["2026-10-21", 0.85, 1],
+      ["2026-10-21", 1, 1],
+    ]);
+  });
+
+  it("a hook that throws never fails the paid call", async () => {
+    const onSpend = () => {
+      throw new Error("boom");
+    };
+    const guard = new SpendGuard(new MemoryDb(), { dailyBudgetUsd: 1, userDailyMessages: null, demo: false }, { onSpend });
+    await expect(guard.reserve(0.2)).resolves.toMatch(/^\d{4}-\d\d-\d\d$/);
+  });
+
+  it("spendGuardFromEnv wires the owner's alert: 80% of the day once", async () => {
+    const seen = captureOwnerAlerts();
+    try {
+      resetBudgetAlertsForTests();
+      const guard = spendGuardFromEnv(new MemoryDb(), { AI_DAILY_BUDGET_USD: "1" })!;
+      await guard.reserve(0.85);
+      await guard.reserve(0.01);
+      expect(seen.map((s) => s.event)).toEqual([expect.objectContaining({ type: "ai_budget", threshold: 80, budgetUsd: 1 })]);
+    } finally {
+      stopCapturingOwnerAlerts();
+    }
   });
 });

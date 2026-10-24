@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { scheduleOwnerAlertsJob } from "@/lib/admin/alerts";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { dataMode } from "@/lib/env";
@@ -15,7 +16,8 @@ function safeEqual(a: string, b: string): boolean {
 /**
  * POST: claims due jobs (claim_due_jobs) and publishes each to /api/jobs/run — the fallback for a database
  * without pg_net (call it every minute from any cron with the internal secret) and the DATA_MODE=memory
- * dev loop (no secret needed there; memory mode is refused in production by lib/env).
+ * dev loop (no secret needed there; memory mode is refused in production by lib/env). First it makes sure the owner
+ * alerts' job of this quarter-hour exists (lib/admin/alerts.ts; SQL schedule_owner_alerts() is the same with pg_cron).
  */
 export async function POST(request: Request) {
   // the demo runs in production on a public URL: it keeps the secret check like the real thing
@@ -26,7 +28,10 @@ export async function POST(request: Request) {
   }
   const workerUrl = new URL("/api/jobs/run", process.env.APP_URL || request.url).toString();
   const queue = getQueue();
-  const result = await dispatchDueJobs(getDb(), queue, workerUrl);
+  const db = getDb();
+  // the owner's alerts job of this quarter-hour (error spike, the morning digest) — idempotent; pg_cron does it in production (0016)
+  await scheduleOwnerAlertsJob(db).catch((e: unknown) => console.error("[jobs] owner alerts not scheduled:", (e as Error).message));
+  const result = await dispatchDueJobs(db, queue, workerUrl);
   await queue.drain?.();
   return Response.json({ ok: true, ...result }, { status: 200 });
 }

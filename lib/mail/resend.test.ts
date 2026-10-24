@@ -26,6 +26,19 @@ describe("ResendMailer", () => {
     await expect(mailer.sendOtp({ to: "a@b.co", code: "000000", ttlMinutes: 10 })).rejects.toThrow(/422/);
   });
 
+  it("an owner alert: one mail to every owner address, text + HTML, Reply-To only when given", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ id: "em_2" }), { status: 200 });
+    });
+    const mailer = new ResendMailer({ apiKey: "re_test", from: "X <no-reply@x.co.il>", productName: "X", fetchImpl: fetchImpl as typeof fetch });
+    await mailer.sendOwnerAlert({ to: ["a@x.co", "b@x.co"], subject: "נרשם חדש", text: "t", html: "<p>h</p>", replyTo: "dana@example.com" });
+    await mailer.sendOwnerAlert({ to: ["a@x.co"], subject: "s", text: "t", html: "h" });
+    expect(bodies[0]).toEqual({ from: "X <no-reply@x.co.il>", to: ["a@x.co", "b@x.co"], subject: "נרשם חדש", text: "t", html: "<p>h</p>", reply_to: "dana@example.com" });
+    expect(bodies[1]).not.toHaveProperty("reply_to");
+  });
+
   it("escapes the product name in HTML", () => {
     const c = otpEmailContent({ to: "a@b.co", code: "111111", ttlMinutes: 10 }, "<b>");
     expect(c.html).toContain("&lt;b&gt;");

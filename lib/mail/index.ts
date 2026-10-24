@@ -6,7 +6,7 @@ import { ConsoleMailer } from "./console";
 import { ResendMailer } from "./resend";
 import type { Mailer } from "./types";
 
-export type { Mailer, OperatorAlertMail, OtpMail, SupportTicketMail } from "./types";
+export type { Mailer, OperatorAlertMail, OtpMail, OwnerAlertMail, SupportTicketMail } from "./types";
 
 const NAME = "mailer";
 

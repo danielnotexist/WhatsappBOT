@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureOwnerAlerts, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { MemoryDb } from "@/lib/db/memory";
 import { MockHypGateway } from "@/lib/hyp/client";
 import { createPayLinkToken, verifyPayLinkToken } from "./pay-link";
@@ -166,6 +167,26 @@ describe("billing", () => {
     // the unknown charge blocks every further charge of this user until reconciled
     expect(await chargeSubscription(db, hyp, user, new Date("2026-11-21T11:00:00Z"))).toMatchObject({ kind: "skipped", reason: "another charge is open" });
     expect(hyp.calls.filter((c) => c.method === "chargeToken")).toHaveLength(2);
+  });
+
+  it("the monthly charge tells the owner (lib/admin/alerts.ts): a decline with what happens next, and an unknown outcome", async () => {
+    const seen = captureOwnerAlerts();
+    try {
+      const db = new MemoryDb();
+      const user = await db.createUser("dana@example.com");
+      const hyp = new MockHypGateway("https://app.example.co.il");
+      await activateSubscription(db, user, { plan: "basic", transId: "T1", amountIls: 99, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, new Date("2026-10-20T10:00:00Z"));
+      hyp.chargeScript = ["4", new Error("ETIMEDOUT")];
+      expect(await chargeSubscription(db, hyp, user, new Date("2026-11-20T10:00:00Z"))).toMatchObject({ kind: "retry", failures: 1 });
+      await expect(chargeSubscription(db, hyp, user, new Date("2026-11-22T10:00:00Z"))).rejects.toThrow("ETIMEDOUT");
+      const locks = db.billingApprovals.filter((a) => a.kind === "renewal");
+      expect(seen.map((s) => s.event)).toEqual([
+        expect.objectContaining({ type: "payment_failed", userId: user.id, email: "dana@example.com", amountIls: 99, ref: locks[0]!.id, reason: expect.stringMatching(/^חיוב חודשי: סירוב של חברת האשראי \(קוד 4\)\. ניסיון נוסף אוטומטי: /) }),
+        expect.objectContaining({ type: "charge_unknown", userId: user.id, amountIls: 99, ref: locks[1]!.id, reason: "חיוב חודשי: לא התקבלה תשובה מ-HYP." }),
+      ]);
+    } finally {
+      stopCapturingOwnerAlerts();
+    }
   });
 
   it("a scheduled downgrade takes effect at the next monthly charge", async () => {

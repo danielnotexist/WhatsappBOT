@@ -1,5 +1,6 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
 import { touchLastSeen } from "@/lib/admin/activity";
+import { ownerAlert } from "@/lib/admin/alerts";
 import type { Db, SignupSource } from "@/lib/db/types";
 import type { Mailer } from "@/lib/mail/types";
 import type { RateLimiter } from "@/lib/rate-limit";
@@ -160,8 +161,8 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
 
 /**
  * The code checked out: the existing user (login) or a new one (signup), audited either way. A new user keeps the
- * browser's first-visit source; both mark "last seen". Those two are best effort (the admin panel's data): a failure
- * there never fails the sign-in.
+ * browser's first-visit source and the owner is told (lib/admin/alerts.ts, after the response); both mark "last seen".
+ * Those are best effort (the admin panel's data): a failure there never fails the sign-in.
  */
 async function signIn(deps: OtpDeps, email: string): Promise<OtpVerifyResult> {
   const db = deps.db;
@@ -174,6 +175,7 @@ async function signIn(deps: OtpDeps, email: string): Promise<OtpVerifyResult> {
     if (deps.signupSource) {
       await db.setSignupSource(user.id, deps.signupSource).catch((e: unknown) => console.warn("[otp] signup source not recorded:", (e as Error).message));
     }
+    ownerAlert({ type: "signup", userId: user.id, email, name: user.name, business: user.business_name, source: deps.signupSource ?? null }, { db });
   } else {
     await db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });
   }

@@ -1,7 +1,9 @@
+import { ownerAlert } from "@/lib/admin/alerts";
 import { copy } from "@/lib/copy/bot";
+import { chargeReason } from "@/lib/copy/owner-alerts";
 import { billButtons, billCopy } from "@/lib/copy/bot-billing";
 import type { UserRow } from "@/lib/db/types";
-import { tokenLast4 } from "@/lib/hyp/codes";
+import { classifyHypFailure, tokenLast4 } from "@/lib/hyp/codes";
 import { formatHeshDesc } from "@/lib/hyp/sign";
 import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate } from "@/lib/wa/templates";
 import type { BillingContext } from "./context";
@@ -87,6 +89,7 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
     const payLink = payLinkFor(ctx.appUrl, user.id);
     if (declined) await notify(ctx, user, copy["bill.payment_failed_initial"](payLink), { name: "trial_ended_payment", params: [user.name ?? ""], link: payLink });
     await ctx.db.addAudit({ user_id: user.id, action: "payment.return", target: params.Id ?? "", result: declined ? `declined:${params.CCode}` : "invalid_signature" });
+    if (declined) ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls: Number(params.Amount ?? PLANS[plan].priceIls) || PLANS[plan].priceIls, reason: chargeReason(`תשלום ראשון בדף התשלום (${PLANS[plan].nameHe})`, classifyHypFailure(params.CCode), params.CCode || null), ref: `first:${params.Id || `${user.id}:${ctx.now().getTime()}`}` }, { db: ctx.db });
     return declined
       ? { ok: false, reason: "declined", userId, message: "התשלום לא עבר. אפשר לנסות שוב, גם עם כרטיס אחר." }
       : { ok: false, reason: "invalid_signature", userId, message: "אימות התשלום נכשל. אם חויבת - נבדוק ונחזור אלייך." };

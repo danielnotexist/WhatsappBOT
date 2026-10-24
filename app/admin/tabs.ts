@@ -2,6 +2,7 @@
  * The tabs of the admin panel and the URL of each (pure, client-safe), like app/account/areas.ts:
  *   /admin                → סקירה        /admin?tab=users   → משתמשים     /admin?tab=help   → צריך עזרה
  *   /admin?tab=tickets    → פניות        /admin?tab=chats   → צ'אט באתר   /admin?tab=errors → תקלות
+ *   /admin?tab=alerts     → התראות (מה נשלח לבעלים במייל, מתגים ושעות שקט — lib/admin/alerts.ts)
  * Each tab is rendered by the server for its own data; the user page is /admin/users/<id>.
  */
 export const ADMIN_TABS = [
@@ -11,6 +12,7 @@ export const ADMIN_TABS = [
   { id: "tickets", label: "פניות" },
   { id: "chats", label: "צ'אט באתר" },
   { id: "errors", label: "תקלות" },
+  { id: "alerts", label: "התראות" },
 ] as const;
 
 export type AdminTab = (typeof ADMIN_TABS)[number]["id"];

@@ -8,6 +8,11 @@ import type {
   AgentRow,
   AuditEntry,
   NewAgent,
+  NewOwnerAlert,
+  OwnerAlertChannel,
+  OwnerAlertClaimResult,
+  OwnerAlertRow,
+  OwnerAlertStatus,
   PendingActionMeta,
   BillingApprovalKind,
   BillingApprovalRow,
@@ -511,6 +516,56 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.client.from("ops_flags").select("key,value,created_at").eq("key", key).maybeSingle();
     if (error) this.fail("getOpsFlag", error);
     return (data as unknown as import("./types").OpsFlagRow | null) ?? null;
+  }
+
+  async setOpsFlag(key: string, value: Record<string, unknown>): Promise<void> {
+    const { error } = await this.client.from("ops_flags").upsert({ key, value }, { onConflict: "key" });
+    if (error) this.fail("setOpsFlag", error);
+  }
+
+  // ---- owner_alerts (0016) ----
+
+  private static readonly OWNER_ALERT_COLS = "id, created_at, type, dedupe_key, status, channel, subject, payload, sent_at, error";
+
+  async claimOwnerAlert(row: NewOwnerAlert): Promise<{ result: OwnerAlertClaimResult; alert: OwnerAlertRow | null }> {
+    const { data, error } = await this.client.rpc("owner_alert_claim", {
+      p_type: row.type,
+      p_dedupe_key: row.dedupe_key,
+      p_subject: row.subject,
+      p_payload: row.payload,
+      p_queue: row.queue,
+      p_max: row.limit ? row.limit.max : null,
+      p_window: row.limit ? `${Math.max(Math.round(row.limit.windowMs / 1000), 1)} seconds` : null,
+    });
+    if (error) this.fail("claimOwnerAlert", error);
+    const r = (data ?? {}) as { result?: string; id?: string };
+    const result: OwnerAlertClaimResult = r.result === "claimed" || r.result === "queued" || r.result === "limited" ? r.result : "duplicate";
+    if (result === "duplicate" || !r.id) return { result: "duplicate", alert: null };
+    const { data: alert, error: readError } = await this.client.from("owner_alerts").select(SupabaseDb.OWNER_ALERT_COLS).eq("id", r.id).maybeSingle();
+    if (readError) this.fail("claimOwnerAlert", readError);
+    return { result, alert: (alert as unknown as OwnerAlertRow | null) ?? null };
+  }
+
+  async finishOwnerAlerts(ids: string[], patch: { status: OwnerAlertStatus; channel?: OwnerAlertChannel | null; error?: string | null }): Promise<void> {
+    if (!ids.length) return;
+    const update: Record<string, unknown> = { status: patch.status };
+    if (patch.channel !== undefined) update.channel = patch.channel;
+    if (patch.error !== undefined) update.error = patch.error === null ? null : patch.error.slice(0, 500);
+    if (patch.status === "sent") update.sent_at = new Date().toISOString();
+    const { error } = await this.client.from("owner_alerts").update(update).in("id", ids);
+    if (error) this.fail("finishOwnerAlerts", error);
+  }
+
+  async takeQueuedOwnerAlerts(limit: number): Promise<OwnerAlertRow[]> {
+    const { data, error } = await this.client.rpc("owner_alerts_take_queued", { p_limit: limit });
+    if (error) this.fail("takeQueuedOwnerAlerts", error);
+    return ((data as unknown as OwnerAlertRow[]) ?? []).slice().sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  async listOwnerAlerts(limit: number): Promise<OwnerAlertRow[]> {
+    const { data, error } = await this.client.from("owner_alerts").select(SupabaseDb.OWNER_ALERT_COLS).order("created_at", { ascending: false }).limit(limit);
+    if (error) this.fail("listOwnerAlerts", error);
+    return (data as unknown as OwnerAlertRow[]) ?? [];
   }
 
   // ---- ai_spend / ai_spend_users (migrations 0009, 0010) ----

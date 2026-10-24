@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
+import { captureOwnerAlerts, settleOwnerAlerts, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { MemoryDb } from "@/lib/db/memory";
 import { createGoogleFixture } from "./__fixtures__/google-fixtures";
 import { GOOGLE_DOC_MIME, GMAIL_JSON_LIMIT_BYTES, GoogleApiError, GoogleClient, driveQueryLiteral } from "./client";
@@ -195,9 +196,18 @@ describe("Google token store", () => {
     await expect(storedGoogleRefreshToken(db, { id: conn.id, user_id: other.id })).rejects.toThrow();
 
     f.state.tokenMode = "invalid_grant"; // e.g. testing-mode refresh token older than 7 days
-    const err = (await getGoogleAccessToken(db, cfg, conn, { force: true }).catch((e: unknown) => e)) as GoogleOAuthError;
-    expect(err.needsReconnect).toBe(true);
-    expect((await db.getConnection(conn.id))!.status).toBe("expired");
-    expect(db.audit.at(-1)).toMatchObject({ action: "connection.expired", target: conn.id, result: "google:invalid_grant" });
+    // a paying user: the owner hears about it (lib/admin/alerts.ts connection_expired_paid)
+    await db.upsertSubscription(conn.user_id, { plan: "pro", status: "active", next_charge_at: new Date(Date.now() + 20 * 86_400_000).toISOString() });
+    const seen = captureOwnerAlerts();
+    try {
+      const err = (await getGoogleAccessToken(db, cfg, conn, { force: true }).catch((e: unknown) => e)) as GoogleOAuthError;
+      expect(err.needsReconnect).toBe(true);
+      expect((await db.getConnection(conn.id))!.status).toBe("expired");
+      expect(db.audit.at(-1)).toMatchObject({ action: "connection.expired", target: conn.id, result: "google:invalid_grant" });
+      await settleOwnerAlerts();
+      expect(seen.map((s) => s.event)).toEqual([expect.objectContaining({ type: "connection_expired_paid", userId: conn.user_id, provider: "google", plan: "פרו", connectionId: conn.id })]);
+    } finally {
+      stopCapturingOwnerAlerts();
+    }
   });
 });

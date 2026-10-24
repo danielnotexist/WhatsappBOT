@@ -122,6 +122,14 @@ export function meetingSummaryReadyTemplate(p: { title: string; summary: string;
   };
 }
 
+/**
+ * `owner_alert` (the owner's own alerts, lib/admin/alerts.ts — OFF until Meta approves it: OWNER_ALERT_WA=1 + ADMIN_PHONE):
+ * {{1}} the alert in one line (its mail subject). No buttons: the details are in the mail and the admin panel.
+ */
+export function ownerAlertTemplate(p: { line: string }): TemplateSend {
+  return { name: "owner_alert", params: [templateParam(p.line, 300)], buttons: [] };
+}
+
 // ---------------------------------------------------------------------------------------------
 // definitions (registration) — the JSON of docs/copy/wa-templates.md; a test keeps them in sync
 // ---------------------------------------------------------------------------------------------
@@ -144,7 +152,7 @@ const quickAndUrl = (quickText: string, urlText: string, url: string, example: s
   ],
 });
 
-/** All 12 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
+/** All 13 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
 export function templateDefinitions(appUrl: string, productName: string = PRODUCT_NAME): TemplateDefinition[] {
   const base = appUrl.replace(/\/+$/, "");
   const def = (name: string, ...components: Record<string, unknown>[]): TemplateDefinition => ({ name, language: TEMPLATE_LANGUAGE, category: "UTILITY", components });
@@ -200,6 +208,7 @@ export function templateDefinitions(appUrl: string, productName: string = PRODUC
       ]),
       quick("לראות את הסיכום", "בלי סיכומי פגישות"),
     ),
+    def("owner_alert", body(`התראה לבעלים ב${productName}: {{1}}\n\nהפרטים המלאים במייל ובפאנל הניהול.`, ["נרשם חדש: dana@example.co.il (מקור: google)"])),
   ];
 }
 

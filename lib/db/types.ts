@@ -171,7 +171,7 @@ export interface PaymentRow {
   approval_id?: string | null;
 }
 
-export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan" | "meeting_plan" | "meeting_summary";
+export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan" | "meeting_plan" | "meeting_summary" | "owner_alerts";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobRow {
@@ -576,6 +576,43 @@ export interface AdminDailyRow {
   revenue: number;
 }
 
+// ---- owner alerts (migration 0016, lib/admin/alerts.ts) ----
+
+/** What the owner is told about. `test` = the "שליחת מייל בדיקה" button of the alerts tab. */
+export type OwnerAlertType = "signup" | "ticket" | "system_request" | "payment_failed" | "charge_unknown" | "error_spike" | "ai_budget" | "connection_expired_paid" | "test";
+/** sending → sent / failed; queued (quiet hours) → sending (the digest) → sent; limited (the type's rate limit); merged (the owner already got that same mail) */
+export type OwnerAlertStatus = "sending" | "sent" | "queued" | "failed" | "limited" | "merged";
+export type OwnerAlertChannel = "email" | "whatsapp" | "email+whatsapp" | "digest";
+
+export interface OwnerAlertRow {
+  id: string;
+  created_at: string;
+  type: OwnerAlertType;
+  /** the event itself (signup:<user>, ticket:<id>, error_spike:<hour>…) — unique: never mailed twice */
+  dedupe_key: string;
+  status: OwnerAlertStatus;
+  channel: OwnerAlertChannel | null;
+  subject: string;
+  /** the event's details, for the morning digest (no secrets) */
+  payload: Record<string, unknown>;
+  sent_at: string | null;
+  error: string | null;
+}
+
+export interface NewOwnerAlert {
+  type: OwnerAlertType;
+  dedupe_key: string;
+  subject: string;
+  payload: Record<string, unknown>;
+  /** quiet hours: stored as queued for the morning digest */
+  queue: boolean;
+  /** at most `max` of this type within `windowMs` (limited rows do not count); absent = no limit */
+  limit?: { max: number; windowMs: number } | null;
+}
+
+/** claimed = send it now; queued = kept for the digest; limited = over the type's rate limit (recorded); duplicate = known */
+export type OwnerAlertClaimResult = "claimed" | "queued" | "limited" | "duplicate";
+
 export interface NewSupportTicket {
   user_id: string | null;
   name: string;
@@ -669,6 +706,8 @@ export interface Db {
   /** sets the flag only if absent; true when this call set it */
   setOpsFlagOnce(key: string, value: Record<string, unknown>): Promise<boolean>;
   getOpsFlag(key: string): Promise<OpsFlagRow | null>;
+  /** sets (inserts or replaces) the flag's value — settings such as `owner_alerts:settings` (migration 0016) */
+  setOpsFlag(key: string, value: Record<string, unknown>): Promise<void>;
 
   // ai_spend / ai_spend_users (migration 0009) — the daily spend cap and the per-user daily message cap (lib/ai/budget.ts).
   // `day` is the calendar day in Asia/Jerusalem, "YYYY-MM-DD".
@@ -774,6 +813,16 @@ export interface Db {
   insertAppError(row: NewAppError): Promise<void>;
   /** newest first */
   listAppErrors(opts: { source?: string; userId?: string; limit: number }): Promise<AppErrorRow[]>;
+
+  // owner alerts (migration 0016) — lib/admin/alerts.ts
+  /** SQL owner_alert_claim(): once per dedupe key, the type's rate limit, atomic per type */
+  claimOwnerAlert(row: NewOwnerAlert): Promise<{ result: OwnerAlertClaimResult; alert: OwnerAlertRow | null }>;
+  /** the outcome of a send: status, channel and error (sent_at is set when it becomes sent) */
+  finishOwnerAlerts(ids: string[], patch: { status: OwnerAlertStatus; channel?: OwnerAlertChannel | null; error?: string | null }): Promise<void>;
+  /** SQL owner_alerts_take_queued(): queued → sending on the digest channel (atomic), oldest first */
+  takeQueuedOwnerAlerts(limit: number): Promise<OwnerAlertRow[]>;
+  /** newest first */
+  listOwnerAlerts(limit: number): Promise<OwnerAlertRow[]>;
 
   // proactive alerts (migration 0013) — lib/proactive
   /**

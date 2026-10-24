@@ -51,6 +51,11 @@ import type {
   AppErrorRow,
   AuditRow,
   NewAppError,
+  NewOwnerAlert,
+  OwnerAlertChannel,
+  OwnerAlertClaimResult,
+  OwnerAlertRow,
+  OwnerAlertStatus,
   SignupSource,
   SupportChatRow,
   SupportChatTurn,
@@ -93,6 +98,7 @@ export class MemoryDb implements Db {
   meetingSummaries: MeetingSummaryRow[] = [];
   supportChats: SupportChatRow[] = [];
   appErrors: AppErrorRow[] = [];
+  ownerAlerts: OwnerAlertRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -490,7 +496,71 @@ export class MemoryDb implements Db {
   }
 
   async getOpsFlag(key: string): Promise<import("./types").OpsFlagRow | null> {
-    return this.opsFlags.get(key) ?? null;
+    const row = this.opsFlags.get(key);
+    return row ? structuredClone(row) : null;
+  }
+
+  async setOpsFlag(key: string, value: Record<string, unknown>): Promise<void> {
+    const prev = this.opsFlags.get(key);
+    this.opsFlags.set(key, { key, value: structuredClone(value), created_at: prev?.created_at ?? iso(this.now()) });
+  }
+
+  // ---- owner_alerts (migration 0016): mirrors owner_alert_claim() / owner_alerts_take_queued() ----
+
+  async claimOwnerAlert(row: NewOwnerAlert): Promise<{ result: OwnerAlertClaimResult; alert: OwnerAlertRow | null }> {
+    if (this.ownerAlerts.some((a) => a.dedupe_key === row.dedupe_key)) return { result: "duplicate", alert: null };
+    const t = this.now().getTime();
+    let status: OwnerAlertStatus = row.queue ? "queued" : "sending";
+    if (row.limit) {
+      const since = t - row.limit.windowMs;
+      const count = this.ownerAlerts.filter((a) => a.type === row.type && Date.parse(a.created_at) > since && a.status !== "limited").length;
+      if (count >= Math.max(row.limit.max, 0)) status = "limited";
+    }
+    const alert: OwnerAlertRow = {
+      id: randomUUID(),
+      created_at: iso(this.now()),
+      type: row.type,
+      dedupe_key: row.dedupe_key,
+      status,
+      channel: null,
+      subject: row.subject.slice(0, 300),
+      payload: structuredClone(row.payload),
+      sent_at: null,
+      error: null,
+    };
+    this.ownerAlerts.push(alert);
+    return { result: status === "sending" ? "claimed" : status === "queued" ? "queued" : "limited", alert: structuredClone(alert) };
+  }
+
+  async finishOwnerAlerts(ids: string[], patch: { status: OwnerAlertStatus; channel?: OwnerAlertChannel | null; error?: string | null }): Promise<void> {
+    for (const a of this.ownerAlerts) {
+      if (!ids.includes(a.id)) continue;
+      a.status = patch.status;
+      if (patch.channel !== undefined) a.channel = patch.channel;
+      if (patch.error !== undefined) a.error = patch.error === null ? null : patch.error.slice(0, 500);
+      if (patch.status === "sent") a.sent_at = iso(this.now());
+    }
+  }
+
+  async takeQueuedOwnerAlerts(limit: number): Promise<OwnerAlertRow[]> {
+    const picked = this.ownerAlerts
+      .filter((a) => a.status === "queued")
+      .sort((a, b) => a.created_at.localeCompare(b.created_at))
+      .slice(0, Math.max(limit, 1));
+    for (const a of picked) {
+      a.status = "sending";
+      a.channel = "digest";
+    }
+    return picked.map((a) => structuredClone(a));
+  }
+
+  async listOwnerAlerts(limit: number): Promise<OwnerAlertRow[]> {
+    return this.ownerAlerts
+      .slice()
+      .reverse()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((a) => structuredClone(a));
   }
 
   // ---- ai_spend / ai_spend_users (migrations 0009, 0010): the day total has no user in it; the per-user counts go with the user ----

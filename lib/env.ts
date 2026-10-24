@@ -97,6 +97,16 @@ export const serverSchema = z.object({
       .pipe(z.array(z.email({ message: "ADMIN_EMAILS חייב להיות רשימת כתובות מייל מופרדות בפסיק" })).min(1))
       .optional(),
   ),
+  /**
+   * התראות לבעלים גם בוואטסאפ (lib/admin/alerts.ts), בתבנית owner_alert. ריק = מייל בלבד. להפעיל רק אחרי שהתבנית אושרה
+   * ב-Meta (docs/copy/wa-templates.md); אז חובה ADMIN_PHONE.
+   */
+  OWNER_ALERT_WA: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.stringbool().default(false)),
+  /** הטלפון של הבעלים להתראות בוואטסאפ: E.164 בלי "+", למשל 972501234567. */
+  ADMIN_PHONE: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : typeof v === "string" ? v.trim().replace(/^\+/, "") : v),
+    z.string().regex(/^[1-9][0-9]{7,14}$/, { message: "ADMIN_PHONE חייב להיות ספרות בלבד בפורמט בינלאומי, למשל 972501234567" }).optional(),
+  ),
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,
@@ -217,6 +227,27 @@ export const DEFAULT_ADMIN_EMAILS: readonly string[] = ["danielnotexist@gmail.co
 /** The addresses that may open /admin, lowercased (ADMIN_EMAILS, or the default). A bad value → Hebrew EnvError. */
 export function adminEmails(source: Record<string, string | undefined> = process.env): readonly string[] {
   return requireEnv(["ADMIN_EMAILS"], source).ADMIN_EMAILS ?? DEFAULT_ADMIN_EMAILS;
+}
+
+/**
+ * The owner's WhatsApp for alerts: null while OWNER_ALERT_WA is off (the default — mail only). On without a valid
+ * ADMIN_PHONE → a Hebrew EnvError naming it.
+ */
+export function ownerAlertWhatsapp(source: Record<string, string | undefined> = process.env): { phone: string } | null {
+  if (!requireEnv(["OWNER_ALERT_WA"], source).OWNER_ALERT_WA) return null;
+  let ADMIN_PHONE: string | undefined;
+  try {
+    ADMIN_PHONE = requireEnv(["ADMIN_PHONE"], source).ADMIN_PHONE;
+  } catch {
+    ADMIN_PHONE = undefined; // not a valid number: the same sentence as a missing one
+  }
+  if (!ADMIN_PHONE) {
+    throw new EnvError(
+      [{ code: "custom", path: ["ADMIN_PHONE"], message: "required", input: undefined }],
+      "OWNER_ALERT_WA=1 דורש ADMIN_PHONE: הטלפון של הבעלים בפורמט בינלאומי, ספרות בלבד (למשל 972501234567). ההתראות ממשיכות במייל.",
+    );
+  }
+  return { phone: ADMIN_PHONE };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureOwnerAlerts, notifyOwner, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { SESSION_COOKIE, createSessionToken } from "@/lib/auth/session";
 import { BRAND } from "@/lib/brand";
 import { setDbForTests } from "@/lib/db";
@@ -117,6 +118,41 @@ describe("/api/support/ticket — a ticket", () => {
     expect(errors).toHaveBeenCalled();
     expect(JSON.stringify(errors.mock.calls)).not.toContain("חויבתי");
     expect(JSON.stringify(errors.mock.calls)).not.toContain("dana@example.com");
+  });
+});
+
+describe("/api/support/ticket — the owner's alert (lib/admin/alerts.ts), merged with the support mail", () => {
+  afterEach(() => stopCapturingOwnerAlerts());
+
+  it("a ticket and a system request each tell the owner once; the support inbox that got the mail is not mailed again", async () => {
+    const seen = captureOwnerAlerts();
+    await send(req(valid));
+    await send(req({ kind: "system", system: "Monday", want: "לראות משימות פתוחות", email: "ron@example.com", website: "" }));
+    expect(seen.map((s) => s.event)).toEqual([
+      { type: "ticket", ticketId: db.supportTickets[0]!.id, subject: "חיוב", fromName: "דנה לוי", fromEmail: "dana@example.com", userId: null, excerpt: valid.body },
+      expect.objectContaining({ type: "system_request", ticketId: db.supportTickets[1]!.id, subject: `${SYSTEM_REQUEST_PREFIX}Monday`, fromEmail: "ron@example.com" }),
+    ]);
+    expect(seen[0]!.deps.alreadyMailed).toEqual([`support@${BRAND.domain}`]);
+  });
+
+  it("SUPPORT_EMAIL is the owner's address → the alert is merged: one mail in that inbox, not two", async () => {
+    vi.stubEnv("SUPPORT_EMAIL", "danielnotexist@gmail.com");
+    const seen = captureOwnerAlerts();
+    await send(req(valid));
+    expect(mailer.tickets.map((m) => m.to)).toEqual(["danielnotexist@gmail.com"]);
+    const { event, deps } = seen[0]!;
+    expect(deps.alreadyMailed).toEqual(["danielnotexist@gmail.com"]);
+    const alerts = new ConsoleMailer();
+    expect(await notifyOwner(event, { ...deps, db, mailer: alerts, env: { NODE_ENV: "test", DATA_MODE: "memory", APP_URL: APP } })).toMatchObject({ status: "merged" });
+    expect(alerts.ownerAlerts).toHaveLength(0);
+  });
+
+  it("the support mail failed → the owner still gets the alert (nothing counts as already mailed)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mailer.sendSupportTicket = async () => Promise.reject(new Error("Resend 500: down"));
+    const seen = captureOwnerAlerts();
+    await send(req(valid));
+    expect(seen[0]!.deps.alreadyMailed).toEqual([]);
   });
 });
 

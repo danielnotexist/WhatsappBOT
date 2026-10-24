@@ -25,6 +25,19 @@ export interface SupportTicketMail {
   text: string;
 }
 
+/**
+ * An alert to the owner (lib/admin/alerts.ts, ADMIN_EMAILS): a new signup, a ticket, a failed payment, the morning
+ * digest. One mail to every address in `to`; plain text with an HTML version (RTL), never a secret.
+ */
+export interface OwnerAlertMail {
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  /** a ticket: answering the alert reaches the person who opened it */
+  replyTo?: string;
+}
+
 export interface Mailer {
   /** Sends the 6-digit sign-in code. Throws on provider failure. */
   sendOtp(mail: OtpMail): Promise<{ id: string | null }>;
@@ -32,4 +45,6 @@ export interface Mailer {
   sendOperatorAlert?(mail: OperatorAlertMail): Promise<{ id: string | null }>;
   /** Sends a support ticket to the support inbox. Optional: a mailer without it means "stored only". Throws on provider failure. */
   sendSupportTicket?(mail: SupportTicketMail): Promise<{ id: string | null }>;
+  /** Sends an alert to the owner. Optional: without it the alert falls back to sendOperatorAlert. Throws on provider failure. */
+  sendOwnerAlert?(mail: OwnerAlertMail): Promise<{ id: string | null }>;
 }

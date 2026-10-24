@@ -1,4 +1,5 @@
 import "server-only";
+import { ownerAlert, type OwnerEvent } from "@/lib/admin/alerts";
 import { BRAND, PRODUCT_NAME } from "@/lib/brand";
 import type { SupportTicketRow } from "@/lib/db/types";
 import { EnvError, integrationsMocked, liveSupportMailInDemo, requireEnv } from "@/lib/env";
@@ -47,19 +48,38 @@ export function ticketMail(ticket: SupportTicketRow, to: string): SupportTicketM
   return { to, replyTo: ticket.email, subject: request ? topic : `פנייה חדשה: ${topic}`, text: lines.join("\n") };
 }
 
+/** The owner's alert of a ticket (lib/admin/alerts.ts): a system request by its marker, a short excerpt of the body. */
+export function ticketOwnerEvent(ticket: SupportTicketRow): OwnerEvent {
+  return {
+    type: isSystemRequest(ticket.subject) ? "system_request" : "ticket",
+    ticketId: ticket.id,
+    subject: ticket.subject,
+    fromName: ticket.name,
+    fromEmail: ticket.email,
+    userId: ticket.user_id,
+    excerpt: one(ticket.body).slice(0, 200),
+  };
+}
+
 /**
- * Sends the ticket to the support inbox. Never throws: the ticket is already stored, so a missing SUPPORT_EMAIL or a
- * provider error is logged (by name and reason, never the ticket's content) and reported as `false`.
+ * Sends the ticket to the support inbox, then tells the owner (one merged mail: when SUPPORT_EMAIL is also an owner
+ * address, that address already has the ticket and gets no second mail). Never throws: the ticket is already stored,
+ * so a missing SUPPORT_EMAIL or a provider error is logged (by name and reason, never the ticket's content) and
+ * reported as `false`.
  */
 export async function notifySupport(ticket: SupportTicketRow): Promise<boolean> {
+  let mailedTo: string | null = null;
   try {
     // the demo with LIVE_SUPPORT_MAIL=1: this one email is real; every other mail stays on the console
     const mailer = liveSupportMailInDemo() ? ResendMailer.fromEnv(PRODUCT_NAME) : getMailer();
-    if (!mailer.sendSupportTicket) return false;
-    await mailer.sendSupportTicket(ticketMail(ticket, supportInbox()));
-    return true;
+    if (mailer.sendSupportTicket) {
+      const inbox = supportInbox();
+      await mailer.sendSupportTicket(ticketMail(ticket, inbox));
+      mailedTo = inbox;
+    }
   } catch (e) {
     console.error(`[support] ticket ${ticket.id} stored but not emailed:`, e instanceof EnvError ? e.message : (e as Error).name);
-    return false;
   }
+  ownerAlert(ticketOwnerEvent(ticket), { alreadyMailed: mailedTo ? [mailedTo] : [] });
+  return mailedTo !== null;
 }

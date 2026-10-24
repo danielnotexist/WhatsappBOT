@@ -6,6 +6,8 @@
  * approval was claimed (a button press from the linked number / a single-use form nonce) and in how they tell the
  * user (a chat reply / a page face).
  */
+import { ownerAlert } from "@/lib/admin/alerts";
+import { chargeReason } from "@/lib/copy/owner-alerts";
 import { reportError } from "@/lib/errors/report";
 import type { BillingApprovalKind, BillingApprovalRow, SubscriptionRow, UserRow } from "@/lib/db/types";
 import { classifyHypFailure, tokefExpired, tokenLast4, type HypFailureKind } from "@/lib/hyp/codes";
@@ -17,6 +19,9 @@ import { PLANS, addOneMonth, isPaidPlan, type PaidPlan } from "./plans";
 import { loadCardToken, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
 
 export type OfferKind = Exclude<BillingApprovalKind, "renewal">;
+
+/** The kind of a one-tap charge, in the owner's alert. */
+const ONE_TAP_KIND_HE: Partial<Record<BillingApprovalKind, string>> = { upgrade: "שדרוג לפרו", retry: "ניסיון חוזר", renew: "חידוש מנוי" };
 export type ChargeKind = Extract<OfferKind, "upgrade" | "retry" | "renew">;
 
 // ---------------------------------------------------------------------------------------------
@@ -176,6 +181,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   const st = stateOf(await ctx.db.getSubscription(user.id), now);
   const sub = st.sub;
   const audit = (result: string, action = `billing.approve.${a.kind}`) => ctx.db.addAudit({ user_id: user.id, action, target: a.id, approved_by_msg_id: pressId, result });
+  const stage = `${pressId.startsWith("web:") ? "חיוב בדף התשלום" : "חיוב בלחיצה בוואטסאפ"} (${ONE_TAP_KIND_HE[a.kind] ?? a.kind})`;
 
   const staleReason = chargeStaleReason(a, st, now);
   if (staleReason || !sub) {
@@ -222,6 +228,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
     await audit("unknown");
     console.error(`[billing] ${a.kind} ${a.id}: no answer from HYP — reconcile manually:`, (e as Error).message);
     await reportError("billing", e, { userId: user.id, db: ctx.db, context: { kind: a.kind, approval: a.id, stage: "no_answer" } });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: a.amount_ils, reason: `${stage}: לא התקבלה תשובה מ-HYP.`, ref: a.id }, { db: ctx.db });
     return { kind: "unknown" };
   }
 
@@ -231,6 +238,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
     await finishApproval(ctx, a, { status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
     await audit("unknown:no_trans_id");
     console.error(`[billing] ${a.kind} ${a.id}: HYP approved without a transaction id — reconcile manually`);
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: a.amount_ils, reason: `${stage}: HYP אישר בלי מספר עסקה.`, ref: a.id }, { db: ctx.db });
     return { kind: "unknown" };
   }
 
@@ -244,6 +252,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
     await finishApproval(ctx, a, { status: "failed", ccode, hyp_trans_id: result.transId });
     await audit(`failed:${ccode}:${failure}`);
     if (failure === "config") console.error(`[billing] HYP configuration error ${ccode} on ${a.kind} — see docs/hyp-setup.md`);
+    ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls: a.amount_ils, reason: chargeReason(stage, failure, ccode), ref: a.id }, { db: ctx.db });
     return { kind: "failed", ccode, failure, transId: result.transId, last4: card.last4 };
   }
 

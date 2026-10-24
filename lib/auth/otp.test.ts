@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { captureOwnerAlerts, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { MemoryDb } from "@/lib/db/memory";
 import { ConsoleMailer } from "@/lib/mail/console";
 import { MemoryRateLimiter } from "@/lib/rate-limit";
@@ -107,6 +108,26 @@ describe("verifyOtp", () => {
     expect(ok2.ok).toBe(true);
     if (ok2.ok) expect(ok2.isNewUser).toBe(false);
     expect(db.users.size).toBe(1);
+  });
+
+  it("a new user tells the owner (lib/admin/alerts.ts, with the source); a returning user does not", async () => {
+    const seen = captureOwnerAlerts();
+    try {
+      const { db, mailer, deps, advance } = setup();
+      const source = { utm_source: "google", utm_campaign: "spring", landing: "/pricing" };
+      await sendOtp(deps, "dana@example.com", "1.1.1.1");
+      const ok = await verifyOtp({ ...deps, signupSource: source }, "dana@example.com", mailer.sent[0]!.code, "1.1.1.1");
+      expect(ok.ok).toBe(true);
+      const user = (await db.findUserByEmail("dana@example.com"))!;
+      expect(seen.map((s) => s.event)).toEqual([{ type: "signup", userId: user.id, email: "dana@example.com", name: null, business: null, source }]);
+      expect(seen[0]!.deps.db).toBe(db);
+      advance(61_000);
+      await sendOtp(deps, "dana@example.com", "1.1.1.1");
+      await verifyOtp(deps, "dana@example.com", mailer.sent[1]!.code, "1.1.1.1");
+      expect(seen).toHaveLength(1);
+    } finally {
+      stopCapturingOwnerAlerts();
+    }
   });
 
   it("rejects wrong codes, counts attempts and locks after 5", async () => {
