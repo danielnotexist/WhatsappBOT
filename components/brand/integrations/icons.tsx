@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 /**
  * Product marks of the systems she works with (lib/integrations/catalogue.ts), as inline SVG.
  *
- * Third-party trademarks: each mark belongs to its owner (Google LLC, Microsoft Corporation, monday.com Ltd.) and is
+ * Third-party trademarks: each mark belongs to its owner (Google LLC, Microsoft Corporation, monday.com Ltd., WhatsApp LLC / Meta) and is
  * shown only to say that she works with the product ("works with" - nominative use), at its own proportions and
  * colours, straight on our night and paper surfaces (lib/integrations/tiles.ts "marks"; "svg" puts them on a white
  * chip). Never recolour, crop or combine them with our own marks. Before production: legal check against Google's and Microsoft's brand guidelines
@@ -487,6 +487,24 @@ export function MondayIcon({ className }: IconProps) {
         stroke="#ffcb00"
       />
       <circle cx="94.5" cy="74.5" r="10.5" fill="#00d647" />
+    </Svg>
+  );
+}
+
+// ---------------------------------------------------------------- WhatsApp (where she lives, not a catalogue system)
+
+/**
+ * WhatsApp's speech-bubble glyph in white on its own green (#25D366) - the glyph of provider-logo.tsx WhatsappGlyph, as
+ * the brand film draws it. For the price lists' voice-note line; buttons that open WhatsApp keep the one-colour glyph.
+ */
+export function WhatsAppIcon({ className }: IconProps) {
+  return (
+    <Svg viewBox="0 0 24 24" className={className}>
+      <path fill="#25D366" d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z" />
+      <path
+        fill="#fff"
+        d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.7.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.1.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .2-1.2c-.1-.1-.3-.2-.5-.3z"
+      />
     </Svg>
   );
 }

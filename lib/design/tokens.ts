@@ -121,6 +121,12 @@ export const contrastPairs: { label: string; fg: string; bg: string; min: number
   { label: "ink on honey (pro plan card)", fg: palette.ink, bg: palette.honey, min: 4.5 },
   { label: "ink muted on honey (pro plan card)", fg: palette.inkMuted, bg: palette.honey, min: 4.5 },
   { label: "focus ring / outline on honey", fg: palette.inkMuted, bg: palette.honey, min: 3 },
+  // the price cards' feature checks (components/brand/plan-features.tsx): an ink circle with a honey check on the honey
+  // pro card, a moss circle with an ink check on the cream paper (non-text graphics, 3:1; the check is what carries it)
+  { label: "ink check circle on honey (pro card)", fg: palette.ink, bg: palette.honey, min: 3 },
+  { label: "honey check in the ink circle", fg: palette.honey, bg: palette.ink, min: 3 },
+  { label: "ink check in the moss circle (paper card)", fg: palette.ink, bg: palette.moss, min: 3 },
+  { label: "ink check against the paper around its circle", fg: palette.ink, bg: palette.paper, min: 3 },
   // WhatsApp mockups (bubbles, timestamps, buttons)
   { label: "wa text on incoming", fg: waMockup.fg, bg: waMockup.in, min: 4.5 },
   { label: "wa text on outgoing", fg: waMockup.fg, bg: waMockup.out, min: 4.5 },

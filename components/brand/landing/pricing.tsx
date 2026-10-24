@@ -11,11 +11,12 @@ import { CONTAINER, H2, LEDE } from "./ui";
 const TILES_SHOWN = 8;
 
 /**
- * Pricing on the landing, compact (Daniel, 23.10.2026: both plans within one desktop screen): one paper sheet on the
- * night stage, two columns split by a rule. Each plan: its name and allowance beside the price, then the feature lines
- * of lib/billing/plans.ts (planFeatures, generated from the entitlements) as tight ruled rows - pro opens with
+ * Pricing on the landing, compact (Daniel, 23.10.2026: both plans within one desktop screen): two cards on the night
+ * stage, basic on cream paper and pro on honey (24.10.2026). Each plan: its name and allowance beside the price, then the
+ * feature lines of lib/billing/plans.ts (planFeatures, generated from the entitlements) as tight ruled rows, each led by
+ * its product marks or a check - pro opens with
  * "כל מה שבבסיסי, ובנוסף:", "בקרוב" on what is coming - and at its foot one compact row of the systems it connects
- * to (lib/integrations/catalogue.ts integrationsForPlan, the official marks straight on the paper): the first few tiles and "+K" for the rest.
+ * to (lib/integrations/catalogue.ts integrationsForPlan, the official marks straight on the card): the first few tiles and "+K" for the rest.
  * The full comparison lives on /pricing ("להשוואה המלאה"). One call to action: the plan is chosen in WhatsApp after
  * the free messages, not here.
  */
@@ -63,56 +64,67 @@ export function Pricing() {
 }
 
 /**
- * The two plans on one paper sheet (the landing, and the top of /pricing). `tilesShown`: the connection tiles before
- * "+K" (undefined shows them all).
+ * The two plans as two cards side by side (the landing, and the top of /pricing): basic on the cream paper, pro on
+ * honey with ink type - the pro card of the brand film (media/brand-film): "כל מה שבבסיסי, ובנוסף:", hairline rules,
+ * and every line opening with the marks of the products it is about or a check in a small circle (a moss circle on
+ * the paper, an ink one on the honey). `tilesShown`: the connection tiles before "+K" (undefined shows them all).
  */
 export function PlanSheet({ className, tilesShown = TILES_SHOWN, headingLevel = 3 }: { className?: string; tilesShown?: number; headingLevel?: 2 | 3 }) {
   const H = headingLevel === 2 ? "h2" : "h3";
   return (
-    <div className={cn("surface-light alze-paper-grain grid overflow-hidden rounded-card text-ink shadow-stage md:grid-cols-2", className)}>
-      {PRICING.plans.map((plan, i) => (
-        <article
-          key={plan.id}
-          aria-labelledby={`plan-${plan.id}`}
-          // the tooltips of the connection tiles stay inside the card (the sheet clips its overflow)
-          data-tip-bounds
-          className={cn("flex flex-col px-6 py-7 sm:px-9 sm:py-8 lg:px-11", i > 0 && "border-t border-ink/15 md:border-s md:border-t-0")}
-        >
-          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-            <div className="min-w-0">
-              <H id={`plan-${plan.id}`} className="font-sans text-[1.375rem] leading-tight font-bold">
-                {plan.name}
-              </H>
-              <p className="mt-1.5 text-[0.9375rem] leading-snug font-semibold text-ink-muted">{plan.allowance}</p>
+    <div className={cn("grid gap-4 md:grid-cols-2 md:gap-5", className)}>
+      {PRICING.plans.map((plan) => {
+        const pro = plan.id === "pro";
+        return (
+          <article
+            key={plan.id}
+            aria-labelledby={`plan-${plan.id}`}
+            // the tooltips of the connection tiles stay inside the card (the card clips its overflow)
+            data-tip-bounds
+            data-plan-surface={pro ? "honey" : "paper"}
+            className={cn(
+              "surface-light flex flex-col overflow-hidden rounded-card px-6 py-7 text-ink shadow-stage sm:px-9 sm:py-8 lg:px-11",
+              pro ? "bg-honey" : "alze-paper-grain",
+            )}
+          >
+            <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+              <div className="min-w-0">
+                <H id={`plan-${plan.id}`} className="font-sans text-[1.375rem] leading-tight font-bold">
+                  {plan.name}
+                </H>
+                <p className="mt-1.5 text-[0.9375rem] leading-snug font-semibold text-ink-muted">{plan.allowance}</p>
+              </div>
+              <p className="flex items-baseline gap-1.5">
+                <span className="tabular font-heading text-[clamp(3.25rem,2.6rem+2vw,4.5rem)] leading-[0.85] font-bold tracking-[-0.02em]">{plan.price}</span>
+                <span className="font-heading text-[1.75rem] leading-none font-bold">₪</span>
+                <span className="ms-0.5 text-[0.9375rem] text-ink-muted">לחודש</span>
+              </p>
             </div>
-            <p className="flex items-baseline gap-1.5">
-              <span className="tabular font-heading text-[clamp(3.25rem,2.6rem+2vw,4.5rem)] leading-[0.85] font-bold tracking-[-0.02em]">{plan.price}</span>
-              <span className="font-heading text-[1.75rem] leading-none font-bold">₪</span>
-              <span className="ms-0.5 text-[0.9375rem] text-ink-muted">לחודש</span>
-            </p>
-          </div>
-          {plan.lead ? <p className="mt-6 text-[0.9375rem] text-ink-muted">{plan.lead}</p> : null}
-          <PlanFeatureList
-            lines={plan.features.filter((f) => f.id !== "account")}
-            className={plan.lead ? "mt-2" : "mt-6"}
-            itemClassName="py-2 text-[0.9375rem]"
-          />
-          {/* pinned to the foot of the card, so both plans' rows line up */}
-          <div className="mt-auto pt-6">
-            <p id={`plan-${plan.id}-connections`} className="text-[0.875rem] leading-snug font-semibold">
-              {plan.connectionsLabel}
-            </p>
-            <IntegrationChipRow
-              groups={integrationsForPlan(plan.id)}
-              labelledBy={`plan-${plan.id}-connections`}
-              tone="paper"
-              size="xs"
-              collapsed={tilesShown}
-              className="mt-2.5"
+            {plan.lead ? <p className="mt-6 text-[0.9375rem] font-semibold text-ink-muted">{plan.lead}</p> : null}
+            <PlanFeatureList
+              lines={plan.features.filter((f) => f.id !== "account")}
+              rule={pro ? "border-ink/20" : "border-ink/15"}
+              lead={pro ? "ink" : "moss"}
+              className={plan.lead ? "mt-2" : "mt-6"}
+              itemClassName="py-2 text-[0.9375rem]"
             />
-          </div>
-        </article>
-      ))}
+            {/* pinned to the foot of the card, so both plans' rows line up */}
+            <div className="mt-auto pt-6">
+              <p id={`plan-${plan.id}-connections`} className="text-[0.875rem] leading-snug font-semibold">
+                {plan.connectionsLabel}
+              </p>
+              <IntegrationChipRow
+                groups={integrationsForPlan(plan.id)}
+                labelledBy={`plan-${plan.id}-connections`}
+                tone="paper"
+                size="xs"
+                collapsed={tilesShown}
+                className="mt-2.5"
+              />
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
