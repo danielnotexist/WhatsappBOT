@@ -13,8 +13,8 @@
   ],
   "start": 63.86818749999736,
   "start_bar_index": 31,
-  "window_bars": 10,
-  "window_rms_mean": 0.25372006595134733,
-  "beat_residual_ms_median": 2.6061507966588238,
-  "beat_residual_ms_p90": 5.4754818560780905
+  "window_bars": 16,
+  "window_rms_mean": 0.25276848394423723,
+  "beat_residual_ms_median": 2.3371598603176835,
+  "beat_residual_ms_p90": 4.982568030597179
 }

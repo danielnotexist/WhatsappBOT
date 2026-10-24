@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Alze ~20s UI-motion brand film (seek-based HTML rendered frame by frame).",
+  "description": "Alze 32 s UI-motion brand film (seek-based HTML rendered frame by frame).",
   "scripts": {
     "events": "node render.mjs --events",
     "beats": "node render.mjs --beats",

@@ -1,4 +1,4 @@
-"""Builds the film's soundtrack: one 8-bar phrase (16 s) of the Mixkit track from the measured downbeat + procedural UI sounds.
+"""Builds the film's soundtrack: one 16-bar phrase (32 s) of the Mixkit track from the measured downbeat + procedural UI sounds.
 
 - Music: build/music.wav (decoded from audio/mixkit-ramp-it-up-69.mp3), cut at the downbeat in audio/beatgrid.json.
 - UI sounds: synthesised here from seeded noise (no samples, no tones): click, tick, pop, swish, whoosh, two or three

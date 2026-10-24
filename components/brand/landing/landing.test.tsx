@@ -265,7 +265,7 @@ describe("signed-in awareness (Daniel, 22.10.2026)", () => {
 
 describe("the day scene", () => {
   it("under reduced motion is a static ordered list of four scenes, each with its phone", () => {
-    render(<DaySection />);
+    render(<DaySection variant="scenes" />);
     const list = screen.getAllByRole("list")[0]!;
     expect(list.tagName).toBe("OL");
     expect(within(list).getAllByRole("listitem")).toHaveLength(4);
@@ -370,7 +370,7 @@ describe("the hoopoe (public/brand/mascot/)", () => {
     render(
       <>
         <Hero />
-        <DaySection />
+        <DaySection variant="scenes" />
       </>,
     );
     expect(

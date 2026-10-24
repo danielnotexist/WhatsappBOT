@@ -1,9 +1,12 @@
-# עלזה - brand film v2 (16 s, "לילה ירוק")
+# עלזה - brand film v2.1 (32 s, "לילה ירוק")
 
-A 16-second, 8-bar, 120 BPM motion piece in the landing's "יום עבודה אחד" language: the night stage, cream type, a
+A 32-second, 16-bar, 120 BPM motion piece in the landing's "יום עבודה אחד" language: the night stage, cream type, a
 honey time stamp that rolls like an odometer, the thin progress line at the side, a phone with the WhatsApp thread,
 the felt hoopoe beside it in the pose of the scene, and the products' own coloured marks. The last frame is the first
-frame, so it loops. v1 (the black-and-white single-shape cut) is in the git history.
+frame, so it loops. v1 (the black-and-white single-shape cut) and v2 (the same script in 16 s, 8 bars) are in the git
+history. v2.1 (24.10.2026, Daniel: "it runs too fast") holds every scene about twice as long: 2 bars per scene (3 for
+the morning rush and for the mail), the next 8 bars of the same section of the song, and a larger type scale on the
+phone (the chat reads at 24 px or more in the 1920x1080 cut).
 
 Self-contained: its own `package.json`, excluded from the web app's lint / typecheck / tests (`media/**`).
 
@@ -11,13 +14,13 @@ Self-contained: its own `package.json`, excluded from the web app's lint / typec
 
 | Bar | Beats | Time stamp | Screen | Words | Hoopoe |
 | --- | --- | --- | --- | --- | --- |
-| 8+1 | 29-4 | 07:58 · בדרך למשרד | Lock screen: Gmail and Outlook notifications stack up, "ועוד 23 → 31 מיילים" | מיילים. / פגישות. / הבטחות. · והיום רק התחיל. | thinking → calling |
-| 2 | 5-8 | 08:02 · ברמזור | The stack folds into the WhatsApp mark, which opens into the chat; press and hold the mic, voice note, ✅, "מקלידה…" | מקליטים / חצי דקה. · הודעה קולית בוואטסאפ, בעברית. | listening |
-| 3 | 9-12 | 08:03 · דקה אחר כך | Three mails waiting (Gmail / Outlook marks), the draft, שלח / ערוך / בטל, click שלח, "נשלח." | היא מסכמת / ומנסחת. · שום דבר לא יוצא בלי אישור. | envelope |
-| 4 | 13-16 | 18:20 · סוף היום | "מה יש לי מחר?", tomorrow from Google Calendar + Outlook with Meet and Teams chips | שואלים / מה מחר. · היא קוראת את היומן ואת המייל. | calendar |
-| 5 | 17-20 | 07:30 · למחרת בבוקר | Dawn lock screen with one notification: her morning summary | הבוקר כבר / מסודר. · סיכום בוקר, בשעה שבוחרים. | front |
-| 6 | 21-24 | Google + Microsoft + WhatsApp marks · מסלול פרו | The phone frame turns into the honey pro card (full from its first frame), click "לשדרג לפרו" | הכול / בשיחה אחת. · Google ו-Microsoft יחד, בוואטסאפ. | celebrating |
-| 7 | 25-28 | - | The card turns back into the phone | מה שהבטחת / לעשות. / עלזה על זה. · 10 הודעות ראשונות בחינם. | waving |
+| 15-16 + 1 | 57-4 | 07:58 · בדרך למשרד | Lock screen: Gmail and Outlook notifications stack up (one every two beats), "ועוד 23 → 31 מיילים" | מיילים. / פגישות. / הבטחות. · והיום רק התחיל. | thinking → calling |
+| 2-3 | 5-12 | 08:02 · ברמזור | The stack folds into the WhatsApp mark, which opens into the chat; press and hold the mic, voice note, ✅, "מקלידה…" | מקליטים / חצי דקה. · הודעה קולית בוואטסאפ, בעברית. | listening |
+| 4-6 | 13-24 | 08:03 · דקה אחר כך | Three mails waiting (Gmail / Outlook marks), the draft, שלח / ערוך / בטל, click שלח, "נשלח." | היא מסכמת / ומנסחת. · שום דבר לא יוצא בלי אישור. | envelope |
+| 7-8 | 25-32 | 18:20 · סוף היום | "מה יש לי מחר?", tomorrow from Google Calendar + Outlook with Meet and Teams chips | שואלים / מה מחר. · היא קוראת את היומן ואת המייל. | calendar |
+| 9-10 | 33-40 | 07:30 · למחרת בבוקר | Dawn lock screen with one notification: her morning summary | הבוקר כבר / מסודר. · סיכום בוקר, בשעה שבוחרים. | front |
+| 11-12 | 41-48 | Google + Microsoft + WhatsApp marks · מסלול פרו | The phone frame turns into the honey pro card (full from its first frame), click "לשדרג לפרו" | הכול / בשיחה אחת. · Google ו-Microsoft יחד, בוואטסאפ. | celebrating |
+| 13-14 | 49-56 | - | The card turns back into the phone | מה שהבטחת / לעשות. / עלזה על זה. · 10 הודעות ראשונות בחינם. | waving |
 
 Every claim is from `lib/billing/plans.ts` and the landing (`components/brand/landing/content.ts`): mail, calendar
 and files, voice notes, drafts that go out only after "שלח", the morning summary, pro's two accounts together,
@@ -28,13 +31,14 @@ messages. The persona's dates follow the landing (Wednesday 21.10 → Thursday 2
 
 | Path | What |
 | --- | --- |
-| `index.html` | The whole film: markup, styles, the product marks (an SVG sprite copied from `components/brand/integrations/icons.tsx` and `provider-logo.tsx`) and a pure `seek(t)`. `?format=wide` gives the 1920x1080 cut with its own layout and a larger type scale. HyperFrames composition (`data-composition-id="main"`, answers `hf-seek`). |
+| `index.html` | The whole film: markup, styles, the product marks (an SVG sprite copied from `components/brand/integrations/icons.tsx` and `provider-logo.tsx`) and a pure `seek(t)`. The film is the 1920x1080 cut, opened as `index.html?format=wide`. HyperFrames composition (`data-composition-id="main"`, answers `hf-seek`). |
 | `assets/mascot` | A link to the site's `public/brand/mascot` (the eight poses and her profile picture). |
 | `render.mjs` | Playwright renderer: beat frames, any instant, the loop check, and the full render. |
 | `tools/beatgrid.py` | numpy beat grid: fine tempo/phase search on the onset envelope, downbeat from kick energy. |
-| `tools/mix_audio.py` | The 8-bar phrase from the measured downbeat + procedural UI sounds placed by their measured peaks; -14 LUFS target. |
+| `tools/mix_audio.py` | The 16-bar phrase from the measured downbeat + procedural UI sounds placed by their measured peaks; -14 LUFS target. |
 | `tools/fetch-music.sh` | Downloads the Mixkit track (not committed). |
-| `audio/beatgrid.json` | The measured grid (120.00 BPM, downbeat 63.868 s). |
+| `audio/beatgrid.json` | The measured grid (120.00 BPM, downbeat 63.868 s, a 16-bar window: bars 31-46 of the track, its loudest steady section, between the break of bar 30 and the closing hit of bar 47). |
+| `tools/encode-web.sh` | The landing's web encodes from the 1920x1080 render -> `public/brand/video/brand-film.{mp4,webm}` and the poster. |
 | `assets/fonts/` | Varela Round (hebrew, latin) from Google Fonts (OFL). |
 
 ## How the motion works
@@ -42,7 +46,7 @@ messages. The persona's dates follow the landing (Wednesday 21.10 → Thursday 2
 - **Time only.** `seek(t)` sets every style from `t`; no CSS transitions, timers or state carried between frames.
 - **Springs** are closed-form step responses (damping 0.78-0.9 for size and position, 1.0 for colour, opacity, the
   camera and the cursor). A value that changes target many times is the sum of one spring per change; the previous
-  cycle's springs are summed too, so `seek(t) === seek(t + 16)` (`node render.mjs --loopcheck` compares PNGs).
+  cycle's springs are summed too, so `seek(t) === seek(t + 32)` (`node render.mjs --loopcheck` compares PNGs).
 - **Time stamp**: four digit reels, each on its own spring, minutes first (an odometer cascade); 07:58 → 08:02 rolls
   through the digits in between.
 - **Thread**: every bubble is placed from the bubbles that arrived after it (each with a presence spring), so the
@@ -56,7 +60,7 @@ messages. The persona's dates follow the landing (Wednesday 21.10 → Thursday 2
 - **Hoopoe**: one pose per scene, swapped on the bar: spring in from 16 px below at 96 % scale, a 0.14 s blur out.
 - **Words**: per word (blur + rise), per letter for the brand line; content leaves 30 ms before its container changes.
 - **Motion blur**: 8 sub-frames per frame (480 fps) blended by ffmpeg `tmix` (a trailing 7/480 s shutter), 60 fps out.
-- **Loop**: 961 frames, frames 0 and 960 identical: the closing frame's sub-frames are copies of the first frame's,
+- **Loop**: 1,921 frames, frames 0 and 1920 identical: the closing frame's sub-frames are copies of the first frame's,
   and both are intra-coded at one constant quantiser, so they decode to the same pixels. The soundtrack is circular
   and carries one extra frame.
 
@@ -73,24 +77,26 @@ tools/fetch-music.sh                          # the Mixkit track -> audio/
 
 # 1. beat grid (already in audio/beatgrid.json)
 mkdir -p build && ffmpeg -v error -y -i audio/mixkit-ramp-it-up-69.mp3 -ar 48000 -ac 2 build/music.wav
-.venv/bin/python -I tools/beatgrid.py build/music.wav --start-near 63.9 --json audio/beatgrid.json
+.venv/bin/python -I tools/beatgrid.py build/music.wav --bars 16 --start-near 63.9 --json audio/beatgrid.json
 
 # 2. sound: events from the page, then the mix -> assets/audio/mix.wav
 node render.mjs --events
 .venv/bin/python -I tools/mix_audio.py
 
 # 3. review: one frame per beat (and half a beat later), any instant, the loop
-node render.mjs --beats                       # build/beats-square/beat-01..32.png
-node render.mjs --beats --offset 0.5
+node render.mjs --beats --format wide         # build/beats-wide/beat-01..64.png
+node render.mjs --beats --offset 0.5 --format wide
 node render.mjs --at 2.1,10.1 --format wide
-node render.mjs --loopcheck
+node render.mjs --loopcheck --format wide
 
 # 4. full renders -> out/
-node render.mjs --full                        # out/alze-film-1440.mp4 (1440x1440)
 node render.mjs --full --format wide          # out/alze-film-1920x1080.mp4
+
+# 5. the landing's copy ("יום עבודה אחד, בוואטסאפ.", components/brand/landing/brand-film.tsx)
+tools/encode-web.sh                           # public/brand/video/brand-film.{mp4,webm} + brand-film-poster.webp
 ```
 
-A full render takes 7,688 screenshots (about 9 minutes on 4 cores). Output: H.264 high, yuv420p, 60 fps,
+A full render takes 15,368 screenshots (about an hour on 4 cores). Output: H.264 high, yuv420p, 60 fps,
 `+faststart`, AAC 192k.
 
 HyperFrames: `npx hyperframes lint .` (two warnings: the single-file composition is long, by design, and her

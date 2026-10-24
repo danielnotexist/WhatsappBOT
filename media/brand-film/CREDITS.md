@@ -10,7 +10,7 @@
   video-on-demand. Not allowed: CDs/DVDs, TV and radio broadcast, video games, remixing it into a music-only track,
   claiming it or registering it with a rights-management service. If a content-ID claim arrives, forward it to
   team@mixkit.co. Checked on 23.10.2026.
-- **Used:** one 8-bar phrase (16.0 s) from 63.868 s, the downbeat measured by `tools/beatgrid.py` (120.00 BPM).
+- **Used:** one 16-bar phrase (32.0 s, bars 31-46) from 63.868 s, the downbeat measured by `tools/beatgrid.py` (120.00 BPM).
 
 ## Sound effects
 

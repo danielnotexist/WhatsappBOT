@@ -1,6 +1,7 @@
 import { PhoneMockup } from "@/components/brand/phone-mockup";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
+import { BrandFilm } from "./brand-film";
 import { SCENES } from "./content";
 import { DeferredMascot } from "./mascot";
 import { DaySwitch } from "./day-switch";
@@ -12,6 +13,7 @@ import { CONTAINER, H2, LEDE } from "./ui";
  * "How it works" as one working day (13:05 → 18:20 → 18:24 → 07:30 the next morning). The room's light follows the
  * clock: daylight, dusk, evening, dawn. Server-rendered as a vertical sequence (phones, reduced motion, no JS); on
  * large screens with motion allowed, DaySwitch swaps in the pinned scroll scene (lazy-loaded with motion + its data).
+ * For now (DAY_SECTION) the section shows the brand film instead; the scenes stay here, one line away.
  */
 
 /** The vertical sequence: an ordered list, because a day is a sequence. */
@@ -56,12 +58,19 @@ export function DayStatic() {
   );
 }
 
-export function DaySection() {
+/**
+ * What stands under the heading of "יום עבודה אחד, בוואטסאפ." - a test (Daniel, 24.10.2026): "film" is the brand film
+ * in a framed card (brand-film.tsx); "scenes" is the working day as scenes, pinned on large screens (DaySwitch).
+ * Back to the scenes: change this one line to "scenes".
+ */
+export const DAY_SECTION: "film" | "scenes" = "film";
+
+export function DaySection({ variant = DAY_SECTION }: { variant?: "film" | "scenes" }) {
   return (
     <section
       id="day"
       aria-labelledby="day-title"
-      className="relative scroll-mt-6 pt-12 pb-28 sm:pt-20 lg:pb-16"
+      className={cn("relative scroll-mt-6 pt-12 sm:pt-20", variant === "film" ? "pb-20 sm:pb-28" : "pb-28 lg:pb-16")}
     >
       <div className={CONTAINER}>
         <h2 id="day-title" className={cn(H2, "max-w-[14ch]")}>
@@ -72,9 +81,15 @@ export function DaySection() {
           ובקבצים.
         </p>
       </div>
-      <DaySwitch>
-        <DayStatic />
-      </DaySwitch>
+      {variant === "film" ? (
+        <div className={cn(CONTAINER, "mt-12 sm:mt-16")}>
+          <BrandFilm />
+        </div>
+      ) : (
+        <DaySwitch>
+          <DayStatic />
+        </DaySwitch>
+      )}
     </section>
   );
 }
