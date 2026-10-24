@@ -1,10 +1,11 @@
-"""Builds the film's soundtrack: 10 bars of the Mixkit track from the measured downbeat + procedural UI sounds.
+"""Builds the film's soundtrack: one 8-bar phrase (16 s) of the Mixkit track from the measured downbeat + procedural UI sounds.
 
 - Music: build/music.wav (decoded from audio/mixkit-ramp-it-up-69.mp3), cut at the downbeat in audio/beatgrid.json.
 - UI sounds: synthesised here from seeded noise (no samples, no tones): click, tick, pop, swish, whoosh, two or three
   takes each, rotated. Each take's peak is measured and the take is placed so its peak lands one frame (1/60 s)
   after the picture event it belongs to (events from build/events.json, written by `node render.mjs --events`).
-- Sounds are placed on a circular 20 s buffer, so the audio loops with the picture.
+- Sounds are placed on a circular buffer of the film's length, so the audio loops with the picture; one more video
+  frame of audio (the loop's first 1/60 s) is appended for the closing frame, which repeats the first frame.
 - Loudness: measured with ffmpeg ebur128, gained to about -14 LUFS with the true peak kept at or under -1 dBTP.
 
 Usage: .venv/bin/python -I tools/mix_audio.py
@@ -137,6 +138,8 @@ def main():
         placed.append({"beat": ev["beat"], "kind": kind, "peak_at": round(target_peak, 4), "take_peak": round(pk, 4)})
 
     mix = bed + fx[:, None]
+    # the closing frame (frame T*60, identical to frame 0) carries the loop's first 1/60 s
+    mix = np.concatenate([mix, mix[: int(round(SR * FRAME))]])
     tmp = BUILD / "mix-raw.wav"
     sf.write(tmp, mix, SR, subtype="FLOAT")
     lufs, tp = loudness(tmp)
