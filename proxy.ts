@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SOURCE_COOKIE, SOURCE_MAX_AGE, encodeSource, sourceFromVisit } from "@/lib/admin/source";
+import { ADMIN_COOKIE, ADMIN_GATE_COOKIE, isGatedAdminPath, verifyAdminToken, verifyGateToken } from "@/lib/admin/tokens";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 import { DEMO_COPY, isDemo } from "@/lib/demo";
 
@@ -77,19 +79,58 @@ export function demoChatHidden(request: NextRequest): boolean {
   return !isDemo() || verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value) === null;
 }
 
+/**
+ * The admin panel (/admin, lib/admin) exists only for the owner: without a valid session and the panel's gate cookie
+ * of that same user (set by GET /admin/enter after the email check) or its open-panel cookie, a real 404 here — before
+ * the page streams. The page and every action check the owner again in full (lib/admin/auth.ts requireOwner).
+ */
+export function adminHidden(request: NextRequest): boolean {
+  if (!isGatedAdminPath(request.nextUrl.pathname)) return false;
+  try {
+    const session = verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value);
+    if (!session) return true;
+    return !verifyGateToken(request.cookies.get(ADMIN_GATE_COOKIE)?.value, session.userId) && !verifyAdminToken(request.cookies.get(ADMIN_COOKIE)?.value, session.userId);
+  } catch {
+    return true; // no key to check with: nothing to show
+  }
+}
+
+/** Paths that never carry a visit's source (the app's own machinery and the panel). */
+const NO_SOURCE = /^\/(api|admin|_next|demo|invoice|pay\/card)(\/|$)/;
+
+/**
+ * The first page load of a browser without the alze_src cookie (lib/admin/source.ts): where it came from. A document
+ * navigation only — never the router's own fetches or prefetches. null when there is nothing to record.
+ */
+export function visitSource(request: NextRequest): string | null {
+  if (request.method !== "GET" || request.cookies.has(SOURCE_COOKIE) || NO_SOURCE.test(request.nextUrl.pathname)) return null;
+  const mode = request.headers.get("sec-fetch-mode");
+  const dest = request.headers.get("sec-fetch-dest");
+  if ((mode !== null && mode !== "navigate") || (dest !== null && dest !== "document") || request.headers.has("next-router-prefetch") || request.headers.has("rsc")) return null;
+  const own = [request.nextUrl.hostname.toLowerCase()];
+  try {
+    if (process.env.APP_URL) own.push(new URL(process.env.APP_URL).hostname.toLowerCase());
+  } catch {
+    // a bad APP_URL is reported elsewhere
+  }
+  return encodeSource(sourceFromVisit(request.nextUrl, request.headers.get("referer"), own));
+}
+
 export function proxy(request: NextRequest) {
   const home = codeCardWithoutEmail(request);
   const response = home
     ? NextResponse.redirect(new URL(home, request.url))
-    : demoChatHidden(request)
+    : demoChatHidden(request) || adminHidden(request)
       ? NextResponse.rewrite(new URL("/_demo-chat-unavailable", request.url)) // no such page → the site's 404
       : NextResponse.next();
+  const source = home ? null : visitSource(request);
+  if (source) response.cookies.set(SOURCE_COOKIE, source, { httpOnly: true, sameSite: "lax", secure: isProduction, path: "/", maxAge: SOURCE_MAX_AGE });
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
     response.headers.set(name, value);
   }
   if (MIC_PAGES.has(request.nextUrl.pathname)) response.headers.set("Permissions-Policy", PERMISSIONS_POLICY_WITH_MIC);
   // מצב הדגמה (lib/demo.ts): לא לאינדוקס בשום מנוע חיפוש — נבדק בכל בקשה, גם אם ה-build נעשה בלי DEMO_MODE
-  if (isDemo()) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
+  if (isDemo() || request.nextUrl.pathname.startsWith("/admin")) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
   return response;
 }
 

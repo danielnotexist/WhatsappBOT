@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/errors/report";
 import type { Route } from "next";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
 import { getDb } from "@/lib/db";
@@ -94,6 +95,7 @@ export async function GET(request: Request) {
       }
     }
     await db.addAudit({ user_id: user.id, action: "ms.connect", result: `error:${error}` });
+    await reportError("oauth.microsoft", `consent returned ${error}`, { userId: user.id, context: { needsAdmin } });
     if (needsAdmin) {
       const adminLink = new URL("/api/auth/microsoft/start?admin=1", process.env.APP_URL || url.origin).toString();
       await tell(copy["err.admin_consent_needed"](user.business_name ?? "הארגון", adminLink));
@@ -130,6 +132,7 @@ export async function GET(request: Request) {
   } catch (e) {
     if (e instanceof MsOAuthError) {
       await db.addAudit({ user_id: user.id, action: "ms.connect", result: `token:${e.code}` });
+      await reportError("oauth.microsoft", e, { userId: user.id, context: { code: e.code } });
       if (e.needsAdminConsent && pending.meetings && !pending.admin) return retryWithoutMeetings(`token:${e.code}`);
       if (e.needsAdminConsent) {
         const adminLink = new URL("/api/auth/microsoft/start?admin=1", process.env.APP_URL || url.origin).toString();

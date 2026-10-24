@@ -85,6 +85,18 @@ export const serverSchema = z.object({
   /** The sender address of real mail (a domain verified in Resend). Default: no-reply@<APP_URL host>. */
   MAIL_FROM: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.email({ message: "MAIL_FROM חייב להיות כתובת מייל בדומיין מאומת ב-Resend, למשל no-reply@example.co.il" }).optional()),
   SUPPORT_EMAIL: z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.email({ message: "SUPPORT_EMAIL חייב להיות כתובת מייל, למשל support@example.co.il" }).optional()),
+  /**
+   * מי נכנס לפאנל הניהול (/admin): כתובות מופרדות בפסיק. ריק = DEFAULT_ADMIN_EMAILS. הכתובת לבדה לא מכניסה — גם קוד
+   * חד-פעמי אמיתי שנשלח אליה במייל (lib/admin/auth.ts).
+   */
+  ADMIN_EMAILS: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z
+      .string()
+      .transform((v) => v.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean))
+      .pipe(z.array(z.email({ message: "ADMIN_EMAILS חייב להיות רשימת כתובות מייל מופרדות בפסיק" })).min(1))
+      .optional(),
+  ),
 
   // ---- AI / תמלול / תמונות ----
   ANTHROPIC_API_KEY: nonEmpty,
@@ -197,6 +209,14 @@ export function googleMocked(source: Record<string, string | undefined> = proces
 /** מצב "מייל תמיכה חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_SUPPORT_MAIL=1` — only the support-ticket email is real. */
 export function liveSupportMailInDemo(source: Record<string, string | undefined> = process.env): boolean {
   return liveSupportMailFlag(source) && isDemo(source);
+}
+
+/** The owner (Daniel) — who opens /admin when ADMIN_EMAILS is not set. */
+export const DEFAULT_ADMIN_EMAILS: readonly string[] = ["danielnotexist@gmail.com"];
+
+/** The addresses that may open /admin, lowercased (ADMIN_EMAILS, or the default). A bad value → Hebrew EnvError. */
+export function adminEmails(source: Record<string, string | undefined> = process.env): readonly string[] {
+  return requireEnv(["ADMIN_EMAILS"], source).ADMIN_EMAILS ?? DEFAULT_ADMIN_EMAILS;
 }
 
 /**

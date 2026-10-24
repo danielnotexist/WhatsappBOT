@@ -20,7 +20,7 @@ import type { SupportChatResponse, SupportTurn } from "./types";
  *     force (a deployment without AI_DAILY_BUDGET_USD) the paid model is never called from this anonymous page.
  *   - Everything else gets the deterministic answer: the mock modes, the cap reached, no cap configured, a provider
  *     error or timeout, an empty or cut-off reply.
- * Nothing of the conversation is logged.
+ * Nothing of the conversation goes to the server log; the route stores the turns for the support team (support_chats).
  */
 
 /** The model tier: the router (Haiku, lib/ai/anthropic.ts DEFAULT_MODELS) and never the strong one (Daniel). */

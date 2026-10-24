@@ -79,7 +79,9 @@ describe("SupportChat — the launcher and the panel", () => {
     const dialog = open();
     fireEvent.click(within(dialog).getByRole("button", { name: "כמה זה עולה?" }));
     expect(within(dialog).getByRole("status", { name: SUPPORT_COPY.typing })).toBeInTheDocument();
-    expect(chatPosts()[0]!.body).toEqual({ message: "כמה זה עולה?", history: [] });
+    expect(chatPosts()[0]!.body).toEqual({ message: "כמה זה עולה?", history: [], chatId: expect.stringMatching(/^[0-9a-f-]{36}$/), page: "/" });
+    // the conversation is stored for the support team, and the panel says so
+    expect(within(dialog).getByText(SUPPORT_COPY.savedNotice)).toBeInTheDocument();
     await act(async () => release());
     const log = within(dialog).getByRole("log");
     expect(await within(log).findByText("שני מסלולים: 99 ₪ ו-299 ₪.")).toBeInTheDocument();
@@ -107,7 +109,10 @@ describe("SupportChat — the launcher and the panel", () => {
         { role: "user", text: "איך מתחברים?" },
         { role: "assistant", text: "תשובה" },
       ],
+      chatId: chatPosts()[0]!.body!.chatId, // one id for the whole conversation
+      page: "/",
     });
+    expect(chatPosts()[0]!.body!.chatId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("the 'not sure' answer brings the chips back and offers a ticket; an error is shown as an alert", async () => {

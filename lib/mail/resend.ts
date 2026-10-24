@@ -5,18 +5,17 @@ export const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
 /** Plain-text + HTML body for the sign-in code. RTL, Hebrew, no links (nothing to phish). */
 export function otpEmailContent(mail: OtpMail, productName: string): { subject: string; text: string; html: string } {
-  const subject = `${mail.code} — קוד הכניסה ל${productName}`;
-  const text = [
-    `קוד הכניסה שלך ל${productName}:`,
-    "",
-    mail.code,
-    "",
-    `הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.`,
-  ].join("\n");
+  const admin = mail.purpose === "admin";
+  const lead = admin ? `קוד הכניסה לפאנל הניהול של ${productName}:` : `קוד הכניסה שלך ל${productName}:`;
+  const tail = admin
+    ? `הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס לפאנל, מישהו מחובר עם הכתובת הזו - כדאי לבדוק.`
+    : `הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.`;
+  const subject = admin ? `${mail.code} — קוד לפאנל הניהול` : `${mail.code} — קוד הכניסה ל${productName}`;
+  const text = [lead, "", mail.code, "", tail].join("\n");
   const html = `<!doctype html><html lang="he" dir="rtl"><body style="font-family:Arial,Helvetica,sans-serif;direction:rtl;text-align:right;color:#1e2a2e">
-<p>קוד הכניסה שלך ל${escapeHtml(productName)}:</p>
+<p>${escapeHtml(lead)}</p>
 <p style="font-size:32px;font-weight:700;letter-spacing:.2em;direction:ltr;text-align:right">${mail.code}</p>
-<p>הקוד תקף ל-${mail.ttlMinutes} דקות. אם לא ביקשת להיכנס — אפשר להתעלם מההודעה.</p>
+<p>${escapeHtml(tail)}</p>
 </body></html>`;
   return { subject, text, html };
 }

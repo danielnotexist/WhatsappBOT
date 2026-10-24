@@ -45,6 +45,15 @@ import type {
   MeetingSummaryAction,
   MeetingSummaryRow,
   NewMeetingSummary,
+  AdminDailyRow,
+  AdminUserRow,
+  AppErrorRow,
+  AuditRow,
+  NewAppError,
+  SignupSource,
+  SupportChatRow,
+  SupportChatTurn,
+  SupportTicketStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -198,7 +207,10 @@ export class SupabaseDb implements Db {
   }
 
   async insertMessage(row: NewMessage): Promise<MessageRow | null> {
-    const { data, error } = await this.client.from("messages").insert(row).select(SupabaseDb.MSG_COLS).single();
+    // messages.tools (0015) is named only when a tool ran, so a reply without tools never depends on the column
+    const { tools, ...rest } = row;
+    const insert = tools?.length ? { ...rest, tools } : rest;
+    const { data, error } = await this.client.from("messages").insert(insert).select(SupabaseDb.MSG_COLS).single();
     if (error) {
       if (error.code === "23505") return null; // unique_violation on wa_message_id → redelivery
       this.fail("insertMessage", error);
@@ -732,6 +744,145 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.client.from("support_tickets").insert(row).select(SupabaseDb.TICKET_COLS).single();
     if (error) this.fail("createSupportTicket", error);
     return data as unknown as SupportTicketRow;
+  }
+
+  // ---- the admin panel (migration 0015). Reads across users: called only behind requireOwner() (lib/admin/auth.ts). ----
+
+  private static ADMIN_USER_COLS = `${SupabaseDb.USER_COLS},signup_source,last_seen_at`;
+  private static ADMIN_TICKET_COLS = `${SupabaseDb.TICKET_COLS},admin_note,status_changed_at`;
+  private static CHAT_COLS = "id,user_id,page,turns,created_at,updated_at";
+  private static ERROR_COLS = "id,at,user_id,source,message,context";
+  private static AUDIT_COLS = "user_id,action,target,reason,result,approved_by_msg_id,pending_action_id,agent_key,agent_name,created_at";
+
+  async setSignupSource(userId: string, source: SignupSource): Promise<void> {
+    const { error } = await this.client.from("users").update({ signup_source: source }).eq("id", userId).is("signup_source", null);
+    if (error) this.fail("setSignupSource", error);
+  }
+
+  async touchLastSeen(userId: string, at: Date, minIntervalMs: number): Promise<void> {
+    const before = new Date(at.getTime() - minIntervalMs).toISOString();
+    const { error } = await this.client
+      .from("users")
+      .update({ last_seen_at: at.toISOString() })
+      .eq("id", userId)
+      .or(`last_seen_at.is.null,last_seen_at.lt.${before}`);
+    if (error) this.fail("touchLastSeen", error);
+  }
+
+  async adminUserOverview(): Promise<AdminUserRow[]> {
+    const { data, error } = await this.client.rpc("admin_user_overview");
+    if (error) this.fail("adminUserOverview", error);
+    return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+      ...(r as unknown as AdminUserRow),
+      providers: ((r.providers as string[] | null) ?? []) as AdminUserRow["providers"],
+      ai_cost_30d: Number(r.ai_cost_30d ?? 0),
+      charge_failures: Number(r.charge_failures ?? 0),
+    }));
+  }
+
+  async adminDailyStats(fromDay: string, toDay: string): Promise<AdminDailyRow[]> {
+    const { data, error } = await this.client.rpc("admin_daily_stats", { p_from: fromDay, p_to: toDay });
+    if (error) this.fail("adminDailyStats", error);
+    return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+      day: String(r.day),
+      signups: Number(r.signups ?? 0),
+      active_users: Number(r.active_users ?? 0),
+      messages: Number(r.messages ?? 0),
+      ai_cost: Number(r.ai_cost ?? 0),
+      revenue: Number(r.revenue ?? 0),
+    }));
+  }
+
+  async adminGetUser(id: string): Promise<UserRow | null> {
+    if (!UUID_RE.test(id)) return null;
+    const { data, error } = await this.client.from("users").select(SupabaseDb.ADMIN_USER_COLS).eq("id", id).is("deleted_at", null).maybeSingle();
+    if (error) this.fail("adminGetUser", error);
+    return (data as unknown as UserRow | null) ?? null;
+  }
+
+  async adminMessages(userId: string, opts: { before?: string; limit: number }): Promise<MessageRow[]> {
+    let q = this.client.from("messages").select(`${SupabaseDb.MSG_COLS},tools`).eq("user_id", userId);
+    if (opts.before) q = q.lt("created_at", opts.before);
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(opts.limit);
+    if (error) this.fail("adminMessages", error);
+    return (data as unknown as MessageRow[]) ?? [];
+  }
+
+  async adminAudit(userId: string, limit: number): Promise<AuditRow[]> {
+    const { data, error } = await this.client.from("audit_log").select(SupabaseDb.AUDIT_COLS).eq("user_id", userId).order("created_at", { ascending: false }).limit(limit);
+    if (error) this.fail("adminAudit", error);
+    return (data as unknown as AuditRow[]) ?? [];
+  }
+
+  async adminJobs(userId: string, limit: number): Promise<JobRow[]> {
+    const { data, error } = await this.client.from("jobs").select(SupabaseDb.JOB_COLS).eq("user_id", userId).order("run_at", { ascending: false }).limit(limit);
+    if (error) this.fail("adminJobs", error);
+    return (data as unknown as JobRow[]) ?? [];
+  }
+
+  async adminFailedJobs(since: Date, limit: number): Promise<JobRow[]> {
+    const { data, error } = await this.client.from("jobs").select(SupabaseDb.JOB_COLS).eq("status", "failed").gte("updated_at", since.toISOString()).order("updated_at", { ascending: false }).limit(limit);
+    if (error) this.fail("adminFailedJobs", error);
+    return (data as unknown as JobRow[]) ?? [];
+  }
+
+  async adminProactiveAlerts(userId: string, limit: number): Promise<ProactiveAlertRow[]> {
+    const { data, error } = await this.client.from("proactive_alerts").select(SupabaseDb.PROACTIVE_COLS).eq("user_id", userId).order("created_at", { ascending: false }).limit(limit);
+    if (error) this.fail("adminProactiveAlerts", error);
+    return (data as unknown as ProactiveAlertRow[]) ?? [];
+  }
+
+  async adminMeetingSummaries(userId: string, limit: number): Promise<MeetingSummaryRow[]> {
+    const { data, error } = await this.client.from("meeting_summaries").select(SupabaseDb.MEETING_COLS).eq("user_id", userId).order("created_at", { ascending: false }).limit(limit);
+    if (error) this.fail("adminMeetingSummaries", error);
+    return (data as unknown as MeetingSummaryRow[]) ?? [];
+  }
+
+  async listSupportTickets(opts: { status?: SupportTicketStatus; userId?: string; limit: number }): Promise<SupportTicketRow[]> {
+    let q = this.client.from("support_tickets").select(SupabaseDb.ADMIN_TICKET_COLS);
+    if (opts.status) q = q.eq("status", opts.status);
+    if (opts.userId) q = q.eq("user_id", opts.userId);
+    const { data, error } = await q.order("created_at", { ascending: false }).limit(opts.limit);
+    if (error) this.fail("listSupportTickets", error);
+    return (data as unknown as SupportTicketRow[]) ?? [];
+  }
+
+  async setSupportTicketStatus(id: string, status: SupportTicketStatus, note?: string | null): Promise<SupportTicketRow | null> {
+    if (!UUID_RE.test(id)) return null;
+    const patch: Record<string, unknown> = { status, status_changed_at: new Date().toISOString() };
+    if (note !== undefined) patch.admin_note = note?.trim() ? note.trim().slice(0, 2000) : null;
+    const { data, error } = await this.client.from("support_tickets").update(patch).eq("id", id).select(SupabaseDb.ADMIN_TICKET_COLS).maybeSingle();
+    if (error) this.fail("setSupportTicketStatus", error);
+    return (data as unknown as SupportTicketRow | null) ?? null;
+  }
+
+  async appendSupportChat(id: string, row: { userId: string | null; page: string | null; turns: SupportChatTurn[]; max?: number }): Promise<boolean> {
+    if (!UUID_RE.test(id)) return false;
+    const { data, error } = await this.client.rpc("support_chat_append", { p_id: id, p_user: row.userId, p_page: row.page, p_turns: row.turns, p_max: row.max ?? 60 });
+    if (error) this.fail("appendSupportChat", error);
+    return data === true;
+  }
+
+  async listSupportChats(opts: { userId?: string; limit: number }): Promise<SupportChatRow[]> {
+    let q = this.client.from("support_chats").select(SupabaseDb.CHAT_COLS);
+    if (opts.userId) q = q.eq("user_id", opts.userId);
+    const { data, error } = await q.order("updated_at", { ascending: false }).limit(opts.limit);
+    if (error) this.fail("listSupportChats", error);
+    return (data as unknown as SupportChatRow[]) ?? [];
+  }
+
+  async insertAppError(row: NewAppError): Promise<void> {
+    const { error } = await this.client.from("app_errors").insert({ user_id: row.user_id ?? null, source: row.source, message: row.message, context: row.context ?? {} });
+    if (error) this.fail("insertAppError", error);
+  }
+
+  async listAppErrors(opts: { source?: string; userId?: string; limit: number }): Promise<AppErrorRow[]> {
+    let q = this.client.from("app_errors").select(SupabaseDb.ERROR_COLS);
+    if (opts.source) q = q.eq("source", opts.source);
+    if (opts.userId) q = q.eq("user_id", opts.userId);
+    const { data, error } = await q.order("at", { ascending: false }).limit(opts.limit);
+    if (error) this.fail("listAppErrors", error);
+    return (data as unknown as AppErrorRow[]) ?? [];
   }
 
   // ---- proactive_alerts (0013) ----

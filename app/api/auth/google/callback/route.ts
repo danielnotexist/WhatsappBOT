@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/errors/report";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
 import { GOOGLE_CAPABILITY_SCOPES, gcopy } from "@/lib/copy/bot-google";
 import { getDb } from "@/lib/db";
@@ -166,6 +167,7 @@ export async function GET(request: Request) {
     if (e instanceof GoogleOAuthError) {
       uncounted(`token exchange failed: ${e.code}`, user.id);
       await db.addAudit({ user_id: user.id, action: "google.connect", result: `token:${e.code}` });
+      await reportError("oauth.google", e, { userId: user.id, context: { code: e.code } });
       if (e.adminBlocked) return back({ ok: false, error: gcopy["g.web.admin_blocked"]() });
       return back({ ok: false, error: gcopy["g.web.failed"](e.code) });
     }

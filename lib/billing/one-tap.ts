@@ -6,6 +6,7 @@
  * approval was claimed (a button press from the linked number / a single-use form nonce) and in how they tell the
  * user (a chat reply / a page face).
  */
+import { reportError } from "@/lib/errors/report";
 import type { BillingApprovalKind, BillingApprovalRow, SubscriptionRow, UserRow } from "@/lib/db/types";
 import { classifyHypFailure, tokefExpired, tokenLast4, type HypFailureKind } from "@/lib/hyp/codes";
 import { HypPreflightError } from "@/lib/hyp/sign";
@@ -212,6 +213,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
       await finishApproval(ctx, a, { status: "failed", error: e.message.slice(0, 300) });
       await audit("failed:preflight");
       console.error(`[billing] ${a.kind} ${a.id}: HYP preflight failed:`, e.message);
+      await reportError("billing", e, { userId: user.id, db: ctx.db, context: { kind: a.kind, approval: a.id, stage: "preflight" } });
       return { kind: "preflight" };
     }
     // No answer from HYP: the charge may or may not exist. "unknown" blocks every further charge of this user until
@@ -219,6 +221,7 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
     await finishApproval(ctx, a, { status: "unknown", error: (e as Error).message.slice(0, 300) });
     await audit("unknown");
     console.error(`[billing] ${a.kind} ${a.id}: no answer from HYP — reconcile manually:`, (e as Error).message);
+    await reportError("billing", e, { userId: user.id, db: ctx.db, context: { kind: a.kind, approval: a.id, stage: "no_answer" } });
     return { kind: "unknown" };
   }
 

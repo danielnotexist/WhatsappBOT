@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DEFAULT_MAX_OUTBOUND, agentRowViolation } from "@/lib/agents/constraints";
 import { customAgentLimit, effectivePlan, type EffectivePlan } from "@/lib/billing/plans";
-import { localDateOf, zonedToUtc } from "@/lib/time/zoned";
+import { addDays, compareDates, dateKey, localDateOf, parseDateKey, zonedToUtc } from "@/lib/time/zoned";
 import { AgentDailyCapError, AgentLimitError, AgentNameTakenError, AgentPlanError, AgentRuleError } from "./errors";
 import type {
   AgentKey,
@@ -46,6 +46,15 @@ import type {
   MeetingSummaryAction,
   MeetingSummaryRow,
   NewMeetingSummary,
+  AdminDailyRow,
+  AdminUserRow,
+  AppErrorRow,
+  AuditRow,
+  NewAppError,
+  SignupSource,
+  SupportChatRow,
+  SupportChatTurn,
+  SupportTicketStatus,
   SubscriptionRow,
   UsageRow,
   UserRow,
@@ -82,6 +91,8 @@ export class MemoryDb implements Db {
   supportTickets: SupportTicketRow[] = [];
   proactiveAlerts: ProactiveAlertRow[] = [];
   meetingSummaries: MeetingSummaryRow[] = [];
+  supportChats: SupportChatRow[] = [];
+  appErrors: AppErrorRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -181,6 +192,8 @@ export class MemoryDb implements Db {
     for (const t of this.supportTickets) if (t.user_id === id) t.user_id = null; // SQL: on delete set null
     this.proactiveAlerts = this.proactiveAlerts.filter((a) => a.user_id !== id);
     this.meetingSummaries = this.meetingSummaries.filter((s) => s.user_id !== id);
+    this.supportChats = this.supportChats.filter((c) => c.user_id !== id); // SQL: on delete cascade
+    this.appErrors = this.appErrors.filter((e) => e.user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -309,6 +322,7 @@ export class MemoryDb implements Db {
       cost_usd: row.cost_usd ?? null,
       agent_key: row.agent_key ?? null,
       hidden_from_model: row.hidden_from_model ?? false,
+      tools: [...(row.tools ?? [])],
       created_at: iso(this.now()),
     };
     this.messages.push(full);
@@ -688,6 +702,199 @@ export class MemoryDb implements Db {
     const ticket: SupportTicketRow = { id: randomUUID(), created_at: iso(this.now()), status: "open", ...row };
     this.supportTickets.push(ticket);
     return ticket;
+  }
+
+  // ---- the admin panel (migration 0015): mirrors admin_user_overview(), admin_daily_stats(), support_chat_append() ----
+
+  async setSignupSource(userId: string, source: SignupSource): Promise<void> {
+    const u = this.users.get(userId);
+    if (u && !u.signup_source) u.signup_source = structuredClone(source);
+  }
+
+  async touchLastSeen(userId: string, at: Date, minIntervalMs: number): Promise<void> {
+    const u = this.users.get(userId);
+    if (!u) return;
+    if (u.last_seen_at && at.getTime() - Date.parse(u.last_seen_at) < minIntervalMs) return;
+    u.last_seen_at = iso(at);
+  }
+
+  async adminUserOverview(): Promise<AdminUserRow[]> {
+    const now = this.now().getTime();
+    const since30 = now - 30 * 86_400_000;
+    const since7 = now - 7 * 86_400_000;
+    return [...this.users.values()]
+      .filter((u) => !u.deleted_at)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((u) => {
+        const sub = this.subscriptions.get(u.id) ?? null;
+        const conns = this.connections.filter((c) => c.user_id === u.id);
+        const phones = this.waIdentities.filter((w) => w.user_id === u.id);
+        const usage = this.usage.filter((x) => x.user_id === u.id).sort((a, b) => b.period_start.localeCompare(a.period_start))[0] ?? null;
+        const recent = this.messages.filter((m) => m.user_id === u.id && Date.parse(m.created_at) >= since30);
+        const onboarding = (u.profile.onboarding as { step?: unknown } | undefined)?.step;
+        return {
+          id: u.id,
+          email: u.email,
+          name: u.name,
+          business_name: u.business_name,
+          created_at: u.created_at,
+          last_seen_at: u.last_seen_at ?? null,
+          signup_source: u.signup_source ? structuredClone(u.signup_source) : null,
+          onboarding_step: typeof onboarding === "string" ? onboarding : null,
+          plan: this.planOf(u.id),
+          sub_status: sub?.status ?? null,
+          charge_failures: sub?.charge_failures ?? 0,
+          phone: phones.filter((w) => w.status === "active").sort((a, b) => b.linked_at.localeCompare(a.linked_at))[0]?.phone_e164 ?? null,
+          wa_linked: phones.length > 0,
+          connections_active: conns.filter((c) => c.status === "active").length,
+          connections_broken: conns.filter((c) => c.status === "expired" || c.status === "error").length,
+          connections_ever: conns.length,
+          providers: [...new Set(conns.filter((c) => c.status === "active").map((c) => c.provider))].sort(),
+          usage_used: usage?.counted_messages ?? null,
+          usage_limit: usage?.plan_limit ?? null,
+          messages_30d: recent.filter((m) => m.direction === "in").length,
+          ai_cost_30d: Math.round(recent.reduce((sum, m) => sum + (m.cost_usd ?? 0), 0) * 1e6) / 1e6,
+          errors_7d: this.appErrors.filter((e) => e.user_id === u.id && Date.parse(e.at) >= since7).length,
+          // the memory job has no updated_at: a failed job counts by its run time
+          failed_jobs_7d: this.jobs.filter((j) => j.user_id === u.id && j.status === "failed" && Date.parse(j.run_at) >= since7).length,
+          paid: this.payments.some((p) => p.user_id === u.id && p.ccode === "0"),
+          open_tickets: this.supportTickets.filter((t) => t.user_id === u.id && t.status !== "closed").length,
+        };
+      });
+  }
+
+  async adminDailyStats(fromDay: string, toDay: string): Promise<AdminDailyRow[]> {
+    const from = parseDateKey(fromDay);
+    const to = parseDateKey(toDay);
+    if (!from || !to || compareDates(to, from) < 0) throw new Error("admin_daily_stats: bad range");
+    const day = (at: string) => dateKey(localDateOf(new Date(at)));
+    const rows: AdminDailyRow[] = [];
+    for (let d = from; compareDates(d, to) <= 0; d = addDays(d, 1)) {
+      if (rows.length >= 367) throw new Error("admin_daily_stats: bad range");
+      const key = dateKey(d);
+      const ins = this.messages.filter((m) => m.direction === "in" && day(m.created_at) === key);
+      rows.push({
+        day: key,
+        signups: [...this.users.values()].filter((u) => !u.deleted_at && day(u.created_at) === key).length,
+        active_users: new Set(ins.map((m) => m.user_id)).size,
+        messages: ins.length,
+        ai_cost: this.aiSpend.get(key)?.cost_usd ?? 0,
+        revenue: this.payments.filter((p) => p.ccode === "0" && day(p.created_at) === key).reduce((sum, p) => sum + p.amount_ils, 0),
+      });
+    }
+    return rows;
+  }
+
+  async adminGetUser(id: string): Promise<UserRow | null> {
+    const u = this.users.get(id);
+    return u && !u.deleted_at ? structuredClone(u) : null;
+  }
+
+  async adminMessages(userId: string, opts: { before?: string; limit: number }): Promise<MessageRow[]> {
+    return this.messages
+      .filter((m) => m.user_id === userId && (!opts.before || m.created_at < opts.before))
+      .slice()
+      .reverse()
+      .slice(0, opts.limit)
+      .map((m) => ({ ...m }));
+  }
+
+  async adminAudit(userId: string, limit: number): Promise<AuditRow[]> {
+    return this.audit
+      .filter((a) => a.user_id === userId)
+      .slice()
+      .reverse()
+      .slice(0, limit)
+      .map((a) => ({ ...a }));
+  }
+
+  async adminJobs(userId: string, limit: number): Promise<JobRow[]> {
+    return this.jobs
+      .filter((j) => j.user_id === userId)
+      .sort((a, b) => b.run_at.localeCompare(a.run_at))
+      .slice(0, limit)
+      .map((j) => ({ ...j }));
+  }
+
+  async adminFailedJobs(since: Date, limit: number): Promise<JobRow[]> {
+    return this.jobs
+      .filter((j) => j.status === "failed" && Date.parse(j.run_at) >= since.getTime())
+      .sort((a, b) => b.run_at.localeCompare(a.run_at))
+      .slice(0, limit)
+      .map((j) => ({ ...j }));
+  }
+
+  async adminProactiveAlerts(userId: string, limit: number): Promise<ProactiveAlertRow[]> {
+    return this.proactiveAlerts
+      .filter((a) => a.user_id === userId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((a) => structuredClone(a));
+  }
+
+  async adminMeetingSummaries(userId: string, limit: number): Promise<MeetingSummaryRow[]> {
+    return this.meetingSummaries
+      .filter((s) => s.user_id === userId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((s) => structuredClone(s));
+  }
+
+  async listSupportTickets(opts: { status?: SupportTicketStatus; userId?: string; limit: number }): Promise<SupportTicketRow[]> {
+    return this.supportTickets
+      .filter((t) => (!opts.status || t.status === opts.status) && (!opts.userId || t.user_id === opts.userId))
+      .slice()
+      .reverse()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, opts.limit)
+      .map((t) => structuredClone(t));
+  }
+
+  async setSupportTicketStatus(id: string, status: SupportTicketStatus, note?: string | null): Promise<SupportTicketRow | null> {
+    const t = this.supportTickets.find((x) => x.id === id);
+    if (!t) return null;
+    if (t.status !== status) t.status_changed_at = iso(this.now());
+    t.status = status;
+    if (note !== undefined) t.admin_note = note?.trim() ? note.trim().slice(0, 2000) : null;
+    return structuredClone(t);
+  }
+
+  async appendSupportChat(id: string, row: { userId: string | null; page: string | null; turns: SupportChatTurn[]; max?: number }): Promise<boolean> {
+    if (row.userId && !this.users.has(row.userId)) throw new Error(`support_chats: unknown user ${row.userId}`); // the SQL foreign key
+    let chat = this.supportChats.find((c) => c.id === id);
+    if (!chat) {
+      chat = { id, user_id: row.userId, page: row.page?.slice(0, 200) || null, turns: [], created_at: iso(this.now()), updated_at: iso(this.now()) };
+      this.supportChats.push(chat);
+    }
+    if (chat.user_id && chat.user_id !== row.userId) return false;
+    chat.turns = [...chat.turns, ...structuredClone(row.turns)].slice(-Math.max(row.max ?? 60, 1));
+    chat.user_id ??= row.userId;
+    chat.updated_at = iso(this.now());
+    return true;
+  }
+
+  async listSupportChats(opts: { userId?: string; limit: number }): Promise<SupportChatRow[]> {
+    return this.supportChats
+      .filter((c) => !opts.userId || c.user_id === opts.userId)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .slice(0, opts.limit)
+      .map((c) => structuredClone(c));
+  }
+
+  async insertAppError(row: NewAppError): Promise<void> {
+    // the SQL foreign key would refuse an unknown user: keep the error, without the link
+    const userId = row.user_id && this.users.has(row.user_id) ? row.user_id : null;
+    this.appErrors.push({ id: randomUUID(), at: iso(this.now()), user_id: userId, source: row.source, message: row.message, context: structuredClone(row.context ?? {}) });
+  }
+
+  async listAppErrors(opts: { source?: string; userId?: string; limit: number }): Promise<AppErrorRow[]> {
+    return this.appErrors
+      .filter((e) => (!opts.source || e.source === opts.source) && (!opts.userId || e.user_id === opts.userId))
+      .slice()
+      .reverse()
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, opts.limit)
+      .map((e) => structuredClone(e));
   }
 
   // ---- proactive_alerts (migration 0013): mirrors proactive_alert_claim() and the (user, channel, item, day) key ----

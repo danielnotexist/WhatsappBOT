@@ -137,4 +137,6 @@ export const SUPPORT_COPY = {
   typing: `${BRAND.name} מקלידה`,
   network: "אין חיבור כרגע. אפשר לנסות שוב.",
   tooLong: `השאלה ארוכה מדי. אפשר עד ${SUPPORT_LIMITS.messageChars} תווים.`,
+  /** under the field: the conversation is stored (support_chats, 180 days) — docs/legal/privacy-policy-he.md */
+  savedNotice: "השיחה נשמרת כדי שנוכל לעזור.",
 } as const;

@@ -25,6 +25,24 @@ export interface UserRow {
   profile: Record<string, unknown>;
   created_at: string;
   deleted_at: string | null;
+  /** migration 0015 — read by the admin panel only (adminGetUser / adminUserOverview), not by the everyday user reads */
+  signup_source?: SignupSource | null;
+  last_seen_at?: string | null;
+}
+
+/** Where a person came from on their first visit (proxy.ts sets the alze_src cookie; signIn copies it to a new user). */
+export interface SignupSource {
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
+  /** the referring site's host, when it was another site */
+  ref?: string;
+  /** the first page (path only) */
+  landing?: string;
+  /** ISO time of that first visit */
+  at?: string;
 }
 
 export interface OtpRow {
@@ -230,6 +248,8 @@ export interface MessageRow {
   agent_key: string | null;
   /** agent management in WhatsApp (step 5b): stored, but never in the model's history or the rolling summary (0006, I5) */
   hidden_from_model: boolean;
+  /** the tools the model called for this reply (migration 0015); read by the admin panel */
+  tools?: string[];
   created_at: string;
 }
 
@@ -247,6 +267,8 @@ export interface NewMessage {
   cost_usd?: number | null;
   agent_key?: AgentKey | null;
   hidden_from_model?: boolean;
+  /** sent only when non-empty, so an outbound row without tools never names the column */
+  tools?: string[];
 }
 
 export interface ConversationStateRow {
@@ -472,6 +494,86 @@ export interface SupportTicketRow {
   body: string;
   transcript: SupportTicketTurn[] | null;
   status: SupportTicketStatus;
+  /** migration 0015: the owner's note from /admin, and when the status last changed */
+  admin_note?: string | null;
+  status_changed_at?: string | null;
+}
+
+// ---- the admin panel (migration 0015, lib/admin) ----
+
+/** A turn of the website support chat as stored (support_chats.turns). */
+export interface SupportChatTurn {
+  role: "user" | "assistant";
+  text: string;
+  at?: string;
+}
+
+export interface SupportChatRow {
+  /** made in the browser, one per conversation */
+  id: string;
+  user_id: string | null;
+  page: string | null;
+  turns: SupportChatTurn[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppErrorRow {
+  id: string;
+  at: string;
+  user_id: string | null;
+  source: string;
+  message: string;
+  context: Record<string, unknown>;
+}
+
+export type NewAppError = Pick<AppErrorRow, "source" | "message"> & { user_id?: string | null; context?: Record<string, unknown> };
+
+export interface AuditRow extends AuditEntry {
+  created_at: string;
+}
+
+/** One row per live user (SQL admin_user_overview()). */
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  name: string | null;
+  business_name: string | null;
+  created_at: string;
+  last_seen_at: string | null;
+  signup_source: SignupSource | null;
+  onboarding_step: string | null;
+  plan: PlanKind;
+  sub_status: SubscriptionStatus | null;
+  charge_failures: number;
+  /** the active linked number */
+  phone: string | null;
+  /** any number was ever linked */
+  wa_linked: boolean;
+  connections_active: number;
+  connections_broken: number;
+  connections_ever: number;
+  providers: ConnectionProvider[];
+  usage_used: number | null;
+  usage_limit: number | null;
+  /** inbound messages in the last 30 days */
+  messages_30d: number;
+  ai_cost_30d: number;
+  errors_7d: number;
+  failed_jobs_7d: number;
+  /** a successful payment exists */
+  paid: boolean;
+  open_tickets: number;
+}
+
+/** One day (Asia/Jerusalem) of SQL admin_daily_stats(). */
+export interface AdminDailyRow {
+  day: string;
+  signups: number;
+  active_users: number;
+  messages: number;
+  ai_cost: number;
+  revenue: number;
 }
 
 export interface NewSupportTicket {
@@ -639,6 +741,39 @@ export interface Db {
 
   // support tickets (migration 0011) — from the website's support chat
   createSupportTicket(row: NewSupportTicket): Promise<SupportTicketRow>;
+
+  // ---- the admin panel (migration 0015, lib/admin). Reads across users — called only behind requireOwner(). ----
+  /** the first-touch source of a new user: set once, never overwritten */
+  setSignupSource(userId: string, source: SignupSource): Promise<void>;
+  /** users.last_seen_at = at, unless it was set less than `minIntervalMs` before */
+  touchLastSeen(userId: string, at: Date, minIntervalMs: number): Promise<void>;
+  /** one row per live user, newest first (SQL admin_user_overview) */
+  adminUserOverview(): Promise<AdminUserRow[]>;
+  /** per day, inclusive, "YYYY-MM-DD" in Asia/Jerusalem (SQL admin_daily_stats) */
+  adminDailyStats(fromDay: string, toDay: string): Promise<AdminDailyRow[]>;
+  /** the user with signup_source and last_seen_at */
+  adminGetUser(id: string): Promise<UserRow | null>;
+  /** newest first; `before` = an ISO time to page back from */
+  adminMessages(userId: string, opts: { before?: string; limit: number }): Promise<MessageRow[]>;
+  /** newest first */
+  adminAudit(userId: string, limit: number): Promise<AuditRow[]>;
+  /** newest first (by run_at) */
+  adminJobs(userId: string, limit: number): Promise<JobRow[]>;
+  /** failed jobs of any user since `since`, newest first (the "צריך עזרה" list) */
+  adminFailedJobs(since: Date, limit: number): Promise<JobRow[]>;
+  adminProactiveAlerts(userId: string, limit: number): Promise<ProactiveAlertRow[]>;
+  adminMeetingSummaries(userId: string, limit: number): Promise<MeetingSummaryRow[]>;
+  /** newest first */
+  listSupportTickets(opts: { status?: SupportTicketStatus; userId?: string; limit: number }): Promise<SupportTicketRow[]>;
+  /** null when no such ticket */
+  setSupportTicketStatus(id: string, status: SupportTicketStatus, note?: string | null): Promise<SupportTicketRow | null>;
+  /** SQL support_chat_append(): creates the chat on the first call; false when the chat belongs to another user */
+  appendSupportChat(id: string, row: { userId: string | null; page: string | null; turns: SupportChatTurn[]; max?: number }): Promise<boolean>;
+  /** newest first (by updated_at) */
+  listSupportChats(opts: { userId?: string; limit: number }): Promise<SupportChatRow[]>;
+  insertAppError(row: NewAppError): Promise<void>;
+  /** newest first */
+  listAppErrors(opts: { source?: string; userId?: string; limit: number }): Promise<AppErrorRow[]>;
 
   // proactive alerts (migration 0013) — lib/proactive
   /**

@@ -1,5 +1,6 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
-import type { Db } from "@/lib/db/types";
+import { touchLastSeen } from "@/lib/admin/activity";
+import type { Db, SignupSource } from "@/lib/db/types";
 import type { Mailer } from "@/lib/mail/types";
 import type { RateLimiter } from "@/lib/rate-limit";
 import { derivedKey, hmac } from "./keys";
@@ -74,6 +75,8 @@ export interface OtpDeps {
    * the limiter) still apply.
    */
   fixedCode?: string;
+  /** where this browser first came from (lib/admin/source.ts, the alze_src cookie) — kept on a user created now */
+  signupSource?: SignupSource | null;
 }
 
 export async function sendOtp(deps: OtpDeps, rawEmail: unknown, ip: string): Promise<OtpSendResult> {
@@ -129,7 +132,7 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
     const a = Buffer.from(code);
     const b = Buffer.from(deps.fixedCode);
     if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, code: "invalid_code", message: OTP_MESSAGES.invalid_code };
-    return signIn(deps.db, email);
+    return signIn(deps, email);
   }
 
   const latest = await deps.db.latestOtp(email);
@@ -152,19 +155,28 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
   }
 
   await deps.db.markOtpUsed(latest.id);
-  return signIn(deps.db, email);
+  return signIn(deps, email);
 }
 
-/** The code checked out: the existing user (login) or a new one (signup), audited either way. */
-async function signIn(db: Db, email: string): Promise<OtpVerifyResult> {
+/**
+ * The code checked out: the existing user (login) or a new one (signup), audited either way. A new user keeps the
+ * browser's first-visit source; both mark "last seen". Those two are best effort (the admin panel's data): a failure
+ * there never fails the sign-in.
+ */
+async function signIn(deps: OtpDeps, email: string): Promise<OtpVerifyResult> {
+  const db = deps.db;
   let user = await db.findUserByEmail(email);
   let isNewUser = false;
   if (!user) {
     user = await db.createUser(email);
     isNewUser = true;
     await db.addAudit({ user_id: user.id, action: "signup", target: email, result: "ok" });
+    if (deps.signupSource) {
+      await db.setSignupSource(user.id, deps.signupSource).catch((e: unknown) => console.warn("[otp] signup source not recorded:", (e as Error).message));
+    }
   } else {
     await db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });
   }
+  await touchLastSeen(db, user.id, deps.now?.() ?? new Date());
   return { ok: true, userId: user.id, isNewUser, email };
 }

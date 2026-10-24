@@ -205,9 +205,9 @@ function tsxFiles(dir: string): string[] {
   });
 }
 
-describe("logical (RTL-safe) classes in the personal area, auth and legal pages", () => {
+describe("logical (RTL-safe) classes in the personal area, the admin panel, auth and legal pages", () => {
   const appDir = join(__dirname, "..");
-  const files = ["account", "(auth)", "(legal)"].flatMap((d) => tsxFiles(join(appDir, d)));
+  const files = ["account", "admin", "(auth)", "(legal)"].flatMap((d) => tsxFiles(join(appDir, d)));
 
   it("finds the pages", () => {
     expect(files.some((f) => f.endsWith(join("account", "page.tsx")))).toBe(true);

@@ -1,3 +1,5 @@
+import { touchLastSeen } from "@/lib/admin/activity";
+import { reportError } from "@/lib/errors/report";
 import { agentDraftAwaitsText, handleAgentMessage, startAgentCreation, updateStickyAfterTurn } from "@/lib/agents/commands";
 import { accountContextOf } from "@/lib/ai/account-context";
 import { BudgetExceededError, type SpendBlock, type SpendTurn } from "@/lib/ai/budget";
@@ -55,6 +57,7 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   // 1. dedupe (unique wa_message_id) + store the inbound row
   const stored = await ctx.db.insertMessage({ user_id: user.id, wa_message_id: msg.waMessageId, direction: "in", type: toDbType(msg.type), text: msg.text, media_url: msg.mediaId ? `wa-media:${msg.mediaId}` : null });
   if (!stored) return { handled: true, note: "duplicate" };
+  await touchLastSeen(ctx.db, user.id, ctx.now());
 
   const isButton = msg.type === "button" || msg.type === "list" || msg.type === "template_button";
   await ctx.wa.markRead(msg.waMessageId, { typing: true }).catch(() => undefined);
@@ -315,7 +318,7 @@ async function afterStored(
     }
     for (const action of out.pendingActions) await presentPendingAction(ctx, to, action);
     const storedText = (flowOnly ? "" : reply) || `[${[...out.pendingActions.map((a) => a.kind), ...out.flows].join(",")}]`;
-    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length || withButtons ? "button" : "text", text: storedText, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null });
+    await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: out.pendingActions.length || withButtons ? "button" : "text", text: storedText, model_used: out.model, tokens_in: out.usage.input + out.usage.cacheRead, tokens_out: out.usage.output, cost_usd: out.costUsd, agent_key: out.agent?.key ?? null, tools: out.toolsUsed });
     for (const flow of out.flows) await (flow === "upgrade" ? upgradeOffer(ctx, freshUser, to) : startAgentCreation(ctx, freshUser, to, sub));
     ranFlow = out.flows.length > 0;
     morningTimeSet = out.toolsUsed.includes("set_morning_time");
@@ -324,6 +327,7 @@ async function afterStored(
     if (e instanceof BudgetExceededError) return capReached(e.reason); // the cap was reached between the check and a call
     const retryable = e instanceof AiProviderError ? e.retryable : false;
     console.error("[bot] assistant failed:", (e as Error).message);
+    await reportError("bot", e, { userId: user.id, db: ctx.db, context: { retryable } });
     await say(retryable ? copy["err.model"]() : copy["err.generic"]());
     return { handled: true, note: "assistant error" };
   }

@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
-import { Cta } from "@/components/brand/cta";
+import { Cta, ctaClass } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot } from "@/components/brand/mascot";
 import { SupportChat } from "@/components/brand/support-chat";
 import { Wordmark } from "@/components/brand/wordmark";
+import { touchLastSeen } from "@/lib/admin/activity";
+import { isAdminEmail } from "@/lib/admin/auth";
 import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
 import { entitlements, mayConnect, providerGate } from "@/lib/billing/plans";
@@ -44,11 +46,16 @@ export default function AccountPage(props: PageProps<"/account">) {
     <div className="stage flex min-h-dvh flex-col">
       <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between px-4 sm:px-8">
         <Wordmark />
-        <form action={signOutAction}>
-          <Cta tone="ghost" size="sm" type="submit">
-            יציאה
-          </Cta>
-        </form>
+        <div className="flex items-center gap-2">
+          <Suspense fallback={null}>
+            <AdminLink />
+          </Suspense>
+          <form action={signOutAction}>
+            <Cta tone="ghost" size="sm" type="submit">
+              יציאה
+            </Cta>
+          </form>
+        </div>
       </header>
       <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-8">
         <Suspense fallback={<AccountSkeleton />}>
@@ -67,6 +74,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const db = getDb();
   const user = await db.getUser(session.userId);
   if (!user) redirect("/login");
+  await touchLastSeen(db, user.id); // the admin panel's "נראה לאחרונה" (best effort, at most once an hour)
   const [connections, phones, subscription, usage, sp] = await Promise.all([
     db.listConnections(user.id),
     db.listWaIdentities(user.id),
@@ -224,6 +232,20 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
 }
 
 /* ---------- pieces ---------- */
+
+/** "ניהול" beside "יציאה" — the owner only (ADMIN_EMAILS); the panel then asks for its own one-time code (lib/admin/auth.ts). */
+async function AdminLink() {
+  await connection();
+  const session = await getSession();
+  if (!session) return null;
+  const user = await getDb().getUser(session.userId);
+  if (!user || !isAdminEmail(user.email)) return null;
+  return (
+    <a href="/admin/enter" className={ctaClass({ tone: "ghost", size: "sm" })}>
+      ניהול
+    </a>
+  );
+}
 
 /** Hebrew one-letter prefixes glued to a Latin name ("ל-Outlook") must not break after the hyphen. */
 function keepPrefixes(text: string): ReactNode[] {

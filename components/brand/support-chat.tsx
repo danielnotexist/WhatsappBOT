@@ -24,7 +24,8 @@ import { cn } from "@/lib/utils";
  * typing dots, and "פתיחת פנייה" — a small form inside the panel that reaches the support inbox.
  *
  * Answers: POST /api/support/chat (the model grounded in lib/support/knowledge.ts, or the deterministic matcher).
- * Tickets: POST /api/support/ticket. Nothing is kept after the page is closed.
+ * Tickets: POST /api/support/ticket. The conversation is stored under one id per open page (support_chats, 180 days) so
+ * the support team can help — a line under the field says so.
  * Shown on the landing, the legal pages and /account; not on the signup flow, /login or /demo/chat.
  *
  * Keyboard: the launcher toggles the panel (aria-expanded), Esc closes it and focus returns to the launcher; opening
@@ -64,6 +65,8 @@ export function SupportChat({ className }: { className?: string }) {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const nextId = useRef(0);
+  // one id per conversation (the page's lifetime): the server keeps the turns under it (support_chats)
+  const chatId = useRef<string | null>(null);
   const panelId = useId();
   const titleId = useId();
 
@@ -94,7 +97,8 @@ export function SupportChat({ className }: { className?: string }) {
     setText("");
     setItems((list) => [...list, { id: `q${++nextId.current}`, role: "user", text: q }]);
     setPending(true);
-    const res = await postJson<SupportChatResponse>(CHAT_API, { message: q, history });
+    chatId.current ??= typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null;
+    const res = await postJson<SupportChatResponse>(CHAT_API, { message: q, history, ...(chatId.current ? { chatId: chatId.current } : {}), page: window.location.pathname.slice(0, 200) });
     setPending(false);
     if (!res.ok) {
       setError(res.message);
@@ -230,7 +234,9 @@ export function SupportChat({ className }: { className?: string }) {
                   <span className="text-cream-muted tabular" aria-live="polite">
                     {text.length}/{SUPPORT_LIMITS.messageChars}
                   </span>
-                ) : null}
+                ) : (
+                  <span className="text-[0.75rem] text-cream-muted">{SUPPORT_COPY.savedNotice}</span>
+                )}
               </div>
             </>
           ) : (

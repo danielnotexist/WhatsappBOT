@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/errors/report";
 import { timingSafeEqual } from "node:crypto";
 import { getBillingContext } from "@/lib/billing";
 import { runChargeJob } from "@/lib/billing/service";
@@ -81,6 +82,7 @@ export async function POST(request: Request) {
   } catch (e) {
     const message = (e as Error).message;
     console.error(`[jobs] ${job.kind} ${job.job_id} failed:`, message);
+    await reportError("jobs", e, { userId: job.user_id ?? null, context: { kind: job.kind, job: job.job_id } });
     await db.finishJob(job.job_id, message).catch(() => undefined);
     return Response.json({ ok: false, error: message }, { status: 500 });
   }

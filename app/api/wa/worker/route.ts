@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/errors/report";
 import { timingSafeEqual } from "node:crypto";
 import { runWorkerJob, type WorkerJob } from "@/lib/bot/pipeline";
 import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
@@ -48,6 +49,7 @@ export async function POST(request: Request) {
     return Response.json(result, { status: 200 });
   } catch (e) {
     console.error("[wa:worker] job failed:", (e as Error).message);
+    await reportError("wa.worker", e, { context: { kind: job.kind } });
     return Response.json({ handled: false, error: (e as Error).message }, { status: 500 });
   }
 }

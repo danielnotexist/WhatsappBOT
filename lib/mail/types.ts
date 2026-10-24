@@ -3,6 +3,8 @@ export interface OtpMail {
   code: string;
   /** minutes until the code expires (for the email text) */
   ttlMinutes: number;
+  /** "admin": the one-time code of the admin panel (/admin, lib/admin/auth.ts) — its own subject and words */
+  purpose?: "signin" | "admin";
 }
 
 /** A plain-text operational alert to the operator (OPERATOR_EMAIL) — e.g. Google's user cap at 80 / 95. */

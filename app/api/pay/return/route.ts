@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/errors/report";
 import { ensureDemoSessionUser, hasSession } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { payResultOf, payResultUrl } from "@/lib/billing/result";
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
   } catch (e) {
     if (e instanceof EnvError) return new Response(e.message, { status: 503 });
     console.error("[pay:return] failed:", (e as Error).message);
+    await reportError("billing.return", e);
     return Response.redirect(payResultUrl(origin, { signedIn, result: "failed", message: "משהו השתבש באימות התשלום. אם היה חיוב, נבדוק ונחזור עם תשובה במייל." }).toString(), 303);
   }
 }
