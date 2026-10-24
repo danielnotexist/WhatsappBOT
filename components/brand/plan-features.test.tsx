@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { planFeatures, ZOOM_SOON_LINE } from "@/lib/billing/plans";
 import { contrastPairs, contrastRatio, palette } from "@/lib/design/tokens";
 import { Pricing } from "./landing/pricing";
-import { FEATURE_MARKS, PlanFeatureList } from "./plan-features";
+import { FEATURE_LEAD_STYLE, FEATURE_MARKS, PlanFeatureList } from "./plan-features";
 
 afterEach(cleanup);
 
@@ -22,8 +22,20 @@ describe("the feature lines' leading pictures", () => {
     expect(container.querySelector("[data-feature-lead]")).toBeNull();
   });
 
-  it("the products lead with their own marks, the rest with a check; decorative, and 'בקרוב' stays", () => {
+  it("on the price cards every line opens with a check, no product marks before the words (Daniel, 24.10.2026)", () => {
+    expect(FEATURE_LEAD_STYLE).toBe("check");
     render(<PlanFeatureList lines={planFeatures("pro").lines} lead="ink" />);
+    const items = screen.getAllByRole("listitem");
+    for (const li of items) {
+      expect(lead(li)).toHaveAttribute("data-feature-lead", "check");
+      expect(lead(li)).toHaveAttribute("aria-hidden", "true");
+      expect(marksOf(li)).toEqual([]);
+    }
+    expect(items.find((li) => li.hasAttribute("data-soon"))).toHaveTextContent("בקרוב");
+  });
+
+  it("under \"marks\" the products lead with their own marks, the rest with a check; decorative, and 'בקרוב' stays", () => {
+    render(<PlanFeatureList lines={planFeatures("pro").lines} lead="ink" leadStyle="marks" />);
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(planFeatures("pro").lines.length);
     for (const li of items) expect(lead(li)).toHaveAttribute("aria-hidden", "true");
@@ -46,8 +58,8 @@ describe("the feature lines' leading pictures", () => {
     expect(marksOf(business)).toEqual(["monday"]);
   });
 
-  it("basic on the paper: mail, calendar, files and voice notes with their marks, the agents with a moss check", () => {
-    render(<PlanFeatureList lines={planFeatures("basic").lines} lead="moss" />);
+  it("basic on the paper under \"marks\": mail, calendar, files and voice notes with their marks, the agents with a moss check", () => {
+    render(<PlanFeatureList lines={planFeatures("basic").lines} lead="moss" leadStyle="marks" />);
     const li = (id: string) => screen.getByText(planFeatures("basic").lines.find((l) => l.id === id)!.text).closest("li")!;
     expect(marksOf(li("account"))).toEqual(["google", "microsoft"]);
     expect(marksOf(li("mail"))).toEqual(["gmail", "outlook"]);

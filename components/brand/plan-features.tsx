@@ -31,6 +31,13 @@ export const FEATURE_MARKS: Readonly<Record<string, readonly FeatureMarkId[] | n
   business: ["monday"],
 };
 
+/**
+ * What a line opens with on the price cards: "check" - a ✓ in a small circle on every line (Daniel, 24.10.2026: the
+ * product marks before the words are not pretty; the marks stay in the row at the bottom of each card); "marks" - the
+ * products' marks (FEATURE_MARKS), a ✓ where a line is not about one product. Back to the marks: change this one line.
+ */
+export const FEATURE_LEAD_STYLE: "check" | "marks" = "check";
+
 export type FeatureMarkId = "google" | "microsoft" | "whatsapp" | keyof typeof INTEGRATION_ICONS;
 
 /** the account marks are cropped to the drawing (as the catalogue's Google icons): their optical side, in percent */
@@ -74,13 +81,14 @@ function Check({ lead }: { lead: FeatureLead }) {
  * A plan's features as ruled rows (the landing's price list, the pay page's plan papers, the upgrade offer, and on the
  * night stage the personal area's "מנוי"): the lines come from lib/billing/plans.ts (planFeatures), and a line that is
  * included once it ships carries "בקרוב". With `lead`, every line opens with a picture (decorative - the words say it):
- * the marks of the products it is about (FEATURE_MARKS), otherwise a check in a small circle.
+ * a check in a small circle, or under `leadStyle` "marks" the marks of the products it is about (FEATURE_MARKS).
  */
 export function PlanFeatureList({
   lines,
   tone = "paper",
   rule = tone === "paper" ? "border-ink/15" : "border-line",
   lead,
+  leadStyle = FEATURE_LEAD_STYLE,
   className,
   itemClassName,
 }: {
@@ -88,13 +96,14 @@ export function PlanFeatureList({
   tone?: TileTone;
   rule?: string;
   lead?: FeatureLead;
+  leadStyle?: "check" | "marks";
   className?: string;
   itemClassName?: string;
 }) {
   return (
     <ul data-plan-features="" className={cn("border-t", rule, className)}>
       {lines.map((l) => {
-        const marks = FEATURE_MARKS[l.id];
+        const marks = leadStyle === "marks" ? FEATURE_MARKS[l.id] : null;
         return (
           <li
             key={l.id}
@@ -102,7 +111,7 @@ export function PlanFeatureList({
             className={cn("flex justify-between gap-3 border-b py-3.5 leading-snug", lead ? "items-center" : "items-baseline", rule, itemClassName)}
           >
             {lead ? (
-              <span aria-hidden="true" data-feature-lead={marks ? "marks" : "check"} className="flex w-11 flex-none items-center gap-1">
+              <span aria-hidden="true" data-feature-lead={marks ? "marks" : "check"} className={cn("flex flex-none items-center gap-1", leadStyle === "marks" && "w-11")}>
                 {marks ? marks.map((m) => <FeatureMark key={m} id={m} />) : <Check lead={lead} />}
               </span>
             ) : null}
