@@ -31,14 +31,14 @@ export async function POST(request: Request) {
 }
 
 /**
- * GET: Vercel Cron (vercel.json "crons", every minute) — the scheduler in production: pg_cron's dispatch_due_jobs needs
- * Vault secrets that are not set. Vercel sends `Authorization: Bearer <CRON_SECRET>`; without CRON_SECRET nothing runs.
+ * GET: the scheduler in production, every minute — Supabase pg_cron + pg_net (0019 tick_dispatch(), works on Vercel
+ * Hobby) or Vercel Cron on Pro. Both send `Authorization: Bearer <CRON_SECRET>`; without CRON_SECRET nothing runs.
  */
 export async function GET(request: Request) {
   await connection();
   const secret = process.env.CRON_SECRET?.trim() ?? "";
   if (!secret) {
-    console.error("[jobs] CRON_SECRET חסר: Vercel Cron לא יכול להפעיל את /api/jobs/tick. להגדיר CRON_SECRET (16 תווים לפחות) ב-Vercel.");
+    console.error("[jobs] CRON_SECRET חסר: המתזמן לא יכול להפעיל את /api/jobs/tick. להגדיר CRON_SECRET (16 תווים לפחות) ב-Vercel, ואותו ערך ב-Vault של Supabase בשם cron_secret.");
     return new Response("CRON_SECRET חסר", { status: 503 });
   }
   if (!safeEqual(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) return new Response("invalid cron secret", { status: 401 });
