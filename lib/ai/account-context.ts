@@ -5,11 +5,14 @@ import {
   TRIAL_MESSAGES,
   builtinAgentsIncluded,
   customAgentLimit,
+  cycleOf,
   effectivePlan,
   entitlements,
   isPaidPlan,
   missingProFeatures,
   proSoonTexts,
+  renewalCycleOf,
+  type BillingCycle,
   type EffectivePlan,
   type Entitlements,
   type PaidPlan,
@@ -35,6 +38,10 @@ export interface AccountContext {
   periodEnd: string | null;
   /** a downgrade waiting for the next charge */
   scheduledPlan: PaidPlan | null;
+  /** how the paid plan is charged (migration 0018); monthly in the trial */
+  cycle?: BillingCycle;
+  /** annual → monthly waiting for the next charge */
+  scheduledCycle?: BillingCycle | null;
 }
 
 /** The plan in force and what is left of it — `remaining` is what the usage counter returned for this message. */
@@ -48,6 +55,8 @@ export function accountContextOf(sub: SubscriptionRow | null, remaining: number 
     messagesLeft: remaining === null ? null : Math.max(0, remaining),
     periodEnd: paid ? sub.next_charge_at : null,
     scheduledPlan: paid && isPaidPlan(sub.scheduled_plan) && sub.scheduled_plan !== sub.plan ? sub.scheduled_plan : null,
+    cycle: paid ? cycleOf(sub) : "monthly",
+    scheduledCycle: paid && sub.scheduled_cycle && sub.scheduled_cycle !== cycleOf(sub) ? renewalCycleOf(sub) : null,
   };
 }
 
@@ -79,10 +88,12 @@ export function planFactsLines(): string[] {
     const later = p === "pro" && soon.length ? ` בקרוב, עוד לא פעיל ובלי מועד: ${soon.join(", ")}.` : "";
     return `- מסלול ${s.nameHe}: ${s.priceIls} ₪ לחודש כולל מע״מ, עד ${s.messages.toLocaleString("en-US")} הודעות בחודש. כולל: ${includesHe(entitlements(p))}. ${builtins(s.builtinAgents, true)}, ${customAgentsHe(s.customAgents)}.${later}`;
   };
+  const year = (p: PaidPlan) => `${PLANS[p].nameHe} ${PLANS[p].annualPriceIls.toLocaleString("en-US")} ₪`;
   return [
     `- תקופת ניסיון: ${TRIAL_MESSAGES} הודעות. כולל: ${includesHe(entitlements("trial"))}. ${builtins(builtinAgentsIncluded("trial"), false)}, ${customAgentsHe(customAgentLimit("trial"))}.`,
     paid("basic"),
     paid("pro"),
+    `- תשלום שנתי (חודשיים מתנה, חיוב אחד בשנה, כולל מע״מ): ${year("basic")}, ${year("pro")}. מכסת ההודעות נשארת חודשית. מעבר לשנתי מהאזור האישי; משנתי לחודשי רק בחידוש, ועל החלק שנותר מהשנה לא מוחזר כסף.`,
   ];
 }
 
@@ -96,11 +107,12 @@ export function accountLines(a: AccountContext, agentNames: readonly string[], t
     lines.push(`- מסלול: תקופת ניסיון (אין מנוי בתשלום).${left}`);
   } else {
     const s = PLANS[a.plan];
-    const head = `- מסלול: ${s.nameHe} (${s.priceIls} ₪ לחודש)`;
+    const head = a.cycle === "annual" ? `- מסלול: ${s.nameHe} שנתי (${s.annualPriceIls.toLocaleString("en-US")} ₪ לשנה)` : `- מסלול: ${s.nameHe} (${s.priceIls} ₪ לחודש)`;
     if (a.status === "cancelled") lines.push(`${head} — המנוי בוטל, והמסלול פעיל${a.periodEnd ? ` עד ${dayOf(a.periodEnd, tz)}` : " עד סוף התקופה"}.${left}`);
     else if (a.status === "past_due") lines.push(`${head} — מושהה עד להסדרת התשלום.`);
     else lines.push(`${head}, פעיל.${left}${a.periodEnd ? ` החיוב הבא: ${dayOf(a.periodEnd, tz)}.` : ""}`);
     if (a.scheduledPlan && a.periodEnd) lines.push(`- מתוכנן מעבר למסלול ${PLANS[a.scheduledPlan].nameHe} ב-${dayOf(a.periodEnd, tz)}.`);
+    if (a.scheduledCycle === "monthly" && a.periodEnd) lines.push(`- מתוכנן מעבר לחיוב חודשי ב-${dayOf(a.periodEnd, tz)}.`);
   }
   lines.push(`- סוכנים במסלול הזה: ${builtinAgentsIncluded(a.plan) ? `שלושת המובנים${a.plan === "trial" ? " (כמו שהם)" : ""}` : "בלי המובנים"}, ${customAgentsHe(customAgentLimit(a.plan))}.`);
   lines.push(agentNames.length ? `- סוכנים פעילים עכשיו: ${agentNames.map((n) => `״${n}״`).join(", ")}.` : "- אין כרגע סוכנים פעילים.");

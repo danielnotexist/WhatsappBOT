@@ -13,6 +13,15 @@ export const CLIENT_EVENTS = ["signup_start", "code_sent", "code_ok"] as const s
 export type ClientEvent = (typeof CLIENT_EVENTS)[number];
 export type ServerEvent = Exclude<FunnelEvent, ClientEvent>;
 
+/**
+ * Named events outside the signup funnel (migration 0018): `referral_visit` — a visit through a friend's link
+ * (/r/<code>, lib/referrals). Written by the server; never a funnel step and never a page view.
+ */
+export const OTHER_EVENTS = ["referral_visit"] as const;
+export type OtherEvent = (typeof OTHER_EVENTS)[number];
+/** Every value page_events.event may hold. */
+export type AnalyticsEvent = FunnelEvent | OtherEvent;
+
 export const DEVICES = ["mobile", "desktop"] as const;
 export type DeviceClass = (typeof DEVICES)[number];
 

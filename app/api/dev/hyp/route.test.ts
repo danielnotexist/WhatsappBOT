@@ -21,7 +21,7 @@ describe("/api/dev/hyp (memory-mode development only)", () => {
     expect(await (await post({ charge: ["4", "x", 6, "0"] })).json()).toEqual({ queued: 2 });
     expect(hyp.chargeScript).toEqual(["4", "0"]);
     await hyp.chargeToken({ amount: 1, token: "t", tokef: "3012", info: "i", order: "o", items: [] } as never);
-    expect(await (await GET()).json()).toEqual({ charges: 1, queued: 1 });
+    expect(await (await GET()).json()).toEqual({ charges: 1, queued: 1, lastCharge: { amount: 1 }, lastPage: null });
   });
 
   it("is a 404 outside memory mode and in production", async () => {

@@ -18,8 +18,9 @@ import type { BillingContext } from "./context";
 import { createUpgradeOfferToken, verifyUpgradeOfferToken } from "./links";
 import { MIN_CHARGE_ILS, formatIls, vatOf } from "./money";
 import { deliver, sendInvoice, shortDateHe } from "./notify";
-import { executeClaimedCharge, quoteFor, savedCard, stateOf, type ClaimedChargeOutcome } from "./one-tap";
-import { PLANS } from "./plans";
+import { executeClaimedCharge, isAnnualSwitch, quoteFor, savedCard, stateOf, type ClaimedChargeOutcome } from "./one-tap";
+import { PLANS, isBillingCycle, priceOf, type BillingCycle } from "./plans";
+import { paymentSuccessTemplate } from "@/lib/wa/templates";
 import { dayLabel } from "./whatsapp";
 
 type ReadCtx = Pick<BillingContext, "db" | "now">;
@@ -35,6 +36,10 @@ export interface WebUpgradeOffer {
   /** the end of the current cycle = the next charge, at the pro price */
   periodEnd: Date;
   nextAmountIls: number;
+  /** the cycle in force (an annual plan is upgraded for the rest of its year) */
+  cycle: BillingCycle;
+  /** the cycle of the next charge (monthly when an annual plan is set to move to monthly) */
+  nextCycle: BillingCycle;
   last4: string;
   /** the hidden form field: signed nonce + amount + cycle, valid 10 minutes */
   offerToken: string;
@@ -55,10 +60,11 @@ export async function webUpgradeView(ctx: ReadCtx, user: Pick<UserRow, "id">, su
   if (card.expired) return { kind: "blocked", reason: "card_expired", last4: card.last4 };
   const q = quoteFor("upgrade", stateOf(sub, now), now, card.last4);
   if (!q) return { kind: "blocked", reason: "renewal_due" };
-  const d = q.details as { vat: number; days_left: number; period_end: string; next_amount: number };
+  const d = q.details as { vat: number; days_left: number; period_end: string; next_amount: number; next_cycle?: string };
   const periodEnd = new Date(d.period_end);
   const offerToken = createUpgradeOfferToken(user.id, { nonce: randomUUID(), amountIls: q.amountIls, periodEnd, daysLeft: d.days_left }, { now });
-  return { kind: "offer", offer: { amountIls: q.amountIls, vatIls: d.vat, daysLeft: d.days_left, periodEnd, nextAmountIls: d.next_amount, last4: card.last4, offerToken } };
+  const nextCycle: BillingCycle = isBillingCycle(d.next_cycle) ? d.next_cycle : q.cycle;
+  return { kind: "offer", offer: { amountIls: q.amountIls, vatIls: d.vat, daysLeft: d.days_left, periodEnd, nextAmountIls: d.next_amount, cycle: q.cycle, nextCycle, last4: card.last4, offerToken } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -92,7 +98,7 @@ async function settled(ctx: ReadCtx, id: string, waitMs: number): Promise<void> 
 /** The approval a form opened before (same nonce), if it is this user's web upgrade. */
 async function replayOf(ctx: ReadCtx, userId: string, nonce: string): Promise<BillingApprovalRow | null> {
   const a = await ctx.db.getBillingApproval(nonce);
-  return a && a.user_id === userId && a.kind === "upgrade" && a.approved_msg_id === `web:${a.id}` ? a : null;
+  return a && a.user_id === userId && a.kind === "upgrade" && !isAnnualSwitch(a) && a.approved_msg_id === `web:${a.id}` ? a : null;
 }
 
 /**
@@ -124,7 +130,8 @@ export async function upgradeFromWeb(ctx: BillingContext, user: UserRow, offerTo
   // the offer still describes this subscription: an active basic plan, the same cycle, a usable card
   const card = await savedCard(ctx, user.id);
   const q = card && !card.expired ? quoteFor("upgrade", stateOf(await ctx.db.getSubscription(user.id), now), now, card.last4) : null;
-  const maxIls = PLANS.pro.priceIls - PLANS.basic.priceIls;
+  // never more than the whole difference of the cycle in force (2,000 ₪ on the annual cycle, 200 ₪ on the monthly one)
+  const maxIls = q ? priceOf("pro", q.cycle) - priceOf("basic", q.cycle) : 0;
   if (!q || Date.parse(String(q.details.period_end)) !== offer.periodEnd.getTime() || offer.amountIls < MIN_CHARGE_ILS || offer.amountIls > maxIls) {
     await ctx.db.addAudit({ user_id: user.id, action: "billing.approve.upgrade", target: offer.nonce, approved_by_msg_id: pressId, result: "stale:offer" });
     return { kind: "changed" };
@@ -132,7 +139,7 @@ export async function upgradeFromWeb(ctx: BillingContext, user: UserRow, offerTo
 
   // exactly the amount that was shown, for the cycle it was priced for
   const details = { ...q.details, vat: vatOf(offer.amountIls), days_left: offer.daysLeft, channel: "web" };
-  const a = await ctx.db.openWebCharge({ id: offer.nonce, user_id: user.id, kind: "upgrade", plan: "pro", amount_ils: offer.amountIls, details });
+  const a = await ctx.db.openWebCharge({ id: offer.nonce, user_id: user.id, kind: "upgrade", plan: "pro", amount_ils: offer.amountIls, details, billing_cycle: q.cycle });
   if (!a) {
     // the same form at the same moment (a double click) → its result; otherwise another charge is open
     const twin = await replayOf(ctx, user.id, offer.nonce);
@@ -151,13 +158,16 @@ export async function upgradeFromWeb(ctx: BillingContext, user: UserRow, offerTo
 
 /**
  * The chat flow's confirmation, to the linked number: inside the 24-hour window the same text as after [שדרוג עכשיו]
- * and the receipt as a document; outside it the approved `payment_success` template (pro, 299 ₪, the next charge). Never throws.
+ * and the receipt as a document; outside it the approved `payment_success` template (pro, the next charge's amount and
+ * date; `payment_success_annual` when the next charge is a yearly one). Never throws.
  */
 async function confirmInWhatsapp(ctx: BillingContext, user: UserRow, out: Extract<ClaimedChargeOutcome, { kind: "charged" }>): Promise<void> {
-  const nextAmount = formatIls(PLANS.pro.priceIls);
+  const nextAmount = formatIls(out.nextAmountIls);
+  const sub = await ctx.db.getSubscription(user.id);
+  const nextAnnual = (sub?.scheduled_cycle ?? sub?.billing_cycle) === "annual";
   const text = billCopy["bill.upgrade_done"]({ amount: formatIls(out.amountIls), nextAmount, nextDate: dayLabel(out.nextChargeAt), resendHint: out.resendHint });
-  const where = await deliver(ctx, user, { text, template: { name: "payment_success", params: [PLANS.pro.nameHe, nextAmount, shortDateHe(out.nextChargeAt)], buttons: [] } });
-  if (where?.windowOpen) await sendInvoice(ctx, user, { transId: out.transId, amountIls: out.amountIls, date: ctx.now(), plan: "pro", nextChargeAt: out.nextChargeAt }, where);
+  const where = await deliver(ctx, user, { text, template: paymentSuccessTemplate({ plan: PLANS.pro.nameHe, amount: nextAmount, nextCharge: shortDateHe(out.nextChargeAt), annual: nextAnnual }) });
+  if (where?.windowOpen) await sendInvoice(ctx, user, { transId: out.transId, amountIls: out.amountIls, date: ctx.now(), plan: "pro", nextChargeAt: out.nextChargeAt, cycle: out.cycle }, where);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -167,7 +177,7 @@ async function confirmInWhatsapp(ctx: BillingContext, user: UserRow, out: Extrac
 export type UpgradeFailure = "changed" | "no_card" | "card_expired" | HypFailureKind;
 
 export type WebUpgradeResult =
-  | { status: "succeeded"; amountIls: number; vatIls: number; nextChargeAt: Date; nextAmountIls: number }
+  | { status: "succeeded"; amountIls: number; vatIls: number; nextChargeAt: Date; nextAmountIls: number; nextCycle: BillingCycle }
   | { status: "processing" }
   | { status: "unknown" }
   | { status: "failed"; failure: UpgradeFailure; ccode: string | null; last4: string | null };
@@ -176,12 +186,14 @@ export type WebUpgradeResult =
 export async function webUpgradeResult(ctx: Pick<BillingContext, "db">, userId: string, approvalId: string): Promise<WebUpgradeResult | null> {
   if (!/^[0-9a-f-]{36}$/.test(approvalId)) return null;
   const a = await ctx.db.getBillingApproval(approvalId);
-  if (!a || a.user_id !== userId || a.kind !== "upgrade" || a.approved_msg_id !== `web:${a.id}`) return null;
+  if (!a || a.user_id !== userId || a.kind !== "upgrade" || isAnnualSwitch(a) || a.approved_msg_id !== `web:${a.id}`) return null;
   if (a.status === "succeeded") {
     const end = typeof a.details.period_end === "string" ? new Date(a.details.period_end) : null;
     const sub = end ? null : await ctx.db.getSubscription(userId);
     const nextChargeAt = end ?? new Date(sub?.next_charge_at ?? Date.now());
-    return { status: "succeeded", amountIls: a.amount_ils, vatIls: vatOf(a.amount_ils), nextChargeAt, nextAmountIls: PLANS.pro.priceIls };
+    const nextCycle: BillingCycle = isBillingCycle(a.details.next_cycle) ? a.details.next_cycle : isBillingCycle(a.billing_cycle) ? a.billing_cycle : "monthly";
+    const nextAmountIls = typeof a.details.next_amount === "number" ? a.details.next_amount : priceOf("pro", nextCycle);
+    return { status: "succeeded", amountIls: a.amount_ils, vatIls: vatOf(a.amount_ils), nextChargeAt, nextAmountIls, nextCycle };
   }
   if (a.status === "processing" || a.status === "pending") return { status: "processing" };
   if (a.status === "unknown") return { status: "unknown" };

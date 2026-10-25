@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { DEMO_OTP_CODE, isDemo } from "@/lib/demo";
 import { getMailer } from "@/lib/mail";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
+import { referralCodeFromCookieHeader } from "@/lib/referrals/code";
 import { sendOtp, verifyOtp, type OtpDeps, type OtpSendResult, type OtpVerifyResult } from "./otp";
 
 /**
@@ -18,6 +19,8 @@ function deps(headers?: Headers): OtpDeps {
     fixedCode: isDemo() ? DEMO_OTP_CODE : undefined,
     // the first-visit source of this browser (proxy.ts), kept on a user created by this sign-in
     signupSource: headers ? sourceFromCookieHeader(headers.get("cookie")) : null,
+    // a friend's link opened in this browser (/r/<code>), attached to a user created by this sign-in
+    referralCode: headers ? referralCodeFromCookieHeader(headers.get("cookie")) : null,
   };
 }
 

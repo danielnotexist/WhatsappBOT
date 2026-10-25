@@ -5,7 +5,7 @@ import { ctaClass } from "@/components/brand/cta";
 import { PlanFeatureList } from "@/components/brand/plan-features";
 import { WaLinkButton } from "@/components/brand/wa-link-button";
 import { formatIls } from "@/lib/billing/money";
-import { PLANS, planFeatures, type PaidPlan, type PlanFeatureLine } from "@/lib/billing/plans";
+import { PER_CYCLE_HE, PLANS, planFeatures, priceOf, type BillingCycle, type PaidPlan, type PlanFeatureLine } from "@/lib/billing/plans";
 import type { UpgradeBlock, UpgradeFailure } from "@/lib/billing/web-upgrade";
 import type { PlanGateReason } from "@/lib/connections/plan-gate";
 import { BRAND } from "@/lib/brand";
@@ -23,6 +23,8 @@ import { PendingSubmit } from "../_components/pending-submit";
 type FormAction = (formData: FormData) => void | Promise<void>;
 
 const count = (n: number) => new Intl.NumberFormat("he-IL").format(n);
+/** a whole price with its thousands ("2,990"), an agorot amount as charged ("135.48") */
+const money = (n: number) => (Number.isInteger(n) ? count(n) : formatIls(n));
 
 /**
  * What pro adds to basic: the messages, then pro's lines of the price list (lib/billing/plans.ts planFeatures, from
@@ -81,6 +83,10 @@ export interface OfferFaceData {
   /** "10.11.2026" in the user's zone */
   periodEndDay: string;
   nextAmountIls: number;
+  /** the cycle in force (annual: the difference is prorated over the year that was paid); monthly when absent */
+  cycle?: BillingCycle;
+  /** the cycle of the next charge ("לחודש" / "לשנה" after its amount); monthly when absent */
+  nextCycle?: BillingCycle;
   last4: string;
   offerToken: string;
 }
@@ -121,11 +127,16 @@ export function UpgradeOfferFace({
   gate?: PlanGateReason | null;
 }) {
   const amount = formatIls(offer.amountIls);
-  const next = formatIls(offer.nextAmountIls);
+  const next = money(offer.nextAmountIls);
+  const per = PER_CYCLE_HE[offer.nextCycle ?? "monthly"];
   return (
     <>
       <PayHeading tag={name ? `${name}, עוברים לפרו.` : "עוברים לפרו."} title="שדרוג לפרו">
-        <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">משלמים עכשיו רק את ההפרש עד סוף התקופה הנוכחית, בכרטיס השמור. מסלול פרו פעיל מיד.</p>
+        <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">
+          {offer.cycle === "annual"
+            ? "המנוי שנתי: משלמים עכשיו רק את ההפרש היחסי עד סוף השנה ששולמה, בכרטיס השמור. מסלול פרו פעיל מיד, ומועד החיוב לא משתנה."
+            : "משלמים עכשיו רק את ההפרש עד סוף התקופה הנוכחית, בכרטיס השמור. מסלול פרו פעיל מיד."}
+        </p>
       </PayHeading>
 
       <Notice code={notice} error={error} />
@@ -152,7 +163,7 @@ export function UpgradeOfferFace({
 
           <dl className="mt-6 border-t border-ink/20 text-[0.9375rem]">
             <Row label="מהחיוב הבא">
-              {next} ₪ לחודש, מ-{offer.periodEndDay}
+              {next} ₪ {per}, מ-{offer.periodEndDay}
             </Row>
             <Row label="החיוב בכרטיס">
               מסתיים ב-<bdi dir="ltr">{offer.last4}</bdi>
@@ -174,7 +185,7 @@ export function UpgradeOfferFace({
             <Assurance>המכסה של החודש עולה מיד ל-{count(PLANS.pro.messages)} הודעות.</Assurance>
             <Assurance>החיוב בכרטיס השמור, בלי להקליד פרטים מחדש.</Assurance>
             <Assurance>
-              מ-{offer.periodEndDay}: {next} ₪ לחודש, כולל מע״מ. ביטול בכל רגע מהאזור האישי או מהשיחה.
+              מ-{offer.periodEndDay}: {next} ₪ {per}, כולל מע״מ. ביטול בכל רגע מהאזור האישי או מהשיחה.
             </Assurance>
           </ul>
           <p className="mt-6 text-[0.875rem]">
@@ -182,7 +193,7 @@ export function UpgradeOfferFace({
             <Link href="/terms" className="rounded-sm underline underline-offset-3 hover:text-cream">
               תנאי השימוש
             </Link>
-            , כולל חיוב חוזר חודשי עד לביטול.
+            , כולל חיוב חוזר {offer.nextCycle === "annual" ? "שנתי" : "חודשי"} עד לביטול.
           </p>
         </div>
       </div>
@@ -192,7 +203,23 @@ export function UpgradeOfferFace({
 
 /* ---------- the result ---------- */
 
-export function UpgradeDoneFace({ email, amountIls, vatIls, nextAmountIls, nextDay, waHref }: { email: string; amountIls: number; vatIls: number; nextAmountIls: number; nextDay: string; waHref: string | null }) {
+export function UpgradeDoneFace({
+  email,
+  amountIls,
+  vatIls,
+  nextAmountIls,
+  nextCycle = "monthly",
+  nextDay,
+  waHref,
+}: {
+  email: string;
+  amountIls: number;
+  vatIls: number;
+  nextAmountIls: number;
+  nextCycle?: BillingCycle;
+  nextDay: string;
+  waHref: string | null;
+}) {
   return (
     <>
       <PayHeading tag="תודה." title="המסלול שודרג לפרו">
@@ -207,7 +234,7 @@ export function UpgradeDoneFace({ email, amountIls, vatIls, nextAmountIls, nextD
             {formatIls(amountIls)} ₪ <span className="font-normal text-ink-muted">(כולל מע״מ {formatIls(vatIls)} ₪)</span>
           </Row>
           <Row label="החיוב הבא">
-            {formatIls(nextAmountIls)} ₪, ב-{nextDay}
+            {money(nextAmountIls)} ₪ {PER_CYCLE_HE[nextCycle]}, ב-{nextDay}
           </Row>
         </dl>
         <p className="mt-5 text-[1rem] leading-relaxed">
@@ -353,6 +380,7 @@ const BLOCK_TEXT: Record<UpgradeBlock, (last4?: string) => string> = {
 
 export function CardUpdateFace({
   plan,
+  cycle = "monthly",
   nextDay,
   cardUpdateHref,
   upgradeHref,
@@ -361,6 +389,8 @@ export function CardUpdateFace({
   gate,
 }: {
   plan: PaidPlan;
+  /** how the plan is charged (the price line: "990 ₪ לשנה") */
+  cycle?: BillingCycle;
   nextDay: string | null;
   /** the HYP card-update page (/pay/card/<token>) */
   cardUpdateHref: string;
@@ -385,7 +415,9 @@ export function CardUpdateFace({
           <h2 className="font-heading text-[1.5rem] leading-tight font-bold">מסלול {PLANS[plan].nameHe}</h2>
           <span className="flex-none rounded-full bg-ink px-3 py-1 text-[0.8125rem] font-semibold text-cream">פעיל</span>
         </div>
-        <p className="mt-1.5 text-[1rem] text-ink-muted">{PLANS[plan].priceIls} ₪ לחודש, כולל מע״מ</p>
+        <p className="mt-1.5 text-[1rem] text-ink-muted">
+          {count(priceOf(plan, cycle))} ₪ {PER_CYCLE_HE[cycle]}, כולל מע״מ{cycle === "annual" ? ". מכסת ההודעות חודשית" : ""}
+        </p>
         {nextDay ? (
           <dl className="mt-6 flex items-baseline justify-between gap-4 border-t border-ink/12 pt-5 text-[0.9375rem]">
             <dt className="text-ink-muted">החיוב הבא</dt>

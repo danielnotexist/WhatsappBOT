@@ -34,7 +34,7 @@ describe("the site's address and indexing", () => {
   });
 
   it("the private prefixes, and nothing that only starts with the same letters", () => {
-    for (const p of ["/admin", "/admin/users/1", "/account", "/api/a", "/pay/x", "/invoice/t", "/login", "/login/w/t", "/demo/chat"]) expect(isPrivatePath(p)).toBe(true);
+    for (const p of ["/admin", "/admin/users/1", "/account", "/api/a", "/pay/x", "/invoice/t", "/login", "/login/w/t", "/demo/chat", "/r/ABCDEFG"]) expect(isPrivatePath(p)).toBe(true);
     for (const p of ["/", "/pricing", "/for/lawyers", "/start", "/privacy", "/accountants", "/payments"]) expect(isPrivatePath(p)).toBe(false);
   });
 });
@@ -141,7 +141,7 @@ describe("sitemap.xml", () => {
 describe("robots.txt", () => {
   it("production: open, the private prefixes closed, the sitemap's address", () => {
     expect(robotsRules(PROD)).toEqual({
-      rules: { userAgent: "*", allow: "/", disallow: ["/admin", "/account", "/api", "/pay", "/invoice", "/login", "/demo"] },
+      rules: { userAgent: "*", allow: "/", disallow: ["/admin", "/account", "/api", "/pay", "/invoice", "/login", "/demo", "/r/"] },
       sitemap: "https://alze.ai/sitemap.xml",
     });
   });

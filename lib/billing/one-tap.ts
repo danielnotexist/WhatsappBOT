@@ -13,16 +13,31 @@ import type { BillingApprovalKind, BillingApprovalRow, SubscriptionRow, UserRow 
 import { classifyHypFailure, tokefExpired, tokenLast4, type HypFailureKind } from "@/lib/hyp/codes";
 import { HypPreflightError } from "@/lib/hyp/sign";
 import type { BillingContext } from "./context";
-import { quoteMonth, quoteUpgrade, vatOf } from "./money";
+import { formatIls, quoteAnnualSwitch, quotePeriod, quoteUpgrade, vatOf } from "./money";
 import { shortDateHe } from "./notify";
-import { PLANS, addOneMonth, isPaidPlan, type PaidPlan } from "./plans";
-import { loadCardToken, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
+import { PLANS, addCycle, addOneYear, cycleOf, isBillingCycle, isPaidPlan, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
+import { applyPendingCredit, loadCardToken, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
 
 export type OfferKind = Exclude<BillingApprovalKind, "renewal">;
 
 /** The kind of a one-tap charge, in the owner's alert. */
 const ONE_TAP_KIND_HE: Partial<Record<BillingApprovalKind, string>> = { upgrade: "שדרוג לפרו", retry: "ניסיון חוזר", renew: "חידוש מנוי" };
 export type ChargeKind = Extract<OfferKind, "upgrade" | "retry" | "renew">;
+
+/**
+ * monthly → annual from the personal area is stored as an `upgrade` approval (billing_approvals.kind is an enum and
+ * migration 0018 adds no value to it) marked `details.change = "annual"`, the plan unchanged. Every place that reads
+ * an upgrade asks this first.
+ */
+export function isAnnualSwitch(a: Pick<BillingApprovalRow, "kind" | "details">): boolean {
+  return a.kind === "upgrade" && a.details.change === "annual";
+}
+
+/** The billing cycle an approval was priced for (older rows: monthly). */
+export function approvalCycle(a: Pick<BillingApprovalRow, "billing_cycle" | "details">): BillingCycle {
+  if (isBillingCycle(a.billing_cycle)) return a.billing_cycle;
+  return isBillingCycle(a.details.cycle) ? a.details.cycle : "monthly";
+}
 
 // ---------------------------------------------------------------------------------------------
 // state
@@ -74,12 +89,20 @@ export async function savedCard(ctx: Pick<BillingContext, "db" | "now">, userId:
 export interface Quote {
   plan: PaidPlan;
   amountIls: number;
+  /** the cycle the price is for (the approval's billing_cycle) */
+  cycle: BillingCycle;
   details: Record<string, unknown>;
 }
 
-/** The invoice line of a prorated upgrade: "שדרוג למסלול פרו — יתרת התקופה עד 10.11.2026". */
-export function upgradeItem(periodEnd: Date | string): string {
-  return `שדרוג למסלול פרו — יתרת התקופה עד ${shortDateHe(periodEnd)}`;
+/** The invoice line of a prorated upgrade: "שדרוג למסלול פרו — יתרת התקופה עד 10.11.2026" ("פרו שנתי" on the annual cycle). */
+export function upgradeItem(periodEnd: Date | string, cycle: BillingCycle = "monthly"): string {
+  return `שדרוג למסלול ${planNameHe("pro", cycle)} — יתרת התקופה עד ${shortDateHe(periodEnd)}`;
+}
+
+/** The invoice line of monthly → annual: "מנוי בסיסי שנתי — 25.10.2026–25.10.2027, בקיזוז 66 ₪ מהחודש הנוכחי". */
+export function annualSwitchItem(plan: PaidPlan, from: Date, to: Date, creditIls: number): string {
+  const base = renewalItem(plan, from, to, "annual");
+  return creditIls > 0 ? `${base}, בקיזוז ${formatIls(creditIls)} ₪ מהחודש הנוכחי` : base;
 }
 
 /** What a charge offer of `kind` costs right now (null when the state does not allow it). */
@@ -88,25 +111,70 @@ export function quoteFor(kind: OfferKind, st: SubState, now: Date, last4: string
   if (!sub || !st.paid) return null;
   if (kind === "upgrade") {
     if (sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0 || !sub.next_charge_at) return null;
-    const q = quoteUpgrade(sub.next_charge_at, now);
+    // the prorated difference of the cycle in force; the period end stays (an annual plan stays annual)
+    const cycle = cycleOf(sub);
+    const q = quoteUpgrade(sub.next_charge_at, now, cycle, renewalCycleOf(sub));
     if (!q) return null;
-    return { plan: "pro", amountIls: q.amountIls, details: { item: upgradeItem(q.periodEnd), vat: q.vatIls, days_left: q.daysLeft, cycle_days: q.cycleDays, period_end: q.periodEnd.toISOString(), next_amount: q.nextAmountIls, last4 } };
+    return {
+      plan: "pro",
+      cycle,
+      amountIls: q.amountIls,
+      details: { item: upgradeItem(q.periodEnd, cycle), vat: q.vatIls, days_left: q.daysLeft, cycle_days: q.cycleDays, period_end: q.periodEnd.toISOString(), next_amount: q.nextAmountIls, next_cycle: renewalCycleOf(sub), cycle, last4 },
+    };
   }
   const plan = renewalPlan(sub);
   if (!plan) return null;
+  // retry / renew: one full period of the renewal's plan and cycle (a scheduled change takes effect there)
+  const cycle = renewalCycleOf(sub);
   if (kind === "retry") {
     if (!(st.inGrace || st.paused) || !sub.next_charge_at) return null;
     const from = st.paused ? now : new Date(sub.next_charge_at);
-    const to = addOneMonth(from);
+    const to = addCycle(from, cycle);
+    const amountIls = priceOf(plan, cycle);
     // `due` + `paused`: the overdue cycle this offer settles — a press after it changed is stale
-    return { plan, amountIls: PLANS[plan].priceIls, details: { item: renewalItem(plan, from, to), vat: vatOf(PLANS[plan].priceIls), period_end: to.toISOString(), due: sub.next_charge_at, paused: st.paused, last4 } };
+    return { plan, cycle, amountIls, details: { item: renewalItem(plan, from, to, cycle), vat: vatOf(amountIls), period_end: to.toISOString(), due: sub.next_charge_at, paused: st.paused, cycle, last4 } };
   }
   if (kind === "renew") {
     if (!(st.paused || (st.cancelled && st.periodOver))) return null;
-    const q = quoteMonth(plan, now);
-    return { plan, amountIls: q.amountIls, details: { item: renewalItem(plan, now, q.periodEnd), vat: q.vatIls, period_end: q.periodEnd.toISOString(), last4 } };
+    const q = quotePeriod(plan, cycle, now);
+    return { plan, cycle, amountIls: q.amountIls, details: { item: renewalItem(plan, now, q.periodEnd, cycle), vat: q.vatIls, period_end: q.periodEnd.toISOString(), cycle, last4 } };
   }
   return null;
+}
+
+/**
+ * monthly → annual (the personal area's [מעבר לשנתי]): an active monthly plan with nothing overdue, cancelled or
+ * scheduled. The annual cycle starts now; the unused part of the month is credited (lib/billing/money.ts
+ * quoteAnnualSwitch). null when the state does not allow it.
+ */
+export function quoteAnnualSwitchFor(st: SubState, now: Date, last4: string): Quote | null {
+  const sub = st.sub;
+  if (!sub || !st.paid || !isPaidPlan(sub.plan) || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0 || !sub.next_charge_at) return null;
+  if (cycleOf(sub) !== "monthly" || sub.scheduled_plan || sub.scheduled_cycle) return null;
+  const q = quoteAnnualSwitch(sub.plan, sub.next_charge_at, now);
+  if (!q) return null;
+  const extraMs = q.newPeriodEnd.getTime() - addOneYear(now).getTime();
+  return {
+    plan: sub.plan,
+    cycle: "annual",
+    amountIls: q.amountIls,
+    details: {
+      change: "annual",
+      cycle: "annual",
+      item: annualSwitchItem(sub.plan, now, q.newPeriodEnd, q.creditIls),
+      vat: q.vatIls,
+      credit: q.creditIls,
+      annual_price: q.annualPriceIls,
+      days_left: q.daysLeft,
+      cycle_days: q.cycleDays,
+      // the monthly cycle the price is computed for (a renewal in between makes the offer stale)
+      period_end: q.periodEnd.toISOString(),
+      new_period_end: q.newPeriodEnd.toISOString(),
+      extra_ms: extraMs,
+      next_amount: q.annualPriceIls,
+      last4,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -128,8 +196,16 @@ const sameInstant = (a: unknown, b: string | null | undefined): boolean => typeo
 export function chargeStaleReason(a: BillingApprovalRow, st: SubState, now: Date): string | null {
   const sub = st.sub;
   if (!sub) return "no subscription";
+  if (isAnnualSwitch(a)) {
+    if (sub.plan !== a.plan || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0) return "not an active plan";
+    if (cycleOf(sub) !== "monthly" || sub.scheduled_plan || sub.scheduled_cycle) return "not a plain monthly plan";
+    if (!sameInstant(a.details.period_end, sub.next_charge_at)) return "another billing cycle";
+    if (Date.parse(sub.next_charge_at!) <= now.getTime()) return "the billing cycle ended";
+    return null;
+  }
   if (a.kind === "upgrade") {
     if (sub.plan !== "basic" || sub.status !== "active" || sub.cancelled_at || sub.charge_failures > 0) return "not an active basic plan";
+    if (approvalCycle(a) !== cycleOf(sub)) return "another billing cycle";
     if (!sameInstant(a.details.period_end, sub.next_charge_at)) return "another billing cycle";
     if (Date.parse(sub.next_charge_at!) <= now.getTime()) return "the billing cycle ended";
     return null;
@@ -138,10 +214,12 @@ export function chargeStaleReason(a: BillingApprovalRow, st: SubState, now: Date
     if (!st.inGrace && !st.paused) return "nothing overdue";
     if (!sameInstant(a.details.due, sub.next_charge_at) || a.details.paused !== st.paused) return "another billing cycle";
     if (a.plan !== renewalPlan(sub)) return "the plan changed";
+    if (approvalCycle(a) !== renewalCycleOf(sub)) return "the cycle changed";
     return null;
   }
   if (!st.paused && !(st.cancelled && st.periodOver)) return "nothing to renew";
   if (a.plan !== renewalPlan(sub)) return "the plan changed";
+  if (approvalCycle(a) !== renewalCycleOf(sub)) return "the cycle changed";
   return null;
 }
 
@@ -160,7 +238,11 @@ export type ClaimedChargeOutcome =
       transId: string;
       amountIls: number;
       plan: PaidPlan;
+      /** the cycle in force after the charge */
+      cycle: BillingCycle;
       nextChargeAt: Date;
+      /** what the next charge will be (the renewal's plan and cycle) */
+      nextAmountIls: number;
       /** upgrade: the message that hit the basic limit within the last day was not handled — it can be sent again */
       resendHint: boolean;
       /** the subscription before the charge */
@@ -180,8 +262,10 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   const now = ctx.now();
   const st = stateOf(await ctx.db.getSubscription(user.id), now);
   const sub = st.sub;
+  const annualSwitch = isAnnualSwitch(a);
   const audit = (result: string, action = `billing.approve.${a.kind}`) => ctx.db.addAudit({ user_id: user.id, action, target: a.id, approved_by_msg_id: pressId, result });
-  const stage = `${pressId.startsWith("web:") ? "חיוב בדף התשלום" : "חיוב בלחיצה בוואטסאפ"} (${ONE_TAP_KIND_HE[a.kind] ?? a.kind})`;
+  const where = pressId.startsWith("web:") ? (annualSwitch ? "חיוב באזור האישי" : "חיוב בדף התשלום") : "חיוב בלחיצה בוואטסאפ";
+  const stage = `${where} (${annualSwitch ? "מעבר לחיוב שנתי" : (ONE_TAP_KIND_HE[a.kind] ?? a.kind)})`;
 
   const staleReason = chargeStaleReason(a, st, now);
   if (staleReason || !sub) {
@@ -243,7 +327,9 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   }
 
   if (result.transId) {
-    await ctx.db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: a.amount_ils, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: a.id });
+    // an upgrade pays for the rest of the cycle in force; monthly → annual, retry and renew for the approval's cycle
+    const paidCycle = a.kind === "upgrade" && !annualSwitch ? cycleOf(sub) : approvalCycle(a);
+    await ctx.db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: a.amount_ils, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: a.id, billing_cycle: paidCycle });
   }
 
   if (!result.ok || !result.transId) {
@@ -257,7 +343,23 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   }
 
   // ---- success: the subscription first, then the approval leaves `processing` (that releases the charge lock) ----
+  // then a free month waiting for a charge (lib/referrals) moves the next one — after the lock is released
+  const withCredit = async (out: Extract<ClaimedChargeOutcome, { kind: "charged" }>): Promise<ClaimedChargeOutcome> => {
+    const credit = await applyPendingCredit(ctx.db, user.id, now);
+    return credit.nextChargeAt ? { ...out, nextChargeAt: credit.nextChargeAt } : out;
+  };
+  if (annualSwitch) {
+    // the annual cycle starts now (free days beyond the paid month, if any, carry over); the plan stays
+    const extraMs = typeof a.details.extra_ms === "number" && a.details.extra_ms > 0 ? a.details.extra_ms : 0;
+    const nextChargeAt = new Date(addOneYear(now).getTime() + extraMs);
+    await ctx.db.upsertSubscription(user.id, { billing_cycle: "annual", scheduled_cycle: null, next_charge_at: nextChargeAt.toISOString() });
+    await scheduleCharge(ctx.db, user.id, nextChargeAt);
+    await finishApproval(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
+    await audit("ok", "subscription.cycle_annual");
+    return withCredit({ kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: a.plan, cycle: "annual", nextChargeAt, nextAmountIls: priceOf(a.plan, "annual"), resendHint: false, before: sub, inGrace: false });
+  }
   if (a.kind === "upgrade") {
+    // the period end stays: the next charge is the full pro price of the renewal's cycle
     const nextChargeAt = new Date(sub.next_charge_at!);
     await ctx.db.upsertSubscription(user.id, { plan: "pro", scheduled_plan: null });
     await ctx.db.raiseUsageLimit(user.id, PLANS.pro.messages);
@@ -267,14 +369,17 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
     const offerAt = typeof user.profile.limit_offer_at === "string" ? Date.parse(user.profile.limit_offer_at) : 0;
     const resendHint = now.getTime() - offerAt < 24 * 3_600_000 && typeof user.profile.pending_input === "string";
     if (resendHint) await ctx.db.mergeUserProfile(user.id, { pending_input: null, limit_offer_at: null });
-    return { kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: "pro", nextChargeAt, resendHint, before: sub, inGrace: st.inGrace };
+    return withCredit({ kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: "pro", cycle: cycleOf(sub), nextChargeAt, nextAmountIls: priceOf("pro", renewalCycleOf(sub)), resendHint, before: sub, inGrace: st.inGrace });
   }
-  // retry in grace → the cycle continues from its due date; paused / ended → a new month from today
-  const nextChargeAt = a.kind === "retry" && st.inGrace ? addOneMonth(new Date(sub.next_charge_at!)) : addOneMonth(now);
+  // retry in grace → the cycle continues from its due date; paused / ended → a new period from today
+  const cycle = approvalCycle(a);
+  const nextChargeAt = a.kind === "retry" && st.inGrace ? addCycle(new Date(sub.next_charge_at!), cycle) : addCycle(now, cycle);
   await ctx.db.upsertSubscription(user.id, {
     status: "active",
     plan: a.plan,
     scheduled_plan: null,
+    billing_cycle: cycle,
+    scheduled_cycle: null,
     charge_failures: 0,
     next_charge_at: nextChargeAt.toISOString(),
     cancelled_at: null,
@@ -283,5 +388,5 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   await scheduleCharge(ctx.db, user.id, nextChargeAt);
   await finishApproval(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
   await audit("ok", a.kind === "retry" ? "subscription.charge" : "subscription.renew");
-  return { kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: a.plan, nextChargeAt, resendHint: false, before: sub, inGrace: st.inGrace };
+  return withCredit({ kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: a.plan, cycle, nextChargeAt, nextAmountIls: priceOf(a.plan, cycle), resendHint: false, before: sub, inGrace: st.inGrace });
 }

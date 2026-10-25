@@ -135,6 +135,7 @@ export const RATE_LIMITS: Record<OwnerAlertType, { max: number; windowMs: number
   // once per threshold per day is the dedupe key (ai_budget:<day>:<80|100>); two thresholds a day at most
   ai_budget: { max: 2, windowMs: 24 * HOUR },
   connection_expired_paid: { max: 20, windowMs: HOUR },
+  referral: { max: 30, windowMs: HOUR },
   test: { max: 10, windowMs: HOUR },
 };
 
@@ -164,6 +165,8 @@ export function dedupeKey(event: OwnerEvent): string {
     case "connection_expired_paid":
       // the same connection may expire again after a reconnect: once a day
       return `connection_expired:${event.connectionId}:${event.day ?? ""}`;
+    case "referral":
+      return `referral:${event.referralId}`;
     case "test":
       return `test:${event.at}`;
   }

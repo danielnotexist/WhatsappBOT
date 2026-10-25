@@ -66,6 +66,10 @@ import type {
   UsageRow,
   UserRow,
   WaIdentityRow,
+  AdminReferralRow,
+  ReferralCodeRow,
+  ReferralRewardResult,
+  ReferralRow,
 } from "./types";
 
 /** An id from a button press is checked before it reaches a uuid column (Postgres would answer 22P02). */
@@ -94,9 +98,11 @@ export class SupabaseDb implements Db {
   private static CONN_COLS =
     "id,user_id,provider,account_email,tenant_id,scopes,status,consent_type,expires_at,created_at,revoked_at";
   private static GSUB_COLS = "id,connection_id,subscription_id,resource,expires_at,client_state";
-  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef,scheduled_plan";
-  private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at,approval_id";
-  private static BA_COLS = "id,user_id,kind,plan,amount_ils,details,phone_e164,status,expires_at,approved_msg_id,approved_at,hyp_trans_id,ccode,error,created_at";
+  private static SUB_COLS = "id,user_id,plan,status,next_charge_at,cancelled_at,started_at,charge_failures,hyp_tokef,scheduled_plan,billing_cycle,scheduled_cycle";
+  private static PAY_COLS = "id,user_id,hyp_trans_id,amount_ils,ccode,acode,invoice_url,raw,created_at,approval_id,billing_cycle";
+  private static BA_COLS = "id,user_id,kind,plan,amount_ils,details,phone_e164,status,expires_at,approved_msg_id,approved_at,hyp_trans_id,ccode,error,created_at,billing_cycle";
+  private static REFCODE_COLS = "user_id,code,created_at";
+  private static REF_COLS = "id,referrer_id,referred_user_id,code,status,reason,referrer_reward,referred_reward,created_at,rewarded_at,payment_id";
   private static JOB_COLS = "id,user_id,kind,run_at,payload,status,attempts,max_attempts,last_error,dedupe_key";
   private static TICKET_COLS = "id,created_at,user_id,name,email,subject,body,transcript,status";
   private static REM_COLS = "id,user_id,text,due_at,job_id,status,recurrence,last_fired_at,created_at";
@@ -835,6 +841,8 @@ export class SupabaseDb implements Db {
       providers: ((r.providers as string[] | null) ?? []) as AdminUserRow["providers"],
       ai_cost_30d: Number(r.ai_cost_30d ?? 0),
       charge_failures: Number(r.charge_failures ?? 0),
+      billing_cycle: r.billing_cycle === "annual" ? "annual" : r.billing_cycle === "monthly" ? "monthly" : null,
+      referred: r.referred === true,
     }));
   }
 
@@ -1156,17 +1164,17 @@ export class SupabaseDb implements Db {
     // expires_at / created_at come from the DB defaults (now() + 10 minutes, enforced by a CHECK)
     const { data, error } = await this.client
       .from("billing_approvals")
-      .insert({ user_id: row.user_id, kind: row.kind, plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: row.phone_e164 })
+      .insert({ user_id: row.user_id, kind: row.kind, plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: row.phone_e164, billing_cycle: row.billing_cycle ?? "monthly" })
       .select(SupabaseDb.BA_COLS)
       .single();
     if (error) this.fail("createBillingApproval", error);
     return SupabaseDb.approval(data);
   }
 
-  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null> {
+  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown>; billing_cycle?: "monthly" | "annual" }): Promise<BillingApprovalRow | null> {
     const { data, error } = await this.client
       .from("billing_approvals")
-      .insert({ user_id: row.user_id, kind: "renewal", plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: null, status: "processing" })
+      .insert({ user_id: row.user_id, kind: "renewal", plan: row.plan, amount_ils: row.amount_ils, details: row.details ?? {}, phone_e164: null, status: "processing", billing_cycle: row.billing_cycle ?? "monthly" })
       .select(SupabaseDb.BA_COLS)
       .single();
     if (error) {
@@ -1183,7 +1191,8 @@ export class SupabaseDb implements Db {
         id: row.id,
         user_id: row.user_id,
         kind: "upgrade",
-        plan: "pro",
+        plan: row.plan,
+        billing_cycle: row.billing_cycle ?? "monthly",
         amount_ils: row.amount_ils,
         details: row.details ?? {},
         phone_e164: null,
@@ -1241,5 +1250,94 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.client.rpc("lower_plan_limit", { p_user_id: userId, p_new_limit: newLimit });
     if (error) this.fail("lowerUsageLimit", error);
     return typeof data === "number" ? data : null;
+  }
+
+  // ---- referrals (migration 0018) ----
+
+  async getReferralCode(userId: string): Promise<ReferralCodeRow | null> {
+    const { data, error } = await this.client.from("referral_codes").select(SupabaseDb.REFCODE_COLS).eq("user_id", userId).maybeSingle();
+    if (error) this.fail("getReferralCode", error);
+    return (data as unknown as ReferralCodeRow | null) ?? null;
+  }
+
+  async ensureReferralCode(userId: string, generate: () => string): Promise<ReferralCodeRow> {
+    for (let i = 0; i < 8; i++) {
+      const existing = await this.getReferralCode(userId);
+      if (existing) return existing;
+      const { data, error } = await this.client.from("referral_codes").insert({ user_id: userId, code: generate().toUpperCase() }).select(SupabaseDb.REFCODE_COLS).single();
+      if (!error) return data as unknown as ReferralCodeRow;
+      // 23505: the code is taken (try another) or a parallel request made this user's code (read it on the next turn)
+      if (error.code !== "23505") this.fail("ensureReferralCode", error);
+    }
+    throw new Error("Supabase ensureReferralCode: could not make a unique referral code");
+  }
+
+  async findReferralCode(code: string): Promise<ReferralCodeRow | null> {
+    const c = code.trim().toUpperCase();
+    if (!/^[A-Z0-9]{1,16}$/.test(c)) return null;
+    const { data, error } = await this.client.from("referral_codes").select(SupabaseDb.REFCODE_COLS).eq("code", c).maybeSingle();
+    if (error) this.fail("findReferralCode", error);
+    if (!data) return null;
+    const row = data as unknown as ReferralCodeRow;
+    return (await this.getUser(row.user_id)) ? row : null; // the owner deleted the account (soft delete): the code is dead
+  }
+
+  async createReferral(row: { referrer_id: string; referred_user_id: string; code: string; status: "pending" | "rejected"; reason?: string | null }): Promise<ReferralRow | null> {
+    const { data, error } = await this.client
+      .from("referrals")
+      .insert({ referrer_id: row.referrer_id, referred_user_id: row.referred_user_id, code: row.code.toUpperCase(), status: row.status, reason: row.reason ?? null })
+      .select(SupabaseDb.REF_COLS)
+      .single();
+    if (error) {
+      if (error.code === "23505") return null; // referrals_referred_user_id_key: referred once
+      this.fail("createReferral", error);
+    }
+    return data as unknown as ReferralRow;
+  }
+
+  async getReferralOf(referredUserId: string): Promise<ReferralRow | null> {
+    const { data, error } = await this.client.from("referrals").select(SupabaseDb.REF_COLS).eq("referred_user_id", referredUserId).maybeSingle();
+    if (error) this.fail("getReferralOf", error);
+    return (data as unknown as ReferralRow | null) ?? null;
+  }
+
+  async listReferralsBy(referrerId: string): Promise<ReferralRow[]> {
+    const { data, error } = await this.client.from("referrals").select(SupabaseDb.REF_COLS).eq("referrer_id", referrerId).order("created_at", { ascending: false }).limit(500);
+    if (error) this.fail("listReferralsBy", error);
+    return (data as unknown as ReferralRow[]) ?? [];
+  }
+
+  async rejectReferral(referredUserId: string, reason: string): Promise<ReferralRow | null> {
+    const { data, error } = await this.client.from("referrals").update({ status: "rejected", reason }).eq("referred_user_id", referredUserId).eq("status", "pending").select(SupabaseDb.REF_COLS).maybeSingle();
+    if (error) this.fail("rejectReferral", error);
+    return (data as unknown as ReferralRow | null) ?? null;
+  }
+
+  async rewardReferral(referredUserId: string, opts: { paymentId: string | null; days: number; cap: number }): Promise<ReferralRewardResult> {
+    const { data, error } = await this.client.rpc("referral_reward", { p_referred: referredUserId, p_payment: opts.paymentId, p_days: opts.days, p_cap: opts.cap });
+    if (error) this.fail("rewardReferral", error);
+    const r = (data ?? {}) as { result?: string; referral?: ReferralRow | null; referrer_next?: string | null; referred_next?: string | null };
+    return { result: r.result === "rewarded" ? "rewarded" : "none", referral: r.referral ?? null, referrerNextChargeAt: r.referrer_next ?? null, referredNextChargeAt: r.referred_next ?? null };
+  }
+
+  async applyReferralCredit(userId: string, days: number): Promise<{ applied: number; nextChargeAt: string | null }> {
+    const { data, error } = await this.client.rpc("referral_apply_credit", { p_user: userId, p_days: days });
+    if (error) this.fail("applyReferralCredit", error);
+    const r = (data ?? {}) as { applied?: number; next_charge_at?: string | null };
+    return { applied: Number(r.applied ?? 0), nextChargeAt: r.next_charge_at ?? null };
+  }
+
+  async adminReferrals(limit: number): Promise<AdminReferralRow[]> {
+    const { data, error } = await this.client
+      .from("referrals")
+      .select(`${SupabaseDb.REF_COLS},referrer:users!referrals_referrer_id_fkey(email),referred:users!referrals_referred_user_id_fkey(email)`)
+      .order("created_at", { ascending: false })
+      .limit(Math.min(Math.max(limit, 1), 500));
+    if (error) this.fail("adminReferrals", error);
+    return ((data ?? []) as unknown as (ReferralRow & { referrer: { email: string } | null; referred: { email: string } | null })[]).map(({ referrer, referred, ...r }) => ({
+      ...r,
+      referrer_email: referrer?.email ?? null,
+      referred_email: referred?.email ?? null,
+    }));
   }
 }

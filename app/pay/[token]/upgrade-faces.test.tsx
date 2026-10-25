@@ -81,7 +81,7 @@ describe("the result faces", () => {
     expect(screen.getByRole("status")).toHaveTextContent("מסלול פרו פעיל");
     expect(text()).toContain("135.48 ₪");
     expect(text()).toContain("כולל מע״מ 20.67 ₪");
-    expect(text()).toContain("299 ₪, ב-10.11.2026");
+    expect(text()).toContain("299 ₪ לחודש, ב-10.11.2026");
     expect(text()).toContain("הקבלה נשלחה למייל");
     expect(screen.getByText("dana@example.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "לאזור האישי" })).toHaveAttribute("href", "/account?tab=plan");

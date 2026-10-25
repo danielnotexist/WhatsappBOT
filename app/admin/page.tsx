@@ -76,7 +76,8 @@ async function Admin({ searchParams }: { searchParams: PageProps<"/admin">["sear
     } catch {
       budgetUsd = null;
     }
-    body = <OverviewTab k={kpis(rows, daily, now)} daily={daily} rows={rows} openTickets={openTickets.length} errors24h={errors.filter((e) => Date.parse(e.at) >= now.getTime() - 86_400_000).length} budgetUsd={budgetUsd} />;
+    const referrals = await db.adminReferrals(200);
+    body = <OverviewTab k={kpis(rows, daily, now)} daily={daily} rows={rows} openTickets={openTickets.length} errors24h={errors.filter((e) => Date.parse(e.at) >= now.getTime() - 86_400_000).length} budgetUsd={budgetUsd} referrals={referrals} />;
   } else if (tab === "traffic") {
     const range = rangeFrom(sp);
     const today = localDateOf(now);

@@ -13,10 +13,16 @@ import {
   cancelSubscriptionFor,
   deleteAccountFor,
   disconnectConnectionFor,
+  keepAnnualFor,
+  scheduleMonthlyFor,
   setProactiveAlertsFor,
   unlinkPhoneFor,
   type AccountActionResult,
 } from "@/lib/account/service";
+import { getBillingContext } from "@/lib/billing";
+import { annualSwitchMessage, annualSwitchResult, switchToAnnualFromWeb } from "@/lib/billing/annual-switch";
+import { EnvError } from "@/lib/env";
+import { formatDay } from "./view";
 import type { AccountArea } from "./areas";
 
 /** Back to the personal area, on the area the action belongs to (./areas.ts), with the result as its notice. */
@@ -46,6 +52,56 @@ export async function unlinkPhoneAction(formData: FormData): Promise<void> {
 export async function cancelSubscriptionAction(): Promise<void> {
   const userId = await requireUserId();
   back(await cancelSubscriptionFor(getDb(), userId), "plan");
+}
+
+/**
+ * [מעבר לשנתי עכשיו] (a POST — server actions never run from a GET): the user id comes from the session only, and the
+ * signed offer in the form must belong to it. Charges the saved card the amount that was shown (the annual price less
+ * the unused part of the month); a replayed form shows the first result and never charges twice.
+ */
+export async function switchToAnnualAction(formData: FormData): Promise<void> {
+  const userId = await requireUserId();
+  let result: AccountActionResult;
+  try {
+    const ctx = getBillingContext();
+    const user = await ctx.db.getUser(userId);
+    if (!user) {
+      result = { ok: false, message: "החשבון לא נמצא." };
+    } else {
+      const out = await switchToAnnualFromWeb(ctx, user, String(formData.get("offer") ?? ""));
+      const tz = user.timezone || "Asia/Jerusalem";
+      if (out.kind === "done") {
+        const m = annualSwitchMessage(await annualSwitchResult(ctx, user.id, out.approvalId), (d) => formatDay(d.toISOString(), tz));
+        result = { ok: m.ok, message: m.text };
+      } else {
+        result = {
+          ok: false,
+          message:
+            out.kind === "expired"
+              ? "עברו יותר מ-10 דקות מאז שהמחיר הוצג, ולכן לא בוצע חיוב. כאן המחיר המעודכן."
+              : out.kind === "busy"
+                ? "יש חיוב קודם שעדיין בבדיקה. כדי לא לחייב פעמיים, לא בוצע חיוב נוסף."
+                : "המצב של המנוי השתנה מאז שהמחיר הוצג, ולכן לא בוצע חיוב.",
+        };
+      }
+    }
+  } catch (e) {
+    console.error("[account] switch to annual failed:", (e as Error).message);
+    result = { ok: false, message: e instanceof EnvError ? e.message : "לא הצלחנו להשלים את המעבר לשנתי כרגע, ולא בוצע חיוב. אפשר לנסות שוב בעוד רגע." };
+  }
+  back(result, "plan");
+}
+
+/** Annual → monthly at the renewal (no charge, no refund). */
+export async function scheduleMonthlyAction(): Promise<void> {
+  const userId = await requireUserId();
+  back(await scheduleMonthlyFor(getDb(), userId), "plan");
+}
+
+/** Undo: the plan stays annual. */
+export async function keepAnnualAction(): Promise<void> {
+  const userId = await requireUserId();
+  back(await keepAnnualFor(getDb(), userId), "plan");
 }
 
 export async function deleteAccountAction(formData: FormData): Promise<void> {

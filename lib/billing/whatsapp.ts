@@ -21,10 +21,11 @@ import { billingCommandOf } from "./commands";
 import { cardLinkFor, invoiceLinkFor } from "./links";
 import { formatIls, vatOf } from "./money";
 import { activePhone, sendInvoice, shortDateHe } from "./notify";
-import { executeClaimedCharge, finishApproval, quoteFor, savedCard, stateOf, type OfferKind, type Quote, type SavedCard } from "./one-tap";
+import { approvalCycle, executeClaimedCharge, finishApproval, quoteFor, savedCard, stateOf, type OfferKind, type Quote, type SavedCard } from "./one-tap";
 import { payLinkFor } from "./pay-link";
-import { PLANS, TRIAL_MESSAGES, type PaidPlan } from "./plans";
+import { PER_CYCLE_HE, PLANS, TRIAL_MESSAGES, cycleOf, isBillingCycle, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
 import { nextChargeRun, renewalPlan, scheduleCharge } from "./subscription";
+import { renewalWhatHe } from "@/lib/copy/bot-billing";
 
 export type { OfferKind } from "./one-tap";
 
@@ -42,8 +43,9 @@ async function reply(ctx: BillingContext, user: UserRow, to: string, text: strin
 // quotes and approvals
 // ---------------------------------------------------------------------------------------------
 
-async function createApproval(ctx: BillingContext, user: UserRow, to: string, kind: OfferKind, plan: PaidPlan, amountIls: number, details: Record<string, unknown>): Promise<BillingApprovalRow> {
-  const a = await ctx.db.createBillingApproval({ user_id: user.id, kind, plan, amount_ils: amountIls, details, phone_e164: to });
+async function createApproval(ctx: BillingContext, user: UserRow, to: string, kind: OfferKind, plan: PaidPlan, amountIls: number, details: Record<string, unknown>, cycle?: BillingCycle): Promise<BillingApprovalRow> {
+  const billingCycle = cycle ?? (isBillingCycle(details.cycle) ? details.cycle : "monthly");
+  const a = await ctx.db.createBillingApproval({ user_id: user.id, kind, plan, amount_ils: amountIls, details, phone_e164: to, billing_cycle: billingCycle });
   await ctx.db.addAudit({ user_id: user.id, action: `billing.offer.${kind}`, target: a.id, result: amountIls ? `amount:${formatIls(amountIls)}` : "sent" });
   return a;
 }
@@ -56,7 +58,7 @@ export async function createRetryApproval(ctx: BillingContext, user: UserRow, ph
   const card = await savedCard(ctx, user.id);
   if (!card || card.expired) return null;
   const q = quoteFor("retry", stateOf(await ctx.db.getSubscription(user.id), ctx.now()), ctx.now(), card.last4);
-  return q ? createApproval(ctx, user, phone, "retry", q.plan, q.amountIls, q.details) : null;
+  return q ? createApproval(ctx, user, phone, "retry", q.plan, q.amountIls, q.details, q.cycle) : null;
 }
 
 /** Shown before any charge offer: a missing / expired card cannot be charged with one tap. */
@@ -73,13 +75,18 @@ async function cardProblem(ctx: BillingContext, user: UserRow, to: string, card:
 }
 
 function offerText(kind: OfferKind, q: Quote, lead?: string): string {
-  const d = q.details as { vat: number; days_left?: number; period_end: string; next_amount?: number; last4: string };
+  const d = q.details as { vat: number; days_left?: number; period_end: string; next_amount?: number; next_cycle?: string; last4: string };
+  const annual = q.cycle === "annual";
   if (kind === "upgrade") {
-    return billCopy["bill.upgrade_offer"]({ amount: formatIls(q.amountIls), vat: formatIls(d.vat), daysLeft: d.days_left ?? 1, periodEnd: dayLabel(d.period_end), nextAmount: formatIls(d.next_amount ?? PLANS.pro.priceIls), last4: d.last4, lead });
+    const nextCycle: BillingCycle = isBillingCycle(d.next_cycle) ? d.next_cycle : q.cycle;
+    return billCopy["bill.upgrade_offer"]({ amount: formatIls(q.amountIls), vat: formatIls(d.vat), daysLeft: d.days_left ?? 1, periodEnd: dayLabel(d.period_end), nextAmount: formatIls(d.next_amount ?? priceOf("pro", nextCycle)), last4: d.last4, lead, per: PER_CYCLE_HE[nextCycle] });
   }
-  if (kind === "retry") return billCopy["bill.retry_offer"]({ amount: formatIls(q.amountIls), vat: formatIls(d.vat), last4: d.last4 });
-  return billCopy["bill.renew_offer"]({ plan: PLANS[q.plan].nameHe, amount: formatIls(q.amountIls), vat: formatIls(d.vat), periodEnd: dayLabel(d.period_end), last4: d.last4 });
+  if (kind === "retry") return billCopy["bill.retry_offer"]({ amount: formatIls(q.amountIls), vat: formatIls(d.vat), last4: d.last4, what: renewalWhatHe(annual) });
+  return billCopy["bill.renew_offer"]({ plan: planNameHe(q.plan, q.cycle), amount: formatIls(q.amountIls), vat: formatIls(d.vat), periodEnd: dayLabel(d.period_end), last4: d.last4, period: annual ? "שנה" : "חודש" });
 }
+
+/** "99 ₪ לחודש" / "990 ₪ לשנה" — the basic price of the renewal's cycle (the downgrade copy). */
+const basicPriceText = (cycle: BillingCycle) => `${formatIls(priceOf("basic", cycle))} ₪ ${PER_CYCLE_HE[cycle]}`;
 
 /**
  * Presents an offer (or explains why there is none). Charge offers show the amount with VAT and the card's last four
@@ -109,8 +116,9 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
       if (sub.plan === "pro") {
         if (sub.scheduled_plan === "basic") {
           // staying on pro changes the next charge (299 instead of 99) — only from a press, like every change
-          const a = await createApproval(ctx, user, to, "keep_pro", "pro", 0, { period_end: sub.next_charge_at });
-          await reply(ctx, user, to, billCopy["bill.keep_pro_confirm"]({ periodEnd, amount: formatIls(PLANS.pro.priceIls) }), billButtons.offer(a.id, OFFER_LABELS.keep_pro.yes, OFFER_LABELS.keep_pro.no));
+          const rc = renewalCycleOf(sub);
+          const a = await createApproval(ctx, user, to, "keep_pro", "pro", 0, { period_end: sub.next_charge_at }, rc);
+          await reply(ctx, user, to, billCopy["bill.keep_pro_confirm"]({ periodEnd, amount: formatIls(priceOf("pro", rc)), basicAmount: formatIls(priceOf("basic", rc)) }), billButtons.offer(a.id, OFFER_LABELS.keep_pro.yes, OFFER_LABELS.keep_pro.no));
           return a;
         }
         await reply(ctx, user, to, billCopy["bill.already_pro"]());
@@ -138,8 +146,9 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
       }
       if (st.periodOver) return presentOffer(ctx, user, to, "renew");
       const plan = renewalPlan(sub)!;
-      const a = await createApproval(ctx, user, to, "resume", plan, 0, { period_end: sub.next_charge_at });
-      await reply(ctx, user, to, billCopy["bill.resume_offer"]({ periodEnd, amount: formatIls(PLANS[plan].priceIls) }), billButtons.offer(a.id, OFFER_LABELS.resume.yes, OFFER_LABELS.resume.no));
+      const rc = renewalCycleOf(sub);
+      const a = await createApproval(ctx, user, to, "resume", plan, 0, { period_end: sub.next_charge_at }, rc);
+      await reply(ctx, user, to, billCopy["bill.resume_offer"]({ periodEnd, amount: formatIls(priceOf(plan, rc)) }), billButtons.offer(a.id, OFFER_LABELS.resume.yes, OFFER_LABELS.resume.no));
       return a;
     }
     case "cancel": {
@@ -147,8 +156,9 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
         await reply(ctx, user, to, st.periodOver ? billCopy["bill.cancel_not_active"]() : billCopy["bill.already_cancelled"](periodEnd));
         return null;
       }
-      const a = await createApproval(ctx, user, to, "cancel", sub.plan as PaidPlan, 0, { period_end: sub.next_charge_at });
-      const text = st.paused ? billCopy["bill.cancel_confirm_paused"]() : copy["bill.cancel_confirm"](periodEnd);
+      const a = await createApproval(ctx, user, to, "cancel", sub.plan as PaidPlan, 0, { period_end: sub.next_charge_at }, cycleOf(sub));
+      // the annual plan: the same cancel (active until the paid period ends), and no refund for the rest of the year
+      const text = st.paused ? billCopy["bill.cancel_confirm_paused"]() : cycleOf(sub) === "annual" ? billCopy["bill.cancel_confirm_annual"](periodEnd) : copy["bill.cancel_confirm"](periodEnd);
       await reply(ctx, user, to, text, billButtons.offer(a.id, OFFER_LABELS.cancel.yes, OFFER_LABELS.cancel.no));
       return a;
     }
@@ -157,12 +167,14 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
         await reply(ctx, user, to, billCopy["bill.already_cancelled"](periodEnd));
         return null;
       }
+      const rc = renewalCycleOf(sub);
       if (sub.plan === "basic" || sub.scheduled_plan === "basic") {
-        await reply(ctx, user, to, sub.plan === "basic" ? billCopy["bill.already_basic"]() : billCopy["bill.downgrade_scheduled"](periodEnd));
+        await reply(ctx, user, to, sub.plan === "basic" ? billCopy["bill.already_basic"]() : billCopy["bill.downgrade_scheduled"](periodEnd, basicPriceText(rc)));
         return null;
       }
-      const a = await createApproval(ctx, user, to, "downgrade", "basic", 0, { period_end: sub.next_charge_at });
-      await reply(ctx, user, to, billCopy["bill.downgrade_confirm"](periodEnd), billButtons.offer(a.id, OFFER_LABELS.downgrade.yes, OFFER_LABELS.downgrade.no));
+      // on the annual cycle too: at the renewal (no refund for the rest of the period — the copy says so)
+      const a = await createApproval(ctx, user, to, "downgrade", "basic", 0, { period_end: sub.next_charge_at }, rc);
+      await reply(ctx, user, to, billCopy["bill.downgrade_confirm"](periodEnd, basicPriceText(rc)), billButtons.offer(a.id, OFFER_LABELS.downgrade.yes, OFFER_LABELS.downgrade.no));
       return a;
     }
   }
@@ -175,7 +187,7 @@ export async function presentOffer(ctx: BillingContext, user: UserRow, to: strin
     await reply(ctx, user, to, kind === "upgrade" ? billCopy["bill.upgrade_wait_renewal"]() : billCopy["bill.already_active"](periodEnd));
     return null;
   }
-  const a = await createApproval(ctx, user, to, kind, q.plan, q.amountIls, q.details);
+  const a = await createApproval(ctx, user, to, kind, q.plan, q.amountIls, q.details, q.cycle);
   const labels = OFFER_LABELS[kind as "upgrade" | "retry" | "renew"];
   await reply(ctx, user, to, offerText(kind, q, opts.lead), billButtons.offer(a.id, labels.yes, labels.no));
   return a;
@@ -270,7 +282,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
   if (a.kind === "cancel") {
     if (!sub || !st.paid || st.cancelled) return stale("not cancellable");
     await ctx.db.cancelSubscription(user.id);
-    if (sub.scheduled_plan) await ctx.db.upsertSubscription(user.id, { scheduled_plan: null });
+    if (sub.scheduled_plan || sub.scheduled_cycle) await ctx.db.upsertSubscription(user.id, { scheduled_plan: null, scheduled_cycle: null });
     await ctx.db.cancelJobs(user.id, "charge");
     await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.cancel");
@@ -282,7 +294,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     await ctx.db.upsertSubscription(user.id, { scheduled_plan: "basic" });
     await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.downgrade_scheduled");
-    await reply(ctx, user, to, billCopy["bill.downgrade_scheduled"](periodEnd));
+    await reply(ctx, user, to, billCopy["bill.downgrade_scheduled"](periodEnd, basicPriceText(renewalCycleOf(sub))));
     return;
   }
   if (a.kind === "keep_pro") {
@@ -301,7 +313,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
     if (run) await scheduleCharge(ctx.db, user.id, run, `resume:${a.id}`);
     await finishApproval(ctx, a, { status: "succeeded" });
     await audit("ok", "subscription.resume");
-    await reply(ctx, user, to, billCopy["bill.resumed"]({ periodEnd, amount: formatIls(PLANS[renewalPlan(sub) ?? "basic"].priceIls) }));
+    await reply(ctx, user, to, billCopy["bill.resumed"]({ periodEnd, amount: formatIls(priceOf(renewalPlan(sub) ?? "basic", renewalCycleOf(sub))) }));
     return;
   }
 
@@ -332,7 +344,7 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
         // a fresh approval (new 10 minutes, re-quoted) behind [ניסיון חוזר]
         const fresh = await ctx.db.getSubscription(user.id);
         const q = quoteFor(a.kind as OfferKind, stateOf(fresh, ctx.now()), ctx.now(), out.last4);
-        const again = q ? await createApproval(ctx, user, to, a.kind as OfferKind, q.plan, q.amountIls, q.details) : null;
+        const again = q ? await createApproval(ctx, user, to, a.kind as OfferKind, q.plan, q.amountIls, q.details, q.cycle) : null;
         const amount = formatIls(q?.amountIls ?? a.amount_ils);
         const text = out.failure === "temporary" ? billCopy["bill.charge_failed_temporary"](amount) : billCopy["bill.charge_failed_declined"]({ code: out.ccode, amount });
         await reply(ctx, user, to, text, again ? billButtons.retryOrCard(again.id) : billButtons.card);
@@ -344,12 +356,12 @@ async function executeApproval(ctx: BillingContext, user: UserRow, to: string, a
       const nextDate = dayLabel(out.nextChargeAt);
       const text =
         a.kind === "upgrade"
-          ? billCopy["bill.upgrade_done"]({ amount, nextAmount: formatIls(PLANS.pro.priceIls), nextDate, resendHint: out.resendHint })
+          ? billCopy["bill.upgrade_done"]({ amount, nextAmount: formatIls(out.nextAmountIls), nextDate, resendHint: out.resendHint })
           : a.kind === "renew"
-            ? billCopy["bill.renewed"]({ plan: PLANS[a.plan].nameHe, amount, nextDate })
+            ? billCopy["bill.renewed"]({ plan: planNameHe(a.plan, out.cycle), amount, nextDate })
             : billCopy["bill.charge_ok_resumed"]({ amount, nextDate });
       await reply(ctx, user, to, text);
-      await sendInvoice(ctx, user, { transId: out.transId, amountIls: out.amountIls, date: now, plan: out.plan, nextChargeAt: out.nextChargeAt }, { phone: to, windowOpen: true });
+      await sendInvoice(ctx, user, { transId: out.transId, amountIls: out.amountIls, date: now, plan: out.plan, nextChargeAt: out.nextChargeAt, cycle: out.cycle }, { phone: to, windowOpen: true });
       return;
     }
   }
@@ -402,11 +414,11 @@ async function sendStatus(ctx: BillingContext, user: UserRow, to: string): Promi
     user,
     to,
     copy["bill.status"]({
-      planName: PLANS[plan].nameHe,
+      planName: planNameHe(plan, cycleOf(st.sub)),
       used: usage?.counted_messages ?? 0,
       limit: usage?.plan_limit ?? PLANS[plan].messages,
       nextCharge: st.cancelled ? "אין (המנוי מבוטל)" : st.sub.next_charge_at ? dayLabel(st.sub.next_charge_at) : "—",
-      amount: formatIls(PLANS[next].priceIls),
+      amount: formatIls(priceOf(next, renewalCycleOf(st.sub))),
     }),
   );
 }
@@ -482,7 +494,7 @@ export async function handlePaused(ctx: BillingContext, user: UserRow, to: strin
   await ctx.db.mergeUserProfile(user.id, { past_due_notified_at: now.toISOString(), pending_input: text });
   const approval = await createRetryApproval(ctx, user, to);
   if (approval) {
-    const offer = billCopy["bill.retry_offer"]({ amount: formatIls(approval.amount_ils), vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? "") });
+    const offer = billCopy["bill.retry_offer"]({ amount: formatIls(approval.amount_ils), vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? ""), what: renewalWhatHe(approvalCycle(approval) === "annual") });
     await reply(ctx, user, to, `${billCopy["bill.paused_reply"]()}\n\n${offer}`, billButtons.retryOrCard(approval.id));
     return;
   }

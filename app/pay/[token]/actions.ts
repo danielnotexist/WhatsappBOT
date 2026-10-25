@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { verifyPayLinkToken } from "@/lib/billing/pay-link";
-import { isPaidPlan } from "@/lib/billing/plans";
+import { isBillingCycle, isPaidPlan } from "@/lib/billing/plans";
 import { startPayment } from "@/lib/billing/service";
 import { upgradeFromWeb } from "@/lib/billing/web-upgrade";
 import { EnvError } from "@/lib/env";
@@ -41,10 +41,15 @@ export async function upgradeAction(formData: FormData): Promise<void> {
   redirect(to as Route);
 }
 
-/** Plan chosen on /pay/<token> → HYP hosted payment page (SIGN happens server-side, keys never leave the server). */
+/**
+ * Plan (and cycle) chosen on /pay/<token> → HYP hosted payment page (SIGN happens server-side, keys never leave the
+ * server). The price comes from lib/billing/plans.ts for the plan and the cycle — never from the form.
+ */
 export async function startPaymentAction(formData: FormData): Promise<void> {
   const token = String(formData.get("token") ?? "");
   const plan = String(formData.get("plan") ?? "");
+  const rawCycle = String(formData.get("cycle") ?? "monthly");
+  const cycle = isBillingCycle(rawCycle) ? rawCycle : "monthly";
   const link = verifyPayLinkToken(token);
   if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent("הקישור לא בתוקף - אפשר לבקש קישור חדש בשיחה.")}` as Route);
   const ctx = getBillingContext();
@@ -53,7 +58,7 @@ export async function startPaymentAction(formData: FormData): Promise<void> {
   if (!user) redirect("/start");
   let url: string;
   try {
-    url = await startPayment(ctx, user, plan);
+    url = await startPayment(ctx, user, plan, cycle);
   } catch (e) {
     const message = e instanceof EnvError ? e.message : "לא הצלחנו לפתוח את דף התשלום כרגע. אפשר לנסות שוב בעוד רגע.";
     console.error("[pay] startPayment failed:", (e as Error).message);

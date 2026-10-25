@@ -6,6 +6,7 @@ import {
   ONBOARDING_LABEL,
   PLAN_LABEL,
   PROBLEM_LABEL,
+  REFERRAL_STATUS_LABEL,
   STAGE_LABEL,
   SUB_STATUS_LABEL,
   USER_SORT_LABEL,
@@ -19,13 +20,14 @@ import {
   funnel,
   planSplit,
   problemsOf,
+  referralTotals,
   sourceSplit,
   stageOf,
   type HelpItem,
   type Kpis,
   type UserQuery,
 } from "@/lib/admin/view";
-import type { AdminDailyRow, AdminUserRow } from "@/lib/db/types";
+import type { AdminDailyRow, AdminReferralRow, AdminUserRow } from "@/lib/db/types";
 import { tabHref } from "../tabs";
 import { DailyColumns, ShareBars } from "./charts";
 import { Empty, Ltr, Panel, Pill, Stat, TableWrap, UserLink, td, th } from "./parts";
@@ -39,6 +41,7 @@ export function OverviewTab({
   openTickets,
   errors24h,
   budgetUsd,
+  referrals = [],
 }: {
   k: Kpis;
   daily: AdminDailyRow[];
@@ -46,7 +49,10 @@ export function OverviewTab({
   openTickets: number;
   errors24h: number;
   budgetUsd: number | null;
+  /** the latest referrals ("חבר מביא חבר", newest first) */
+  referrals?: AdminReferralRow[];
 }) {
+  const rt = referralTotals(referrals);
   const sum = (f: (d: AdminDailyRow) => number) => daily.reduce((s, d) => s + f(d), 0);
   const f = funnel(rows);
   return (
@@ -83,9 +89,54 @@ export function OverviewTab({
           <ShareBars title="משתמשים בכל תוכנית" rows={planSplit(rows)} />
         </Panel>
         <Panel id="sources" title="מאיפה הגיעו">
-          <ShareBars title="מקור ההרשמה (utm_source או האתר המפנה)" rows={sourceSplit(rows)} />
+          <ShareBars title="מקור ההרשמה (utm_source, האתר המפנה, או הפניה של חבר)" rows={sourceSplit(rows)} />
         </Panel>
       </div>
+
+      <Panel id="referrals" title="חבר מביא חבר" lead="הפניות דרך הקישור האישי: מי נרשם, מי שילם, וכמה חודשים חינם ניתנו לשני הצדדים.">
+        <dl className="grid grid-cols-2 gap-x-6 border-y border-line py-2 sm:grid-cols-4 sm:gap-x-10">
+          <Stat label="נרשמו דרך הפניה" value={formatInt(rt.joined)} note={rt.pending ? `${formatInt(rt.pending)} עוד לא שילמו` : "כולם שילמו או נדחו"} />
+          <Stat label="שילמו" value={formatInt(rt.rewarded)} />
+          <Stat label="חודשים חינם" value={formatInt(rt.months)} note="לחבר ולמי שהביא אותו" />
+          <Stat label="נדחו" value={formatInt(rt.rejected)} tone={rt.rejected ? "warn" : "plain"} note="הפניה עצמית" />
+        </dl>
+        {referrals.length ? (
+          <TableWrap label="ההפניות האחרונות">
+            <table className="w-full text-[0.9375rem]">
+              <thead>
+                <tr>
+                  <th className={th}>מי הביא</th>
+                  <th className={th}>מי הצטרף</th>
+                  <th className={th}>מצב</th>
+                  <th className={th}>נרשם</th>
+                </tr>
+              </thead>
+              <tbody>
+                {referrals.slice(0, 8).map((r) => (
+                  <tr key={r.id} className="border-t border-line">
+                    <td className={td}>
+                      <UserLink id={r.referrer_id}>
+                        <Ltr>{r.referrer_email ?? r.referrer_id}</Ltr>
+                      </UserLink>
+                    </td>
+                    <td className={td}>
+                      <UserLink id={r.referred_user_id}>
+                        <Ltr>{r.referred_email ?? r.referred_user_id}</Ltr>
+                      </UserLink>
+                    </td>
+                    <td className={td}>
+                      <Pill tone={r.status === "rewarded" ? "ok" : r.status === "rejected" ? "error" : "off"}>{REFERRAL_STATUS_LABEL[r.status]}</Pill>
+                    </td>
+                    <td className={td}>{formatDate(r.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+        ) : (
+          <Empty>עוד אין הפניות.</Empty>
+        )}
+      </Panel>
     </div>
   );
 }

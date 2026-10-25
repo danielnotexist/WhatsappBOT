@@ -6,7 +6,7 @@ import { localDateOf } from "@/lib/time/zoned";
 import type { BillingContext } from "./context";
 import { createInvoiceToken, invoiceLinkFor } from "./links";
 import { formatIls } from "./money";
-import { PLANS, type PaidPlan } from "./plans";
+import { PLANS, type BillingCycle, type PaidPlan } from "./plans";
 
 const WINDOW_MS = 24 * 3_600_000;
 
@@ -74,6 +74,8 @@ export interface InvoiceInfo {
   /** for the `payment_receipt` template outside the window */
   plan?: PaidPlan;
   nextChargeAt?: Date;
+  /** annual → the `payment_receipt_annual` template */
+  cycle?: BillingCycle;
 }
 
 /**
@@ -101,7 +103,7 @@ export async function sendInvoice(ctx: BillingContext, user: UserRow, info: Invo
         await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "text", text });
       }
     } else if (info.plan && info.nextChargeAt) {
-      const t = paymentReceiptTemplate({ amount, plan: PLANS[info.plan].nameHe, nextCharge: shortDateHe(info.nextChargeAt), invoiceToken: createInvoiceToken(user.id, info.transId) });
+      const t = paymentReceiptTemplate({ amount, plan: PLANS[info.plan].nameHe, nextCharge: shortDateHe(info.nextChargeAt), invoiceToken: createInvoiceToken(user.id, info.transId), annual: info.cycle === "annual" });
       await ctx.wa.sendTemplate(phone, t.name, t.params.map((text) => ({ type: "text" as const, text })), t.buttons);
       await ctx.db.insertMessage({ user_id: user.id, direction: "out", type: "template", text: billCopy["bill.invoice_link"]({ amount, date, link }) });
     }

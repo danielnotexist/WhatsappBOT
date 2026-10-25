@@ -114,7 +114,17 @@ const STATIC: Record<string, Entry> = {
   "subscription.downgrade_cleared": ["ביטל את המעבר לבסיסי", "billing"],
   "subscription.card_wait_ended": ["נגמרה ההמתנה לכרטיס", "billing"],
   "subscription.pause": ["המנוי הושהה", "billing"],
+  "subscription.cycle_annual": ["עבר לחיוב שנתי", "billing"],
+  "subscription.cycle_monthly_scheduled": ["קבע מעבר לחיוב חודשי בחידוש", "billing"],
+  "subscription.cycle_monthly_cleared": ["ביטל את המעבר לחיוב חודשי", "billing"],
+  "payment.amount_mismatch": ["סכום התשלום לא תאם את המסלול השנתי", "billing"],
   "payment.return": ["חזר מדף התשלום", "billing"],
+  // חבר מביא חבר (lib/referrals)
+  "referral.attach": ["נרשם דרך קישור של חבר", "billing"],
+  "referral.reject": ["הפניה נדחתה (הפניה עצמית)", "billing"],
+  "referral.reward": ["קיבל חודש חינם מחבר מביא חבר", "billing"],
+  "referral.credit_applied": ["חודש חינם ממתין נכנס למנוי", "billing"],
+  "referral.link": ["קיבל את קישור חבר מביא חבר", "billing"],
   "payment.token": ["שמירת הכרטיס", "billing"],
   "billing.charge": ["חויב", "billing"],
   "billing.card_page": ["פתח את דף עדכון הכרטיס", "billing"],
@@ -294,11 +304,13 @@ export function jobEvent(j: JobRow): TimelineEvent {
 }
 
 export function approvalEvent(a: BillingApprovalRow): TimelineEvent {
+  // monthly → annual is an `upgrade` row marked details.change = "annual" (lib/billing/one-tap.ts isAnnualSwitch)
+  const what = a.kind === "upgrade" && a.details?.change === "annual" ? "מעבר לחיוב שנתי" : (BILLING_KIND_LABEL[a.kind] ?? a.kind);
   return {
     id: `b:${a.id}`,
     at: a.created_at,
     category: "billing",
-    label: `בקשת אישור: ${BILLING_KIND_LABEL[a.kind] ?? a.kind}`,
+    label: `בקשת אישור: ${what}`,
     action: null,
     status: APPROVAL_STATUS[a.status] ?? "review",
     reason: a.error ?? (a.ccode && a.ccode !== "0" ? `CCode ${a.ccode}` : null),

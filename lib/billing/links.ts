@@ -9,12 +9,13 @@ import { derivedKey, hmac } from "@/lib/auth/keys";
  *                        billing cycle that were shown, 10 minutes (like a WhatsApp approval)
  * token = base64url("<userId>.<extra>.<exp>").sig — no session needed on the phone.
  */
-type Purpose = "card" | "inv" | "upg";
+type Purpose = "card" | "inv" | "upg" | "ann";
 
 /** How long the upgrade price shown on the pay page can be accepted — the WhatsApp approval's 10 minutes. */
 export const UPGRADE_OFFER_TTL_SECONDS = 10 * 60;
 
-const TTL: Record<Purpose, number> = { card: 7 * 24 * 3600, inv: 90 * 24 * 3600, upg: UPGRADE_OFFER_TTL_SECONDS };
+/** `ann` — the hidden field of [מעבר לשנתי] in the personal area: the same terms, its own purpose (never an upgrade's). */
+const TTL: Record<Purpose, number> = { card: 7 * 24 * 3600, inv: 90 * 24 * 3600, upg: UPGRADE_OFFER_TTL_SECONDS, ann: UPGRADE_OFFER_TTL_SECONDS };
 
 function sign(purpose: Purpose, userId: string, extra: string, opts: { key?: Buffer; now?: Date } = {}): string {
   const key = opts.key ?? derivedKey("session");
@@ -72,15 +73,32 @@ export interface UpgradeOfferTerms {
 
 const NONCE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export function createUpgradeOfferToken(userId: string, terms: UpgradeOfferTerms, opts: { key?: Buffer; now?: Date } = {}): string {
+function createOfferToken(purpose: "upg" | "ann", userId: string, terms: UpgradeOfferTerms, opts: { key?: Buffer; now?: Date }): string {
   const cents = Math.round(terms.amountIls * 100);
   if (!NONCE.test(terms.nonce) || !(cents > 0) || !Number.isFinite(terms.periodEnd.getTime()) || !(terms.daysLeft > 0)) throw new Error("invalid upgrade offer");
-  return sign("upg", userId, `${terms.nonce}_${cents}_${terms.periodEnd.getTime()}_${Math.trunc(terms.daysLeft)}`, opts);
+  return sign(purpose, userId, `${terms.nonce}_${cents}_${terms.periodEnd.getTime()}_${Math.trunc(terms.daysLeft)}`, opts);
 }
 
-export function verifyUpgradeOfferToken(token: string | null | undefined, opts: { key?: Buffer; now?: Date } = {}): ({ userId: string } & UpgradeOfferTerms) | null {
-  const v = verify("upg", token, opts);
+function verifyOfferToken(purpose: "upg" | "ann", token: string | null | undefined, opts: { key?: Buffer; now?: Date }): ({ userId: string } & UpgradeOfferTerms) | null {
+  const v = verify(purpose, token, opts);
   const m = v?.extra.match(/^([0-9a-f-]{36})_(\d{1,9})_(\d{1,15})_(\d{1,3})$/);
   if (!v || !m || !NONCE.test(m[1]!)) return null;
   return { userId: v.userId, nonce: m[1]!, amountIls: Number(m[2]) / 100, periodEnd: new Date(Number(m[3])), daysLeft: Number(m[4]) };
+}
+
+export function createUpgradeOfferToken(userId: string, terms: UpgradeOfferTerms, opts: { key?: Buffer; now?: Date } = {}): string {
+  return createOfferToken("upg", userId, terms, opts);
+}
+
+export function verifyUpgradeOfferToken(token: string | null | undefined, opts: { key?: Buffer; now?: Date } = {}): ({ userId: string } & UpgradeOfferTerms) | null {
+  return verifyOfferToken("upg", token, opts);
+}
+
+/** monthly → annual (the personal area): the amount after the credit, and the monthly cycle it was priced for. */
+export function createAnnualOfferToken(userId: string, terms: UpgradeOfferTerms, opts: { key?: Buffer; now?: Date } = {}): string {
+  return createOfferToken("ann", userId, terms, opts);
+}
+
+export function verifyAnnualOfferToken(token: string | null | undefined, opts: { key?: Buffer; now?: Date } = {}): ({ userId: string } & UpgradeOfferTerms) | null {
+  return verifyOfferToken("ann", token, opts);
 }

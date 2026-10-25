@@ -18,6 +18,17 @@ export type OwnerEvent =
   | { type: "error_spike"; count: number; threshold: number; top: { source: string; count: number }[]; slot: string }
   | { type: "ai_budget"; threshold: 80 | 100; spentUsd: number; budgetUsd: number; day: string }
   | { type: "connection_expired_paid"; userId: string; email?: string | null; name?: string | null; provider: "google" | "microsoft"; plan: string; connectionId: string; day?: string }
+  | {
+      type: "referral";
+      referralId: string;
+      referrerId: string;
+      referrerEmail?: string | null;
+      referredId: string;
+      referredEmail?: string | null;
+      /** the referrer's month: on the subscription, waiting for a paid one, or over the yearly cap */
+      referrerReward: "applied" | "pending" | "capped";
+      referredReward: "applied" | "pending";
+    }
   | { type: "test"; by: string; at: string };
 
 /** The types the owner switches on and off (the test mail is not one of them). */
@@ -43,6 +54,7 @@ export const OWNER_ALERT_KINDS: readonly AlertKind[] = [
   { type: "error_spike", label: "קפיצה בתקלות", description: "יותר תקלות בשעה מהסף שנקבע כאן. לכל היותר מייל אחד בשעה.", urgency: "urgent" },
   { type: "ai_budget", label: "תקציב AI", description: "ההוצאה היומית על AI הגיעה ל-80% או ל-100% מהתקציב (AI_DAILY_BUDGET_USD). פעם אחת ביום לכל סף.", urgency: "urgent_at_100" },
   { type: "connection_expired_paid", label: "חיבור שפג אצל לקוח משלם", description: "חיבור Google או Microsoft 365 של לקוח בתשלום פג תוקף.", urgency: "digest" },
+  { type: "referral", label: "חבר מביא חבר", description: "חבר שהגיע דרך קישור אישי שילם בפעם הראשונה, ושני הצדדים קיבלו חודש חינם. התראת מידע: בשעות השקט נכנסת למייל המרוכז.", urgency: "digest" },
 ];
 
 export const ALERT_TYPE_LABEL: Record<OwnerAlertType, string> = {
@@ -212,6 +224,20 @@ export function ownerAlertContent(event: OwnerEvent, appUrl: string): OwnerAlert
         note: "בשיחה הבאה בוואטסאפ הלקוח יקבל קישור לחיבור מחדש.",
         link: { href: `${url}/admin/users/${event.userId}`, label: "לדף הלקוח" },
       };
+    case "referral": {
+      const month = { applied: "נוסף למנוי (החיוב הבא נדחה ב-30 יום)", pending: "ממתין לתשלום הבא (אין עדיין מנוי שיכול לקבל אותו)", capped: "לא ניתן: הגיע ל-12 חודשים חינם בשנה" } as const;
+      return {
+        subject: `חבר מביא חבר: ${one(event.referredEmail) || event.referredId} שילם בפעם הראשונה`,
+        lead: "חבר שהגיע דרך קישור אישי שילם בפעם הראשונה.",
+        rows: [
+          ["החבר", one(event.referredEmail) || event.referredId],
+          ["הביא אותו", one(event.referrerEmail) || event.referrerId],
+          ["החודש של החבר", month[event.referredReward]],
+          ["החודש של המביא", month[event.referrerReward]],
+        ],
+        link: { href: `${url}/admin/users/${event.referrerId}#referrals`, label: "לדף המביא" },
+      };
+    }
     case "test":
       return {
         subject: "מייל בדיקה מפאנל הניהול",

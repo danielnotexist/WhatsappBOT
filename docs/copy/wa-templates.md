@@ -21,6 +21,8 @@
 | `proactive_alert` | התראה דחופה (פרו) כשאין חלון פתוח — באותם כללים: עד 2 ביום, 08:00–20:00, לא בשבת ובחג, לא אחרי "בלי התראות" | 1 ההתראה בשורה אחת | Quick reply "לטפל עכשיו" (payload `al:reply:<id>` למייל, `al:conf:<id>` להתנגשות) + "בלי התראות" (`al:off`) |
 | `meeting_summary_ready` | סיכום פגישה (פרו) מוכן כשאין חלון פתוח, בשעות שבהן מותר לשלוח | 1 שם הפגישה, 2 הסיכום הקצר | Quick reply "לראות את הסיכום" (`mt:show:<id>`) + "בלי סיכומי פגישות" (`mt:off`) |
 | `owner_alert` | התראה לבעלים (דניאל), לא ללקוח: נרשם חדש, תשלום שנכשל, קפיצה בתקלות וכו'. **כבויה** עד אישור ב-Meta (`OWNER_ALERT_WA=1` + `ADMIN_PHONE`) | 1 ההתראה בשורה אחת (נושא המייל) | — |
+| `payment_success_annual` · `payment_failed_annual` · `card_update_needed_annual` · `account_paused_annual` · `payment_receipt_annual` | כמו התבניות החודשיות, במנוי בחיוב שנתי (סבב 3) | כמו בחודשיות | כמו בחודשיות |
+| `referral_reward` | "חבר מביא חבר": חודש חינם נוסף למנוי (לחבר ולמי שהביא אותו) | 1 החיוב הבא | — |
 
 **התראות יזומות (פרו, `lib/proactive`):** מחוץ לחלון 24 השעות התראה דחופה נשלחת בתבנית `proactive_alert` (אישור של דניאל, 23.10.2026), עם אותה תקרה יומית, שעות שקטות וכיבוי. אם שליחת התבנית נכשלת (למשל לפני שהיא אושרה ב-Meta), ההתראה נרשמת (`deferred`) ונכנסת לסיכום הבוקר הבא, כמו קודם. בתבנית `morning_summary` של משתמש פרו, שורות "דברים שכדאי לא לפספס" נכנסות ל-{{3}} (מייל) ול-{{2}} (יומן), וה-Quick reply "לנסח תשובה" נושא payload `al:reply:<id>` של המייל הראשון (בלי פריט כזה — ה-payload הוא טקסט הכפתור, כמו קודם).
 
@@ -420,6 +422,130 @@
 }
 ```
 
+## 14–18. מסלול שנתי: `payment_success_annual`, `payment_failed_annual`, `card_update_needed_annual`, `account_paused_annual`, `payment_receipt_annual`
+
+אותן הודעות כמו 4, 5, 8, 9, 10 — למנוי בחיוב שנתי (סבב 3; `lib/billing/plans.ts`: 990 ₪ / 2,990 ₪ לשנה). התבנית החודשית לא השתנתה. השליחה בוחרת לפי המחזור של המנוי (החידוש השנתי, או התשלום הראשון כשנבחר שנתי). עד שהן מאושרות ב-Meta, ההודעה מחוץ לחלון לא נשלחת (כמו בתבניות האחרות), והחיוב עצמו לא תלוי בה.
+
+```json
+{
+  "name": "payment_success_annual",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "התשלום התקבל והחשבון פעיל. מסלול {{1}} שנתי, {{2}} ₪ לשנה. החיוב הבא: {{3}}.\nקבלה נשלחה אוטומטית למייל. ממשיכים מאותו מקום — אפשר לכתוב כאן.",
+      "example": { "body_text": [["בסיסי", "990", "20.11.2027"]] }
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "payment_failed_annual",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "החיוב השנתי ({{1}} ₪) לא עבר. ננסה שוב ב-{{2}}.\nאפשר לנסות שוב כבר עכשיו או לעדכן כרטיס. אחרי שבוע בלי תשלום השירות מושהה, וכל ההגדרות נשמרות.",
+      "example": { "body_text": [["990", "יום ה׳ 23.10"]] }
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [
+        { "type": "QUICK_REPLY", "text": "ניסיון חוזר" },
+        { "type": "URL", "text": "עדכון כרטיס", "url": "https://APP_DOMAIN/pay/card/{{1}}", "example": ["https://APP_DOMAIN/pay/card/c_7f3a9c"] }
+      ]
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "card_update_needed_annual",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "החיוב השנתי ({{1}} ₪) לא עבר: הכרטיס השמור לא אושר לחיוב, ולכן לא ננסה אותו שוב.\nהשירות ממשיך עד {{2}}. אחרי עדכון הכרטיס אפשר לחייב בלחיצה בשיחה.",
+      "example": { "body_text": [["990", "יום ב׳ 26.10"]] }
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [{ "type": "URL", "text": "עדכון כרטיס", "url": "https://APP_DOMAIN/pay/card/{{1}}", "example": ["https://APP_DOMAIN/pay/card/c_7f3a9c"] }]
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "account_paused_annual",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "החיוב השנתי ({{1}} ₪) לא עבר גם בניסיון האחרון, ולכן החשבון בעלזה מושהה.\nכל ההגדרות, החיבורים והתזכורות שמורים — ברגע שהתשלום יוסדר, ממשיכים מאותו מקום.",
+      "example": { "body_text": [["990"]] }
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [
+        { "type": "QUICK_REPLY", "text": "ניסיון חוזר" },
+        { "type": "URL", "text": "עדכון כרטיס", "url": "https://APP_DOMAIN/pay/card/{{1}}", "example": ["https://APP_DOMAIN/pay/card/c_7f3a9c"] }
+      ]
+    }
+  ]
+}
+```
+
+```json
+{
+  "name": "payment_receipt_annual",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "החיוב השנתי עבר: {{1}} ₪, מסלול {{2}} שנתי. החיוב הבא: {{3}}.\nהקבלה זמינה בכפתור, ונשלחה גם למייל.",
+      "example": { "body_text": [["990", "בסיסי", "20.12.2027"]] }
+    },
+    {
+      "type": "BUTTONS",
+      "buttons": [{ "type": "URL", "text": "לקבלה", "url": "https://APP_DOMAIN/invoice/{{1}}", "example": ["https://APP_DOMAIN/invoice/i_7f3a9c"] }]
+    }
+  ]
+}
+```
+
+## 19. `referral_reward`
+
+```
+עדכון במנוי בעלזה: חודש חינם מ״חבר מביא חבר״ נוסף למנוי, והחיוב הבא נדחה ל-{{1}}.
+אין צורך לעשות דבר.
+```
+"חבר מביא חבר" (`lib/referrals`, סבב 3): החבר שילם בפעם הראשונה, ולכל אחד מהשניים — החבר ומי שהביא אותו — נוסף חודש חינם (החיוב הבא נדחה ב-30 יום). עדכון על המנוי, לא הצעה: אין כפתורים ואין קישור. בתוך החלון — `bill.referral_reward_referrer` / `bill.referral_reward_referred`.
+
+```json
+{
+  "name": "referral_reward",
+  "language": "he",
+  "category": "UTILITY",
+  "components": [
+    {
+      "type": "BODY",
+      "text": "עדכון במנוי בעלזה: חודש חינם מ״חבר מביא חבר״ נוסף למנוי, והחיוב הבא נדחה ל-{{1}}.\nאין צורך לעשות דבר.",
+      "example": { "body_text": [["20.12.2026"]] }
+    }
+  ]
+}
+```
+
 ---
 
 ## שליחה (Send API) — מבנה אחיד
@@ -452,5 +578,5 @@ Quick reply לא דורש פרמטרים; הלחיצה חוזרת ב-webhook כ-
 
 ## מה דניאל צריך לעשות ידנית
 1. להחליף `APP_DOMAIN` בדומיין הסופי בכל ה-JSON לפני הרישום (השם עלזה כבר בפנים).
-2. לרשום את 13 התבניות (`registerTemplates({ …, dryRun: false })` ב-`lib/wa/templates.ts`, או ידנית ב-WhatsApp Manager → Message templates). שתי החדשות (`proactive_alert`, `meeting_summary_ready`) אפשר לרשום לבד עם `names: ["proactive_alert", "meeting_summary_ready"]`. עד שהן מאושרות, השליחה שלהן נכשלת בשקט: ההתראה נדחית לסיכום הבוקר, וסיכום הפגישה נשמר עד שמבקשים אותו. את `owner_alert` רושמים עם `names: ["owner_alert"]`, ורק אחרי האישור מפעילים `OWNER_ALERT_WA=1` + `ADMIN_PHONE`.
+2. לרשום את 19 התבניות (`registerTemplates({ …, dryRun: false })` ב-`lib/wa/templates.ts`, או ידנית ב-WhatsApp Manager → Message templates). שתי החדשות (`proactive_alert`, `meeting_summary_ready`) אפשר לרשום לבד עם `names: ["proactive_alert", "meeting_summary_ready"]`. עד שהן מאושרות, השליחה שלהן נכשלת בשקט: ההתראה נדחית לסיכום הבוקר, וסיכום הפגישה נשמר עד שמבקשים אותו. את `owner_alert` רושמים עם `names: ["owner_alert"]`, ורק אחרי האישור מפעילים `OWNER_ALERT_WA=1` + `ADMIN_PHONE`. שש התבניות של סבב 3 (`payment_success_annual`, `payment_failed_annual`, `card_update_needed_annual`, `account_paused_annual`, `payment_receipt_annual`, `referral_reward`) נרשמות עם `names: [...]` שלהן.
 3. אם תבנית נדחית בגלל "variable at start/end" — להוסיף מילה קבועה לפני/אחרי המשתנה ולשלוח שוב.

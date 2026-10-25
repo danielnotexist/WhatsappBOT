@@ -1,5 +1,5 @@
 import { PLANS } from "@/lib/billing/plans";
-import type { AdminDailyRow, AdminUserRow, JobRow, PlanKind, SubscriptionStatus, SupportTicketStatus } from "@/lib/db/types";
+import type { AdminDailyRow, AdminUserRow, JobRow, PlanKind, ReferralRewardState, ReferralRow, ReferralStatus, SubscriptionStatus, SupportTicketStatus } from "@/lib/db/types";
 import { sourceLabel } from "./source";
 
 /**
@@ -271,7 +271,8 @@ export function kpis(rows: readonly AdminUserRow[], daily: readonly AdminDailyRo
     newThisWeek: rows.filter((u) => Date.parse(u.created_at) >= week).length,
     activeToday: today?.active_users ?? 0,
     activeWeek: rows.filter((u) => u.last_seen_at && Date.parse(u.last_seen_at) >= week).length,
-    mrrIls: paying.reduce((sum, u) => sum + (u.plan === "trial" ? 0 : PLANS[u.plan].priceIls), 0),
+    // an annual plan counts a twelfth of its yearly price (lib/billing/plans.ts)
+    mrrIls: Math.round(paying.reduce((sum, u) => sum + (u.plan === "trial" ? 0 : u.billing_cycle === "annual" ? PLANS[u.plan].annualPriceIls / 12 : PLANS[u.plan].priceIls), 0) * 100) / 100,
     paying: paying.length,
     aiToday: today?.ai_cost ?? 0,
     aiMonth: daily.filter((d) => monthKey && d.day.startsWith(monthKey)).reduce((sum, d) => sum + d.ai_cost, 0),
@@ -293,11 +294,41 @@ export function planSplit(rows: readonly AdminUserRow[]): Share[] {
   return (["trial", "basic", "pro"] as const).map((p) => ({ key: p, label: PLAN_LABEL[p], count: rows.filter((u) => u.plan === p).length }));
 }
 
+/** The source of a user who signed up through a friend's link ("חבר מביא חבר"). */
+export const REFERRAL_SOURCE_LABEL = "הפניה";
+
+export const REFERRAL_STATUS_LABEL: Record<ReferralStatus, string> = { pending: "נרשם, עוד לא שילם", rewarded: "שילם, חודש חינם ניתן", rejected: "נדחתה" };
+export const REFERRAL_REWARD_LABEL: Record<ReferralRewardState, string> = { applied: "נוסף למנוי", pending: "ממתין לתשלום", capped: "מעל 12 בשנה" };
+export const REFERRAL_REASON_LABEL: Record<string, string> = { self: "אותו משתמש", same_email: "אותו מייל", same_phone: "אותו טלפון", same_card: "אותו כרטיס" };
+
+export interface ReferralTotals {
+  joined: number;
+  rewarded: number;
+  pending: number;
+  rejected: number;
+  /** free months given, both sides (applied or waiting) */
+  months: number;
+}
+
+/** The overview's "חבר מביא חבר" figures, from the latest referrals. */
+export function referralTotals(rows: readonly Pick<ReferralRow, "status" | "referrer_reward" | "referred_reward">[]): ReferralTotals {
+  const rewarded = rows.filter((r) => r.status === "rewarded");
+  const given = (s: ReferralRewardState | null) => (s === "applied" || s === "pending" ? 1 : 0);
+  return {
+    joined: rows.filter((r) => r.status !== "rejected").length,
+    rewarded: rewarded.length,
+    pending: rows.filter((r) => r.status === "pending").length,
+    rejected: rows.filter((r) => r.status === "rejected").length,
+    months: rewarded.reduce((n, r) => n + given(r.referrer_reward) + given(r.referred_reward), 0),
+  };
+}
+
 /** The sign-up sources, biggest first; past `top` they fold into "אחר". */
 export function sourceSplit(rows: readonly AdminUserRow[], top = 6): Share[] {
   const counts = new Map<string, number>();
   for (const u of rows) {
-    const label = sourceLabel(u.signup_source);
+    // signed up through a friend's link (a referrals row, migration 0018): "הפניה", whatever the first visit said
+    const label = u.referred ? REFERRAL_SOURCE_LABEL : sourceLabel(u.signup_source);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));

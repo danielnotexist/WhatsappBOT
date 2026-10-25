@@ -99,4 +99,26 @@ total_reserve="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select cost_usd 
 [[ "$total_reserve" == "0.600000" ]] || { echo "✖ race: ai_spend_reserve — expected 0.600000, got $total_reserve"; exit 1; }
 echo "ok - race: two parallel reservations with room for one → one passes, the other -1"
 
+# referral_reward (0018): two redirects of the friend's first payment at once → one reward (the referral row lock),
+# the second waits for the first, then sees it rewarded; each next charge moved exactly 30 days, not 60
+run -d "$DB_NAME" -c "
+  insert into public.users (id, email) values ('c2222222-2222-4222-8222-222222222201', 'race-ref-a@example.com'), ('c2222222-2222-4222-8222-222222222202', 'race-ref-b@example.com');
+  insert into public.subscriptions (user_id, plan, status, next_charge_at) values
+    ('c2222222-2222-4222-8222-222222222201', 'basic', 'active', '2031-01-10 08:00:00+00'),
+    ('c2222222-2222-4222-8222-222222222202', 'basic', 'active', '2031-01-20 08:00:00+00');
+  insert into public.referral_codes (user_id, code) values ('c2222222-2222-4222-8222-222222222201', 'RACEABC');
+  insert into public.referrals (referrer_id, referred_user_id, code) values ('c2222222-2222-4222-8222-222222222201', 'c2222222-2222-4222-8222-222222222202', 'RACEABC');"
+reward_a="$(mktemp)"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select public.referral_reward('c2222222-2222-4222-8222-222222222202', null, 30, 12) ->> 'result'; select pg_sleep(2); commit;" >"$reward_a" 2>&1 &
+pid_reward=$!
+sleep 0.7
+out_reward="$("${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select public.referral_reward('c2222222-2222-4222-8222-222222222202', null, 30, 12) ->> 'result'")"
+wait "$pid_reward" || { cat "$reward_a"; echo "✖ race: referral_reward — the first call failed"; exit 1; }
+grep -qx "rewarded" "$reward_a" || { cat "$reward_a"; echo "✖ race: referral_reward — the first call did not reward"; exit 1; }
+rm -f "$reward_a"
+[[ "$out_reward" == "none" ]] || { echo "$out_reward"; echo "✖ race: referral_reward — the second call rewarded again ($out_reward)"; exit 1; }
+pushed="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select string_agg(to_char(next_charge_at at time zone 'UTC', 'YYYY-MM-DD'), ',' order by user_id) from public.subscriptions where user_id in ('c2222222-2222-4222-8222-222222222201', 'c2222222-2222-4222-8222-222222222202')")"
+[[ "$pushed" == "2031-02-09,2031-02-19" ]] || { echo "✖ race: referral_reward — expected 2031-02-09,2031-02-19, got $pushed"; exit 1; }
+echo "ok - race: two parallel rewards of one friend → one reward, 30 days each"
+
 echo "SUPABASE LOCAL: ALL TESTS PASSED"

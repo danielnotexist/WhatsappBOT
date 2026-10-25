@@ -1,6 +1,6 @@
 import type { ChatStep } from "@/components/brand/chat-demo";
 import { BRAND } from "@/lib/brand";
-import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures, proSoonTexts } from "@/lib/billing/plans";
+import { PLANS, TRIAL_MESSAGES, VAT_RATE, annualPerMonthIls, planFeatures, proSoonTexts } from "@/lib/billing/plans";
 import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import type { MascotPose } from "./mascot";
 
@@ -151,9 +151,14 @@ function proConnectionsLabel(): string {
   return `כולל ${all.length - soon} חיבורים${soon ? `, ועוד ${soon} בקרוב` : ""}`;
 }
 
+/** "82.50" / "249.17" - the per-month equivalent of the annual price (lib/billing/plans.ts annualPerMonthIls) */
+const perMonth = (n: number) => n.toFixed(2);
+
 export const PRICING = {
   trial: TRIAL_MESSAGES,
-  vatNote: `המחירים לחודש וכוללים מע״מ (${vatPercent}%). חיוב חודשי, קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
+  vatNote: `המחירים כוללים מע״מ (${vatPercent}%). חיוב חודשי, או שנתי עם חודשיים מתנה. קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
+  /** under the cards when the annual cycle is shown (the switch: ./plan-cycle.tsx) */
+  annualNote: `בתשלום שנתי משלמים 10 חודשים ומקבלים 12, בחיוב אחד. מכסת ההודעות נשארת חודשית.`,
   /**
    * lib/integrations/catalogue.ts integrationsForPlan + lib/billing/plans.ts entitlements: basic and the free messages
    * work with one account, pro with both and the pro services
@@ -164,6 +169,8 @@ export const PRICING = {
       id: "basic" as const,
       name: PLANS.basic.nameHe,
       price: PLANS.basic.priceIls,
+      annualPrice: PLANS.basic.annualPriceIls,
+      annualPerMonth: perMonth(annualPerMonthIls("basic")),
       allowance: `עד ${formatNumber(PLANS.basic.messages)} הודעות בחודש, בערך ${Math.round(PLANS.basic.messages / 30)} ביום`,
       lead: planFeatures("basic").lead,
       /** every line of the plan, from lib/billing/plans.ts (the pay page shows them all) */
@@ -175,6 +182,8 @@ export const PRICING = {
       id: "pro" as const,
       name: PLANS.pro.nameHe,
       price: PLANS.pro.priceIls,
+      annualPrice: PLANS.pro.annualPriceIls,
+      annualPerMonth: perMonth(annualPerMonthIls("pro")),
       allowance: `עד ${formatNumber(PLANS.pro.messages)} הודעות בחודש, בשימוש הוגן`,
       lead: planFeatures("pro").lead,
       features: planFeatures("pro").lines,
@@ -231,7 +240,15 @@ export const PRICING_FAQ: readonly { q: string; a: string }[] = [
   },
   {
     q: "אפשר לעבור בין המסלולים?",
-    a: "כן. שדרוג לפרו נכנס לתוקף מיד, מהאזור האישי או בהודעה ״שדרוג״ בוואטסאפ. מעבר לבסיסי, בהודעה בוואטסאפ, נכנס לתוקף בחיוב החודשי הבא.",
+    a: "כן. שדרוג לפרו נכנס לתוקף מיד, מהאזור האישי או בהודעה ״שדרוג״ בוואטסאפ, ומשלמים רק את ההפרש היחסי עד סוף התקופה, גם בשנתי. מעבר לבסיסי, בהודעה בוואטסאפ, נכנס לתוקף בחיוב הבא.",
+  },
+  {
+    q: "יש תשלום שנתי?",
+    a: `כן, עם חודשיים מתנה: משלמים 10 חודשים ומקבלים 12, בחיוב אחד. בסיסי ${formatNumber(PLANS.basic.annualPriceIls)} ₪ לשנה ופרו ${formatNumber(PLANS.pro.annualPriceIls)} ₪ לשנה, כולל מע״מ. מכסת ההודעות נשארת חודשית. מעבר מחודשי לשנתי, מהאזור האישי, נכנס לתוקף מיד: השנה מתחילה מאותו יום, והימים שנותרו בחודש מקוזזים מהחיוב. מעבר משנתי לחודשי נכנס לתוקף בחידוש, ועל החלק שנותר מהשנה אין החזר.`,
+  },
+  {
+    q: "מה זה ״חבר מביא חבר״?",
+    a: "לכל חשבון יש קישור אישי באזור האישי, ובוואטסאפ בהודעה ״חבר מביא חבר״. חבר שנרשם דרכו ומשלם בפעם הראשונה מקבל חודש חינם, ומי שהביא אותו מקבל חודש חינם: החיוב הבא נדחה ב-30 יום. עד 12 חודשים חינם בשנה.",
   },
   {
     q: "מה קורה לחשבון השני במעבר לבסיסי?",
@@ -239,7 +256,7 @@ export const PRICING_FAQ: readonly { q: string; a: string }[] = [
   },
   {
     q: "המחירים כוללים מע״מ?",
-    a: `כן. ${PLANS.basic.priceIls} ₪ ו-${PLANS.pro.priceIls} ₪ לחודש כוללים מע״מ (${vatPercent}%). החיוב חודשי, וקבלה נשלחת במייל אחרי כל חיוב.`,
+    a: `כן. ${PLANS.basic.priceIls} ₪ ו-${PLANS.pro.priceIls} ₪ לחודש, וגם ${formatNumber(PLANS.basic.annualPriceIls)} ₪ ו-${formatNumber(PLANS.pro.annualPriceIls)} ₪ לשנה, כוללים מע״מ (${vatPercent}%). קבלה נשלחת במייל אחרי כל חיוב.`,
   },
   {
     q: "מה מסומן ״בקרוב״?",
@@ -247,6 +264,6 @@ export const PRICING_FAQ: readonly { q: string; a: string }[] = [
   },
   {
     q: "אפשר לבטל?",
-    a: "כן, בכל רגע, מהאזור האישי או בהודעה ״ביטול מנוי״ בוואטסאפ. המנוי נשאר פעיל עד סוף התקופה ששולמה ולא מתחדש. בלי התחייבות.",
+    a: "כן, בכל רגע, מהאזור האישי או בהודעה ״ביטול מנוי״ בוואטסאפ. המנוי נשאר פעיל עד סוף התקופה ששולמה ולא מתחדש. בלי התחייבות. במנוי שנתי השירות נמשך עד סוף השנה ששולמה, ועל החלק שנותר אין החזר.",
   },
 ];

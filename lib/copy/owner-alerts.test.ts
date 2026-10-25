@@ -16,6 +16,7 @@ const EVENTS: Record<OwnerEvent["type"], OwnerEvent> = {
   error_spike: { type: "error_spike", count: 14, threshold: 10, top: [{ source: "bot", count: 9 }, { source: "jobs", count: 5 }], slot: "2026-10-21T12" },
   ai_budget: { type: "ai_budget", threshold: 80, spentUsd: 2.4, budgetUsd: 3, day: "2026-10-21" },
   connection_expired_paid: { type: "connection_expired_paid", userId: U, email: "ron@example.co.il", name: "רון", provider: "microsoft", plan: "פרו", connectionId: "c1", day: "2026-10-21" },
+  referral: { type: "referral", referralId: "r-1", referrerId: U, referrerEmail: "dana@example.co.il", referredId: "22222222-2222-4222-8222-222222222222", referredEmail: "ron@example.co.il", referrerReward: "applied", referredReward: "applied" },
   test: { type: "test", by: "danielnotexist@gmail.com", at: "2026-10-21T09:00:00.000Z" },
 };
 
@@ -28,6 +29,11 @@ const EXPECTED: Record<OwnerEvent["type"], { subject: string; href: string; rows
   error_spike: { subject: "קפיצה בתקלות: 14 בשעה האחרונה", href: "https://alze.example/admin?tab=errors", rows: ["bot: 9", "jobs: 5"] },
   ai_budget: { subject: "תקציב AI: 80% מהתקציב היומי", href: "https://alze.example/admin", rows: ["הוצאה: $2.40", "תקציב יומי: $3.00"] },
   connection_expired_paid: { subject: "חיבור פג אצל לקוח משלם: Microsoft 365, רון", href: `https://alze.example/admin/users/${U}`, rows: ["ספק: Microsoft 365", "מסלול: פרו"] },
+  referral: {
+    subject: "חבר מביא חבר: ron@example.co.il שילם בפעם הראשונה",
+    href: `https://alze.example/admin/users/${U}#referrals`,
+    rows: ["החבר: ron@example.co.il", "הביא אותו: dana@example.co.il", "החודש של החבר: נוסף למנוי (החיוב הבא נדחה ב-30 יום)", "החודש של המביא: נוסף למנוי (החיוב הבא נדחה ב-30 יום)"],
+  },
   test: { subject: "מייל בדיקה מפאנל הניהול", href: "https://alze.example/admin?tab=alerts", rows: ["נשלח על ידי: danielnotexist@gmail.com"] },
 };
 
@@ -71,7 +77,7 @@ describe("every event's copy", () => {
   });
 
   it("which types skip the quiet hours", () => {
-    expect(OWNER_ALERT_KINDS.map((k) => k.type)).toEqual(["signup", "ticket", "system_request", "payment_failed", "charge_unknown", "error_spike", "ai_budget", "connection_expired_paid"]);
+    expect(OWNER_ALERT_KINDS.map((k) => k.type)).toEqual(["signup", "ticket", "system_request", "payment_failed", "charge_unknown", "error_spike", "ai_budget", "connection_expired_paid", "referral"]);
     const urgent = (Object.values(EVENTS) as OwnerEvent[]).filter(isUrgent).map((e) => e.type);
     expect(urgent).toEqual(["payment_failed", "charge_unknown", "error_spike", "test"]);
     expect(isUrgent({ ...(EVENTS.ai_budget as Extract<OwnerEvent, { type: "ai_budget" }>), threshold: 100 })).toBe(true);

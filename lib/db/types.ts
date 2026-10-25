@@ -6,9 +6,11 @@
  * Only the server ever talks to this layer. Row shapes mirror supabase/migrations/0001_init.sql.
  */
 
-import type { DeviceClass, FunnelEvent } from "@/lib/analytics/events";
+import type { AnalyticsEvent, DeviceClass, FunnelEvent } from "@/lib/analytics/events";
 
 export type ConnectionProvider = "microsoft" | "google";
+/** subscriptions.billing_cycle (migration 0018) — the twin of lib/billing/plans.ts BillingCycle */
+export type BillingCycleKind = "monthly" | "annual";
 export type ConnectionStatus = "active" | "expired" | "revoked" | "error";
 export type PlanKind = "trial" | "basic" | "pro";
 export type SubscriptionStatus = "trial" | "active" | "past_due" | "cancelled";
@@ -151,6 +153,10 @@ export interface SubscriptionRow {
   hyp_tokef: string | null;
   /** plan that takes effect at the next monthly charge (pro → basic from the chat; migration 0007) */
   scheduled_plan?: PlanKind | null;
+  /** migration 0018: how often the plan is charged (absent on older rows = monthly) */
+  billing_cycle?: BillingCycleKind;
+  /** migration 0018: the cycle that takes effect at the next renewal (annual → monthly); null = no change */
+  scheduled_cycle?: BillingCycleKind | null;
 }
 
 /** Only the billing module reads the encrypted token (separate call, never listed with the row). */
@@ -171,6 +177,8 @@ export interface PaymentRow {
   created_at: string;
   /** the WhatsApp approval that led to this charge (migration 0007); null for monthly / web payments */
   approval_id?: string | null;
+  /** migration 0018: the cycle this payment paid for (absent / monthly on older rows) */
+  billing_cycle?: BillingCycleKind;
 }
 
 export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan" | "meeting_plan" | "meeting_summary" | "owner_alerts";
@@ -331,6 +339,8 @@ export interface BillingApprovalRow {
   ccode: string | null;
   error: string | null;
   created_at: string;
+  /** migration 0018: the billing cycle the offer was priced for (absent on older rows = monthly) */
+  billing_cycle?: BillingCycleKind;
 }
 
 export interface NewBillingApproval {
@@ -340,17 +350,67 @@ export interface NewBillingApproval {
   amount_ils: number;
   details?: Record<string, unknown>;
   phone_e164: string;
+  billing_cycle?: BillingCycleKind;
 }
 
-/** An upgrade approved on the pay page (/pay/<token>) — see Db.openWebCharge. */
+/**
+ * A charge approved on the site — see Db.openWebCharge: the pay page's [לשדרג עכשיו] (basic → pro) and the personal
+ * area's [מעבר לשנתי] (monthly → annual: kind `upgrade` with details.change = "annual", the plan unchanged).
+ */
 export interface NewWebCharge {
   /** the single-use nonce of the form that was submitted (a UUID minted when the page was rendered) */
   id: string;
   user_id: string;
   kind: "upgrade";
-  plan: "pro";
+  plan: "basic" | "pro";
   amount_ils: number;
   details?: Record<string, unknown>;
+  billing_cycle?: BillingCycleKind;
+}
+
+// ---- referrals (migration 0018, lib/referrals): "חבר מביא חבר" ----
+
+export interface ReferralCodeRow {
+  user_id: string;
+  /** short, readable, no ambiguous characters (lib/referrals/code.ts) */
+  code: string;
+  created_at: string;
+}
+
+export type ReferralStatus = "pending" | "rewarded" | "rejected";
+/** One side's free month: pushed on the subscription (applied), waiting for a paid subscription (pending), or over the yearly cap (capped, the referrer only). */
+export type ReferralRewardState = "applied" | "pending" | "capped";
+
+export interface ReferralRow {
+  id: string;
+  referrer_id: string;
+  referred_user_id: string;
+  code: string;
+  status: ReferralStatus;
+  /** why it was rejected (self, same_email, same_phone, same_card, …) */
+  reason: string | null;
+  referrer_reward: ReferralRewardState | null;
+  referred_reward: ReferralRewardState | null;
+  created_at: string;
+  rewarded_at: string | null;
+  /** the referred user's first successful payment */
+  payment_id: string | null;
+}
+
+/** What referral_reward() did (exactly once per referral, under a row lock). */
+export interface ReferralRewardResult {
+  /** rewarded = this call gave the reward; none = nothing pending (no referral, already rewarded or rejected) */
+  result: "rewarded" | "none";
+  referral: ReferralRow | null;
+  /** the subscriptions' next charge after the push (null when the side's month is pending / capped) */
+  referrerNextChargeAt: string | null;
+  referredNextChargeAt: string | null;
+}
+
+/** A row of the admin panel's referrals list. */
+export interface AdminReferralRow extends ReferralRow {
+  referrer_email: string | null;
+  referred_email: string | null;
 }
 
 export interface LinkAttemptResult {
@@ -566,6 +626,10 @@ export interface AdminUserRow {
   /** a successful payment exists */
   paid: boolean;
   open_tickets: number;
+  /** migration 0018: the subscription's cycle (null without a subscription) */
+  billing_cycle?: BillingCycleKind | null;
+  /** migration 0018: signed up through a friend's link (a referrals row, any status) */
+  referred?: boolean;
 }
 
 /** One day (Asia/Jerusalem) of SQL admin_daily_stats(). */
@@ -581,7 +645,7 @@ export interface AdminDailyRow {
 // ---- owner alerts (migration 0016, lib/admin/alerts.ts) ----
 
 /** What the owner is told about. `test` = the "שליחת מייל בדיקה" button of the alerts tab. */
-export type OwnerAlertType = "signup" | "ticket" | "system_request" | "payment_failed" | "charge_unknown" | "error_spike" | "ai_budget" | "connection_expired_paid" | "test";
+export type OwnerAlertType = "signup" | "ticket" | "system_request" | "payment_failed" | "charge_unknown" | "error_spike" | "ai_budget" | "connection_expired_paid" | "referral" | "test";
 /** sending → sent / failed; queued (quiet hours) → sending (the digest) → sent; limited (the type's rate limit); merged (the owner already got that same mail) */
 export type OwnerAlertStatus = "sending" | "sent" | "queued" | "failed" | "limited" | "merged";
 export type OwnerAlertChannel = "email" | "whatsapp" | "email+whatsapp" | "digest";
@@ -630,7 +694,8 @@ export interface NewPageEvent {
   utm_medium: string | null;
   utm_campaign: string | null;
   device: DeviceClass | null;
-  event: FunnelEvent | null;
+  /** a funnel step, or another named event (referral_visit, migration 0018) */
+  event: AnalyticsEvent | null;
   /** defaults to now */
   at?: string;
 }
@@ -905,7 +970,7 @@ export interface Db {
   createBillingApproval(row: NewBillingApproval): Promise<BillingApprovalRow>;
   getBillingApproval(id: string): Promise<BillingApprovalRow | null>;
   /** the monthly charge's lock: inserts a `renewal` row as processing; null when another charge of the user is open */
-  openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null>;
+  openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown>; billing_cycle?: BillingCycleKind }): Promise<BillingApprovalRow | null>;
   /**
    * The pay page's [לשדרג עכשיו] (migration 0012): an `upgrade` approval inserted already claimed (processing) — the form
    * post is the press. `id` = the form's single-use nonce, approved_msg_id = "web:<id>", no phone. null when that id
@@ -922,4 +987,30 @@ export interface Db {
   raiseUsageLimit(userId: string, newLimit: number): Promise<number | null>;
   /** SQL lower_plan_limit(): the current month's quota → newLimit (a downgrade taking effect), remaining clamped at 0. Remaining after, or null when unchanged. */
   lowerUsageLimit(userId: string, newLimit: number): Promise<number | null>;
+
+  // referrals (migration 0018) — lib/referrals
+  /** the user's own code, or null when none was made yet */
+  getReferralCode(userId: string): Promise<ReferralCodeRow | null>;
+  /** the user's code; creates one with `generate()` when there is none (a taken code is retried with a new one) */
+  ensureReferralCode(userId: string, generate: () => string): Promise<ReferralCodeRow>;
+  /** the code's owner (codes are matched upper-case) — null for an unknown code or a deleted owner */
+  findReferralCode(code: string): Promise<ReferralCodeRow | null>;
+  /** null when the referred user already has a referral (once per user: referred_user_id is unique) */
+  createReferral(row: { referrer_id: string; referred_user_id: string; code: string; status: "pending" | "rejected"; reason?: string | null }): Promise<ReferralRow | null>;
+  /** the referral that brought this user, if any */
+  getReferralOf(referredUserId: string): Promise<ReferralRow | null>;
+  /** the referrals this user brought, newest first */
+  listReferralsBy(referrerId: string): Promise<ReferralRow[]>;
+  /** pending → rejected with the reason (atomic); null when it was not pending */
+  rejectReferral(referredUserId: string, reason: string): Promise<ReferralRow | null>;
+  /**
+   * SQL referral_reward(): pending → rewarded exactly once (row lock), then the free month for each side — pushed onto
+   * next_charge_at (`days`) when the subscription can take it now, otherwise kept as a pending credit; the referrer's
+   * month is `capped` past `cap` rewarded months in the last 365 days (the referrer's row is locked for the count).
+   */
+  rewardReferral(referredUserId: string, opts: { paymentId: string | null; days: number; cap: number }): Promise<ReferralRewardResult>;
+  /** SQL referral_apply_credit(): the user's pending free months (either side) onto next_charge_at, when the subscription can take them. */
+  applyReferralCredit(userId: string, days: number): Promise<{ applied: number; nextChargeAt: string | null }>;
+  /** the admin panel: the latest referrals with both emails, newest first */
+  adminReferrals(limit: number): Promise<AdminReferralRow[]>;
 }

@@ -14,6 +14,10 @@ import {
   ONBOARDING_LABEL,
   PLAN_LABEL,
   PROBLEM_LABEL,
+  REFERRAL_REASON_LABEL,
+  REFERRAL_REWARD_LABEL,
+  REFERRAL_SOURCE_LABEL,
+  REFERRAL_STATUS_LABEL,
   STAGE_LABEL,
   SUB_STATUS_LABEL,
   formatAgo,
@@ -99,6 +103,10 @@ async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["pa
     db.listSupportChats({ userId: user.id, limit: 30 }),
   ]);
   const { agents, plan } = await loadAgents(db, user.id, now, subscription);
+  // "חבר מביא חבר": who brought this user, and whom they brought (with the emails, to open their pages)
+  const [cameFrom, brought, code] = await Promise.all([db.getReferralOf(user.id), db.listReferralsBy(user.id), db.getReferralCode(user.id)]);
+  const referrer = cameFrom ? await db.getUser(cameFrom.referrer_id) : null;
+  const broughtUsers = new Map((await Promise.all(brought.slice(0, 30).map((r) => db.getUser(r.referred_user_id)))).filter((u): u is NonNullable<typeof u> => Boolean(u)).map((u) => [u.id, u]));
   const meter = usageView(subscription, usage, now, tz);
   const phone = phones.find((p) => p.status === "active") ?? null;
   const o: Pick<AdminUserRow, "wa_linked" | "connections_ever" | "paid"> = overview ?? { wa_linked: phones.length > 0, connections_ever: connections.length, paid: payments.some((p) => p.ccode === "0") };
@@ -184,7 +192,7 @@ async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["pa
             {src ? (
               <Facts
                 rows={[
-                  ["מקור", sourceLabel(src)],
+                  ["מקור", cameFrom ? REFERRAL_SOURCE_LABEL : sourceLabel(src)],
                   ...(src.utm_medium ? ([["utm_medium", src.utm_medium]] as [string, ReactNode][]) : []),
                   ...(src.utm_campaign ? ([["utm_campaign", src.utm_campaign]] as [string, ReactNode][]) : []),
                   ...(src.utm_term ? ([["utm_term", src.utm_term]] as [string, ReactNode][]) : []),
@@ -195,7 +203,7 @@ async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["pa
                 ]}
               />
             ) : (
-              <Empty>לא ידוע: נרשם לפני שהמקור נשמר, או מדפדפן שחסם את העוגייה.</Empty>
+              <Empty>{cameFrom ? "הפניה של חבר (המקור של הביקור הראשון לא נשמר)." : "לא ידוע: נרשם לפני שהמקור נשמר, או מדפדפן שחסם את העוגייה."}</Empty>
             )}
           </Panel>
 
@@ -278,9 +286,11 @@ async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["pa
               rows={[
                 ["תוכנית", PLAN_LABEL[plan]],
                 ["סטטוס", subscription ? SUB_STATUS_LABEL[subscription.status] : "ניסיון, בלי מנוי"],
+                ...(subscription && plan !== "trial" ? ([["מחזור חיוב", subscription.billing_cycle === "annual" ? "שנתי" : "חודשי"]] as [string, ReactNode][]) : []),
                 ...(subscription?.next_charge_at ? ([["החיוב הבא", formatDate(subscription.next_charge_at)]] as [string, ReactNode][]) : []),
                 ...(subscription?.charge_failures ? ([["חיובים שנכשלו", formatInt(subscription.charge_failures)]] as [string, ReactNode][]) : []),
                 ...(subscription?.scheduled_plan ? ([["יעבור ל", PLAN_LABEL[subscription.scheduled_plan]]] as [string, ReactNode][]) : []),
+                ...(subscription?.scheduled_cycle ? ([["בחידוש יעבור לחיוב", subscription.scheduled_cycle === "annual" ? "שנתי" : "חודשי"]] as [string, ReactNode][]) : []),
               ]}
             />
             {payments.length ? (
@@ -308,6 +318,58 @@ async function UserView({ params }: { params: PageProps<"/admin/users/[id]">["pa
                   ))}
                 </ul>
               </details>
+            ) : null}
+          </Panel>
+
+          <Panel id="referrals" title="חבר מביא חבר">
+            <Facts
+              rows={[
+                [
+                  "הגיע דרך",
+                  cameFrom ? (
+                    <span key="from">
+                      {referrer ? (
+                        <Link href={`/admin/users/${referrer.id}` as Route} className="underline decoration-cream-muted/40 underline-offset-4 hover:decoration-honey">
+                          <Ltr>{referrer.email}</Ltr>
+                        </Link>
+                      ) : (
+                        "חשבון שנמחק"
+                      )}
+                      <span className="block text-[0.8125rem] text-cream-muted">
+                        {REFERRAL_STATUS_LABEL[cameFrom.status]}
+                        {cameFrom.reason ? `: ${REFERRAL_REASON_LABEL[cameFrom.reason] ?? cameFrom.reason}` : ""}
+                        {cameFrom.referred_reward ? `, החודש שלו: ${REFERRAL_REWARD_LABEL[cameFrom.referred_reward]}` : ""}
+                      </span>
+                    </span>
+                  ) : (
+                    "לא דרך הפניה"
+                  ),
+                ],
+                ["הקוד שלו", code ? <Ltr key="c">{code.code}</Ltr> : "עוד לא נוצר"],
+                ["הביא", `${formatInt(brought.filter((r) => r.status !== "rejected").length)} נרשמו, ${formatInt(brought.filter((r) => r.status === "rewarded").length)} שילמו`],
+              ]}
+            />
+            {brought.length ? (
+              <ul className="mt-4 grid gap-2 text-[0.9375rem]">
+                {brought.slice(0, 30).map((r) => {
+                  const u = broughtUsers.get(r.referred_user_id);
+                  return (
+                    <li key={r.id} className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      {u ? (
+                        <Link href={`/admin/users/${u.id}` as Route} className="min-w-0 truncate underline decoration-cream-muted/40 underline-offset-4 hover:decoration-honey">
+                          <Ltr>{u.email}</Ltr>
+                        </Link>
+                      ) : (
+                        <span className="text-cream-muted">חשבון שנמחק</span>
+                      )}
+                      <span className="flex-none text-[0.8125rem] text-cream-muted">
+                        <Pill tone={r.status === "rewarded" ? "ok" : r.status === "rejected" ? "error" : "off"}>{REFERRAL_STATUS_LABEL[r.status]}</Pill>
+                        {r.referrer_reward ? ` · החודש שלו: ${REFERRAL_REWARD_LABEL[r.referrer_reward]}` : ""}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             ) : null}
           </Panel>
 

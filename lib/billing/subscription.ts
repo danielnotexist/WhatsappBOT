@@ -7,18 +7,23 @@ import type { BillingApprovalRow, Db, SubscriptionRow, UserRow } from "@/lib/db/
 import type { HypGateway } from "@/lib/hyp/client";
 import { classifyHypFailure } from "@/lib/hyp/codes";
 import { HypPreflightError } from "@/lib/hyp/sign";
+import { REFERRAL_FREE_DAYS } from "@/lib/referrals/constants";
 import { localDateOf } from "@/lib/time/zoned";
-import { MAX_CHARGE_FAILURES, PAUSE_DAY, PLANS, addOneMonth, chargeAttemptAt, isPaidPlan, type PaidPlan } from "./plans";
+import { MAX_CHARGE_FAILURES, PAUSE_DAY, PLANS, addCycle, chargeAttemptAt, isPaidPlan, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
 
 /**
  * Subscription state machine (PLAN §4, docs/progress/hyp.md):
- *   trial ──pay (web)──▶ active ──charge ok──▶ active (next month)
+ *   trial ──pay (web)──▶ active ──charge ok──▶ active (next month, or next year on the annual cycle)
  *   active ──charge fails day 1──▶ active, nudge ──day 3 / 5 fail──▶ active, nudge ──day 7 fail──▶ past_due (paused)
  *   active ──"card" failure──▶ active (no automatic retry) ──day 7──▶ past_due
  *          └─card updated before day 7──▶ automatic attempts resume on the next attempt day (3 / 5 / 7)
  *   active / past_due ──[ניסיון חוזר] / card update + charge / web payment──▶ active
  *   active ──cancel──▶ cancelled (until next_charge_at) ──period ends──▶ trial plan (user_plan())
  *   pro ──downgrade──▶ scheduled_plan = basic ──next charge──▶ basic
+ *   annual ──to monthly──▶ scheduled_cycle = monthly ──next charge──▶ monthly (no refund for the rest of the year)
+ *   monthly ──to annual (the personal area)──▶ annual at once: a year from now, the unused month credited (one-tap.ts)
+ * Both cycles renew the same way (one charge per period, the same retry days 1 / 3 / 5 / 7, the same pause); only
+ * the period (a month / a year) and the price (lib/billing/plans.ts priceOf) differ.
  */
 
 const DAY_MS = 86_400_000;
@@ -26,6 +31,8 @@ export const cardAad = (userId: string) => `${userId}:hyp`;
 
 export interface ActivationInput {
   plan: PaidPlan;
+  /** default monthly */
+  cycle?: BillingCycle;
   transId: string;
   amountIls: number;
   acode: string | null;
@@ -35,13 +42,19 @@ export interface ActivationInput {
   raw: Record<string, unknown>;
 }
 
-/** After a verified first payment: store the encrypted token, activate, schedule the monthly charge job. */
-export async function activateSubscription(db: Db, user: UserRow, input: ActivationInput, now: Date = new Date()): Promise<{ subscription: SubscriptionRow; firstTime: boolean; duplicate: boolean }> {
-  const payment = await db.insertPayment({ user_id: user.id, hyp_trans_id: input.transId, amount_ils: input.amountIls, ccode: "0", acode: input.acode, invoice_url: input.invoiceUrl, raw: input.raw });
+/** After a verified first payment: store the encrypted token, activate, schedule the charge job of the next period. */
+export async function activateSubscription(
+  db: Db,
+  user: UserRow,
+  input: ActivationInput,
+  now: Date = new Date(),
+): Promise<{ subscription: SubscriptionRow; firstTime: boolean; duplicate: boolean; paymentId: string | null }> {
+  const cycle = input.cycle ?? "monthly";
+  const payment = await db.insertPayment({ user_id: user.id, hyp_trans_id: input.transId, amount_ils: input.amountIls, ccode: "0", acode: input.acode, invoice_url: input.invoiceUrl, raw: input.raw, billing_cycle: cycle });
   const previous = await db.getSubscription(user.id);
   // the same redirect twice (a refresh / back button): already activated for this transaction — change nothing
-  if (!payment && previous && previous.status !== "trial") return { subscription: previous, firstTime: false, duplicate: true };
-  const nextChargeAt = addOneMonth(now);
+  if (!payment && previous && previous.status !== "trial") return { subscription: previous, firstTime: false, duplicate: true, paymentId: null };
+  const nextChargeAt = addCycle(now, cycle);
   const subscription = await db.upsertSubscription(user.id, {
     plan: input.plan,
     status: "active",
@@ -50,15 +63,39 @@ export async function activateSubscription(db: Db, user: UserRow, input: Activat
     cancelled_at: null,
     charge_failures: 0,
     scheduled_plan: null,
+    billing_cycle: cycle,
+    scheduled_cycle: null,
     hyp_tokef: input.tokef,
     hyp_token_enc: encryptToken(input.token, { aad: cardAad(user.id) }),
   });
   await scheduleCharge(db, user.id, nextChargeAt);
-  await db.addAudit({ user_id: user.id, action: "subscription.activate", target: input.plan, result: payment ? "ok" : "duplicate_payment" });
+  await db.addAudit({ user_id: user.id, action: "subscription.activate", target: cycle === "annual" ? `${input.plan}:annual` : input.plan, result: payment ? "ok" : "duplicate_payment" });
   const firstTime = !previous || previous.status === "trial";
   // the signup funnel's last step: the first real payment (lib/analytics), once per transaction
   if (payment && firstTime) trackServerEvent(db, "paid", user.id, now);
-  return { subscription, firstTime, duplicate: !payment };
+  return { subscription, firstTime, duplicate: !payment, paymentId: payment?.id ?? null };
+}
+
+/**
+ * After a successful charge: the user's free months waiting in "חבר מביא חבר" (lib/referrals) go onto the subscription
+ * now that it can take them (SQL referral_apply_credit — atomic), and the charge job moves with next_charge_at.
+ * Never throws: a failure leaves the credit pending for the next charge. Returns the new next charge when it moved.
+ */
+export async function applyPendingCredit(db: Db, userId: string, now: Date): Promise<{ applied: number; nextChargeAt: Date | null }> {
+  try {
+    const r = await db.applyReferralCredit(userId, REFERRAL_FREE_DAYS);
+    if (!r.applied || !r.nextChargeAt) return { applied: 0, nextChargeAt: null };
+    const sub = await db.getSubscription(userId);
+    if (sub?.status === "active") {
+      const run = nextChargeRun(sub, now);
+      if (run) await scheduleCharge(db, userId, run, `credit:${Date.parse(r.nextChargeAt)}`);
+    }
+    await db.addAudit({ user_id: userId, action: "referral.credit_applied", target: String(r.applied), result: `next=${r.nextChargeAt}` });
+    return { applied: r.applied, nextChargeAt: new Date(r.nextChargeAt) };
+  } catch (e) {
+    console.error(`[billing] the referral credit of ${userId} was not applied:`, (e as Error).message);
+    return { applied: 0, nextChargeAt: null };
+  }
 }
 
 /** Replaces the saved card (HYP J2 card check → getToken). The plan, dates and failure count stay as they are. */
@@ -96,7 +133,7 @@ export function nextChargeRun(sub: Pick<SubscriptionRow, "next_charge_at" | "cha
   return at.getTime() < now.getTime() ? new Date(now.getTime() + 60_000) : at;
 }
 
-/** The plan the next monthly charge is for: a scheduled downgrade takes effect at that charge. */
+/** The plan the next charge is for: a scheduled downgrade takes effect at that charge. */
 export function renewalPlan(sub: Pick<SubscriptionRow, "plan" | "scheduled_plan">): PaidPlan | null {
   const p = sub.scheduled_plan ?? sub.plan;
   return isPaidPlan(p) ? p : null;
@@ -107,13 +144,16 @@ const dm = (d: Date) => {
   return `${l.day}.${l.month}.${l.year}`;
 };
 
-/** The invoice line of a monthly charge: "מנוי פרו — 20.11.2026–20.12.2026". */
-export function renewalItem(plan: PaidPlan, from: Date, to: Date): string {
-  return `מנוי ${PLANS[plan].nameHe} — ${dm(from)}–${dm(to)}`;
+/** The invoice line of a renewal: "מנוי פרו — 20.11.2026–20.12.2026" / "מנוי פרו שנתי — 20.11.2026–20.11.2027". */
+export function renewalItem(plan: PaidPlan, from: Date, to: Date, cycle: BillingCycle = "monthly"): string {
+  return `מנוי ${planNameHe(plan, cycle)} — ${dm(from)}–${dm(to)}`;
 }
 
+/** "חיוב חודשי" / "חיוב שנתי" — the stage of a renewal in the owner's alert. */
+export const renewalStageHe = (cycle: BillingCycle) => (cycle === "annual" ? "חיוב שנתי" : "חיוב חודשי");
+
 export type ChargeOutcome =
-  | { kind: "charged"; transId: string; amountIls: number; plan: PaidPlan; nextChargeAt: Date }
+  | { kind: "charged"; transId: string; amountIls: number; plan: PaidPlan; cycle: BillingCycle; nextChargeAt: Date }
   | { kind: "retry"; failures: number; retryAt: Date; amountIls: number; ccode: string }
   | { kind: "card_invalid"; amountIls: number; pauseAt: Date; ccode: string }
   | { kind: "paused"; failures: number; amountIls: number }
@@ -147,7 +187,14 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   if (!(await loadCardToken(db, user.id))) return { kind: "skipped", reason: "no token" };
 
   const lockPlan = renewalPlan(before!)!;
-  const lock = await db.openRenewalCharge({ user_id: user.id, plan: lockPlan, amount_ils: PLANS[lockPlan].priceIls, details: { due: before!.next_charge_at, attempt: before!.charge_failures + 1 } });
+  const lockCycle = renewalCycleOf(before);
+  const lock = await db.openRenewalCharge({
+    user_id: user.id,
+    plan: lockPlan,
+    amount_ils: priceOf(lockPlan, lockCycle),
+    billing_cycle: lockCycle,
+    details: { due: before!.next_charge_at, attempt: before!.charge_failures + 1, cycle: lockCycle },
+  });
   if (!lock) {
     // a one-tap charge from WhatsApp is in flight (or its outcome is unknown) — never charge in parallel
     await scheduleCharge(db, user.id, new Date(now.getTime() + 15 * 60_000), "busy");
@@ -166,7 +213,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
       return { kind: "skipped", reason: late };
     }
     sub = fresh!;
-    if (renewalPlan(sub) !== lockPlan) {
+    if (renewalPlan(sub) !== lockPlan || renewalCycleOf(sub) !== lockCycle) {
       await release({ status: "failed", error: "not charged: the plan changed" });
       await scheduleCharge(db, user.id, new Date(now.getTime() + 60_000), "replan");
       return { kind: "skipped", reason: "the plan changed" };
@@ -184,7 +231,9 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   }
 
   const plan = lockPlan;
-  const amountIls = PLANS[plan].priceIls;
+  const cycle = lockCycle;
+  const stage = renewalStageHe(cycle);
+  const amountIls = priceOf(plan, cycle);
   const due = new Date(sub.next_charge_at!);
   const pauseAt = chargeAttemptAt(due, MAX_CHARGE_FAILURES - 1);
 
@@ -192,11 +241,11 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   if (sub.charge_failures >= MAX_CHARGE_FAILURES) {
     const out = await pause(db, user.id, sub.charge_failures, amountIls);
     await release({ status: "failed", error: "not charged: paused (no card update)" });
-    ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: הכרטיס לא עודכן אחרי חיוב שנדחה, והחשבון הושהה.", ref: lock.id }, { db });
+    ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: `${stage}: הכרטיס לא עודכן אחרי חיוב שנדחה, והחשבון הושהה.`, ref: lock.id }, { db });
     return out;
   }
 
-  const nextChargeAt = addOneMonth(due);
+  const nextChargeAt = addCycle(due, cycle);
   const [first, ...rest] = (user.name ?? "").trim().split(/\s+/);
   let result;
   try {
@@ -209,7 +258,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
       clientLName: rest.join(" ") || undefined,
       info: `renewal:${lock.id}`,
       order: lock.id,
-      items: [{ description: renewalItem(plan, due, nextChargeAt), quantity: 1, price: amountIls }],
+      items: [{ description: renewalItem(plan, due, nextChargeAt, cycle), quantity: 1, price: amountIls }],
     });
   } catch (e) {
     if (e instanceof HypPreflightError) {
@@ -221,7 +270,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
     // of this user until someone reconciles it in the HYP portal (Order = lock id) — docs/hyp-setup.md.
     await release({ status: "unknown", error: (e as Error).message.slice(0, 300) });
     await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown" });
-    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: לא התקבלה תשובה מ-HYP.", ref: lock.id }, { db });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: `${stage}: לא התקבלה תשובה מ-HYP.`, ref: lock.id }, { db });
     throw e;
   }
 
@@ -230,23 +279,26 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
     // automatically; "unknown" blocks further charges until reconciled in the HYP portal (Order = lock id)
     await release({ status: "unknown", ccode: result.ccode || "0", error: "approved without a transaction id" });
     await db.addAudit({ user_id: user.id, action: "subscription.charge", target: lock.id, result: "unknown:no_trans_id" });
-    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: "חיוב חודשי: HYP אישר בלי מספר עסקה.", ref: lock.id }, { db });
-    throw new Error(`HYP approved the monthly charge ${lock.id} without a transaction id — reconcile manually (docs/hyp-setup.md §7)`);
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls, reason: `${stage}: HYP אישר בלי מספר עסקה.`, ref: lock.id }, { db });
+    throw new Error(`HYP approved the renewal charge ${lock.id} without a transaction id — reconcile manually (docs/hyp-setup.md §7)`);
   }
 
   if (result.transId) {
-    await db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: amountIls, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: lock.id });
+    await db.insertPayment({ user_id: user.id, hyp_trans_id: result.transId, amount_ils: amountIls, ccode: result.ok ? "0" : result.ccode || "?", acode: result.acode, invoice_url: null, raw: result.response, approval_id: lock.id, billing_cycle: cycle });
   }
 
   if (result.ok && result.transId) {
     // state first, lock last: a one-tap press that claims right after the release already sees the new cycle
-    await db.upsertSubscription(user.id, { status: "active", plan, scheduled_plan: null, next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
+    await db.upsertSubscription(user.id, { status: "active", plan, scheduled_plan: null, billing_cycle: cycle, scheduled_cycle: null, next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
     // a downgrade that takes effect now also lowers this calendar month's quota (an upgrade raises it at once)
     if (PLANS[plan].messages < (isPaidPlan(sub.plan) ? PLANS[sub.plan].messages : 0)) await db.lowerUsageLimit(user.id, PLANS[plan].messages);
     await scheduleCharge(db, user.id, nextChargeAt);
     await release({ status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
-    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId, result: plan === sub.plan ? "ok" : `ok:plan=${plan}` });
-    return { kind: "charged", transId: result.transId, amountIls, plan, nextChargeAt };
+    const changed = [plan !== sub.plan ? `plan=${plan}` : null, cycle !== (sub.billing_cycle ?? "monthly") ? `cycle=${cycle}` : null].filter(Boolean).join(",");
+    await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId, result: changed ? `ok:${changed}` : "ok" });
+    // a free month waiting for this charge (a referral reward while the renewal was failing) moves the next one
+    const credit = await applyPendingCredit(db, user.id, now);
+    return { kind: "charged", transId: result.transId, amountIls, plan, cycle, nextChargeAt: credit.nextChargeAt ?? nextChargeAt };
   }
 
   const ccode = result.ccode || "?";
@@ -254,7 +306,7 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   const outcome = await applyFailure(db, user.id, sub, { ccode, failureKind, amountIls, due, pauseAt, now });
   await release({ status: "failed", hyp_trans_id: result.transId, ccode: result.ccode || null });
   await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId ?? lock.id, result: `failed:${ccode}:${failureKind}` });
-  ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: chargeReason("חיוב חודשי", failureKind, ccode, renewalNext(outcome)), ref: lock.id }, { db });
+  ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: chargeReason(stage, failureKind, ccode, renewalNext(outcome)), ref: lock.id }, { db });
   return outcome;
 }
 

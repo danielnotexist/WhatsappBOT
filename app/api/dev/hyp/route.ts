@@ -18,7 +18,15 @@ export async function GET() {
   await connection();
   const hyp = devMock();
   if (!hyp) return new Response("not found", { status: 404 });
-  return Response.json({ charges: hyp.calls.filter((c) => c.method === "chargeToken").length, queued: hyp.chargeScript.length }, { headers: { "cache-control": "no-store" } });
+  const charges = hyp.calls.filter((c) => c.method === "chargeToken");
+  const pages = hyp.calls.filter((c) => c.method === "createPaymentPage");
+  // the amounts too: the e2e tests check what was charged (a 990 ₪ year, a prorated upgrade), never just that something was
+  const lastCharge = (charges.at(-1)?.args as { amount?: number; order?: string } | undefined) ?? null;
+  const lastPage = (pages.at(-1)?.args as { Amount?: number; Order?: string } | undefined) ?? null;
+  return Response.json(
+    { charges: charges.length, queued: hyp.chargeScript.length, lastCharge: lastCharge ? { amount: lastCharge.amount ?? null } : null, lastPage: lastPage ? { amount: lastPage.Amount ?? null, order: lastPage.Order ?? null } : null },
+    { headers: { "cache-control": "no-store" } },
+  );
 }
 
 /**

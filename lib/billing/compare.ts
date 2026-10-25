@@ -52,6 +52,8 @@ export function planComparison(): CompareSection[] {
       title: "המסלול",
       rows: [
         { id: "price", label: "מחיר לחודש, כולל מע״מ", basic: text(`${PLANS.basic.priceIls} ₪`), pro: text(`${PLANS.pro.priceIls} ₪`) },
+        // the annual cycle: 10 months for 12, one charge (lib/billing/plans.ts)
+        { id: "price_annual", label: "מחיר לשנה, חודשיים מתנה", basic: text(`${he.format(PLANS.basic.annualPriceIls)} ₪`), pro: text(`${he.format(PLANS.pro.annualPriceIls)} ₪`) },
         { id: "messages", label: "הודעות בחודש", basic: text(messages("basic")), pro: text(messages("pro")) },
         { id: "accounts", label: "חשבונות מחוברים", basic: text(accountsText(b.maxProviders)), pro: text(accountsText(p.maxProviders)) },
       ],

@@ -4,6 +4,7 @@ import { ownerAlert } from "@/lib/admin/alerts";
 import type { Db, SignupSource } from "@/lib/db/types";
 import type { Mailer } from "@/lib/mail/types";
 import type { RateLimiter } from "@/lib/rate-limit";
+import { attachReferralOnSignup } from "@/lib/referrals/service";
 import { derivedKey, hmac } from "./keys";
 
 /** Policy (PLAN §1): 6 digits, 10 minutes, resend after 60s, 5 wrong attempts, 5 codes per hour per email. */
@@ -78,6 +79,8 @@ export interface OtpDeps {
   fixedCode?: string;
   /** where this browser first came from (lib/admin/source.ts, the alze_src cookie) — kept on a user created now */
   signupSource?: SignupSource | null;
+  /** a friend's code from /r/<code> (the alze_ref cookie, lib/referrals) — attached to a user created now */
+  referralCode?: string | null;
 }
 
 export async function sendOtp(deps: OtpDeps, rawEmail: unknown, ip: string): Promise<OtpSendResult> {
@@ -175,6 +178,8 @@ async function signIn(deps: OtpDeps, email: string): Promise<OtpVerifyResult> {
     if (deps.signupSource) {
       await db.setSignupSource(user.id, deps.signupSource).catch((e: unknown) => console.warn("[otp] signup source not recorded:", (e as Error).message));
     }
+    // "חבר מביא חבר": new users only — a login never attaches a referral (attachReferralOnSignup never throws)
+    if (deps.referralCode) await attachReferralOnSignup(db, user, deps.referralCode);
     ownerAlert({ type: "signup", userId: user.id, email, name: user.name, business: user.business_name, source: deps.signupSource ?? null }, { db });
   } else {
     await db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });

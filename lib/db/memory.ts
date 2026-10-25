@@ -68,6 +68,11 @@ import type {
   UsageRow,
   UserRow,
   WaIdentityRow,
+  AdminReferralRow,
+  ReferralCodeRow,
+  ReferralRewardResult,
+  ReferralRewardState,
+  ReferralRow,
 } from "./types";
 
 const iso = (d: Date = new Date()) => d.toISOString();
@@ -104,6 +109,8 @@ export class MemoryDb implements Db {
   appErrors: AppErrorRow[] = [];
   ownerAlerts: OwnerAlertRow[] = [];
   pageEvents: PageEventRow[] = [];
+  referralCodes: ReferralCodeRow[] = [];
+  referrals: ReferralRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -206,6 +213,9 @@ export class MemoryDb implements Db {
     this.supportChats = this.supportChats.filter((c) => c.user_id !== id); // SQL: on delete cascade
     this.appErrors = this.appErrors.filter((e) => e.user_id !== id);
     for (const e of this.pageEvents) if (e.user_id === id) e.user_id = null; // SQL: on delete set null (the anonymous row stays)
+    // migration 0018: the code and every referral of either side go with the user (on delete cascade)
+    this.referralCodes = this.referralCodes.filter((c) => c.user_id !== id);
+    this.referrals = this.referrals.filter((r) => r.referrer_id !== id && r.referred_user_id !== id);
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -656,7 +666,7 @@ export class MemoryDb implements Db {
 
   async upsertSubscription(userId: string, patch: Partial<Omit<SubscriptionRow, "id" | "user_id">> & { hyp_token_enc?: string | null }): Promise<SubscriptionRow> {
     const { hyp_token_enc, ...rest } = patch;
-    const cur = this.subscriptions.get(userId) ?? { id: randomUUID(), user_id: userId, plan: "trial" as const, status: "trial" as const, next_charge_at: null, cancelled_at: null, started_at: null, charge_failures: 0, hyp_tokef: null };
+    const cur: SubscriptionRow = this.subscriptions.get(userId) ?? { id: randomUUID(), user_id: userId, plan: "trial" as const, status: "trial" as const, next_charge_at: null, cancelled_at: null, started_at: null, charge_failures: 0, hyp_tokef: null, billing_cycle: "monthly", scheduled_cycle: null };
     const next: SubscriptionRow = { ...cur, ...rest };
     this.subscriptions.set(userId, next);
     if (hyp_token_enc !== undefined || rest.hyp_tokef !== undefined) {
@@ -680,7 +690,7 @@ export class MemoryDb implements Db {
     if (this.payments.some((p) => p.hyp_trans_id === row.hyp_trans_id)) return null;
     // payments_one_success_per_approval (0007)
     if (row.approval_id && row.ccode === "0" && this.payments.some((p) => p.approval_id === row.approval_id && p.ccode === "0")) return null;
-    const full: PaymentRow = { ...row, id: randomUUID(), created_at: iso(this.now()) };
+    const full: PaymentRow = { ...row, billing_cycle: row.billing_cycle ?? "monthly", id: randomUUID(), created_at: iso(this.now()) };
     this.payments.push(full);
     return full;
   }
@@ -835,6 +845,8 @@ export class MemoryDb implements Db {
           failed_jobs_7d: this.jobs.filter((j) => j.user_id === u.id && j.status === "failed" && Date.parse(j.run_at) >= since7).length,
           paid: this.payments.some((p) => p.user_id === u.id && p.ccode === "0"),
           open_tickets: this.supportTickets.filter((t) => t.user_id === u.id && t.status !== "closed").length,
+          billing_cycle: sub ? (sub.billing_cycle ?? "monthly") : null,
+          referred: this.referrals.some((r) => r.referred_user_id === u.id),
         };
       });
   }
@@ -1200,12 +1212,13 @@ export class MemoryDb implements Db {
       ccode: null,
       error: null,
       created_at: iso(now),
+      billing_cycle: row.billing_cycle ?? "monthly",
     };
     this.billingApprovals.push(full);
     return { ...full };
   }
 
-  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown> }): Promise<BillingApprovalRow | null> {
+  async openRenewalCharge(row: { user_id: string; plan: "basic" | "pro"; amount_ils: number; details?: Record<string, unknown>; billing_cycle?: "monthly" | "annual" }): Promise<BillingApprovalRow | null> {
     if (this.hasOpenCharge(row.user_id)) return null;
     const now = this.now();
     const full: BillingApprovalRow = {
@@ -1224,6 +1237,7 @@ export class MemoryDb implements Db {
       ccode: null,
       error: null,
       created_at: iso(now),
+      billing_cycle: row.billing_cycle ?? "monthly",
     };
     this.billingApprovals.push(full);
     return { ...full };
@@ -1231,6 +1245,7 @@ export class MemoryDb implements Db {
 
   async openWebCharge(row: NewWebCharge): Promise<BillingApprovalRow | null> {
     if (!(row.amount_ils > 0)) throw new Error("billing_approvals_charge_amount");
+    if (row.plan !== "basic" && row.plan !== "pro") throw new Error("billing_approvals_paid_plan");
     // the primary key (a replayed form) and billing_approvals_one_open_charge_per_user
     if (this.billingApprovals.some((a) => a.id === row.id) || this.hasOpenCharge(row.user_id)) return null;
     const now = this.now();
@@ -1238,7 +1253,8 @@ export class MemoryDb implements Db {
       id: row.id,
       user_id: row.user_id,
       kind: "upgrade",
-      plan: "pro",
+      plan: row.plan,
+      billing_cycle: row.billing_cycle ?? "monthly",
       amount_ils: row.amount_ils,
       details: row.details ?? {},
       phone_e164: null,
@@ -1314,6 +1330,122 @@ export class MemoryDb implements Db {
     return row.free_remaining;
   }
 
+  // ---- referrals (mirrors 0018_annual_referrals.sql) ----
+
+  async getReferralCode(userId: string): Promise<ReferralCodeRow | null> {
+    const row = this.referralCodes.find((c) => c.user_id === userId);
+    return row ? { ...row } : null;
+  }
+
+  async ensureReferralCode(userId: string, generate: () => string): Promise<ReferralCodeRow> {
+    const existing = await this.getReferralCode(userId);
+    if (existing) return existing;
+    if (!this.users.has(userId)) throw new Error("referral_codes_user_id_fkey");
+    for (let i = 0; i < 8; i++) {
+      const code = generate().toUpperCase();
+      if (!/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6,12}$/.test(code)) throw new Error("referral_codes_code_format");
+      if (this.referralCodes.some((c) => c.code === code)) continue; // referral_codes_code_key — try another
+      const row: ReferralCodeRow = { user_id: userId, code, created_at: iso(this.now()) };
+      this.referralCodes.push(row);
+      return { ...row };
+    }
+    throw new Error("could not make a unique referral code");
+  }
+
+  async findReferralCode(code: string): Promise<ReferralCodeRow | null> {
+    const c = code.trim().toUpperCase();
+    const row = this.referralCodes.find((r) => r.code === c);
+    if (!row) return null;
+    const owner = this.users.get(row.user_id);
+    return owner && !owner.deleted_at ? { ...row } : null;
+  }
+
+  async createReferral(row: { referrer_id: string; referred_user_id: string; code: string; status: "pending" | "rejected"; reason?: string | null }): Promise<ReferralRow | null> {
+    if (row.referrer_id === row.referred_user_id) throw new Error("referrals_not_self");
+    if (!this.users.has(row.referrer_id) || !this.users.has(row.referred_user_id)) throw new Error("referrals_user_fkey");
+    if (this.referrals.some((r) => r.referred_user_id === row.referred_user_id)) return null; // referrals_referred_user_id_key
+    const full: ReferralRow = {
+      id: randomUUID(),
+      referrer_id: row.referrer_id,
+      referred_user_id: row.referred_user_id,
+      code: row.code.toUpperCase(),
+      status: row.status,
+      reason: row.reason ?? null,
+      referrer_reward: null,
+      referred_reward: null,
+      created_at: iso(this.now()),
+      rewarded_at: null,
+      payment_id: null,
+    };
+    this.referrals.push(full);
+    return { ...full };
+  }
+
+  async getReferralOf(referredUserId: string): Promise<ReferralRow | null> {
+    const row = this.referrals.find((r) => r.referred_user_id === referredUserId);
+    return row ? { ...row } : null;
+  }
+
+  async listReferralsBy(referrerId: string): Promise<ReferralRow[]> {
+    return this.referrals
+      .filter((r) => r.referrer_id === referrerId)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map((r) => ({ ...r }));
+  }
+
+  async rejectReferral(referredUserId: string, reason: string): Promise<ReferralRow | null> {
+    const row = this.referrals.find((r) => r.referred_user_id === referredUserId && r.status === "pending");
+    if (!row) return null;
+    Object.assign(row, { status: "rejected", reason });
+    return { ...row };
+  }
+
+  /** Mirrors public.referral_push(): the free days onto next_charge_at, when the subscription can take them now. */
+  private referralPush(userId: string, days: number): boolean {
+    const sub = this.subscriptions.get(userId);
+    const now = this.now().getTime();
+    if (!sub || (sub.plan !== "basic" && sub.plan !== "pro") || !sub.next_charge_at || Date.parse(sub.next_charge_at) <= now) return false;
+    const open = (sub.status === "active" && !sub.cancelled_at && sub.charge_failures === 0) || sub.status === "cancelled";
+    if (!open || this.hasOpenCharge(userId)) return false;
+    sub.next_charge_at = iso(new Date(Date.parse(sub.next_charge_at) + days * 86_400_000));
+    return true;
+  }
+
+  async rewardReferral(referredUserId: string, opts: { paymentId: string | null; days: number; cap: number }): Promise<ReferralRewardResult> {
+    const ref = this.referrals.find((r) => r.referred_user_id === referredUserId);
+    if (!ref || ref.status !== "pending") return { result: "none", referral: ref ? { ...ref } : null, referrerNextChargeAt: null, referredNextChargeAt: null };
+    const now = this.now();
+    const yearAgo = now.getTime() - 365 * 86_400_000;
+    const counted = this.referrals.filter(
+      (r) => r.referrer_id === ref.referrer_id && r.id !== ref.id && r.status === "rewarded" && (r.referrer_reward === "applied" || r.referrer_reward === "pending") && r.rewarded_at && Date.parse(r.rewarded_at) > yearAgo,
+    ).length;
+    const referrer: ReferralRewardState = counted >= opts.cap ? "capped" : this.referralPush(ref.referrer_id, opts.days) ? "applied" : "pending";
+    const referred: ReferralRewardState = this.referralPush(referredUserId, opts.days) ? "applied" : "pending";
+    Object.assign(ref, { status: "rewarded", rewarded_at: iso(now), payment_id: opts.paymentId, referrer_reward: referrer, referred_reward: referred });
+    const next = (id: string, state: ReferralRewardState) => (state === "applied" ? (this.subscriptions.get(id)?.next_charge_at ?? null) : null);
+    return { result: "rewarded", referral: { ...ref }, referrerNextChargeAt: next(ref.referrer_id, referrer), referredNextChargeAt: next(referredUserId, referred) };
+  }
+
+  async applyReferralCredit(userId: string, days: number): Promise<{ applied: number; nextChargeAt: string | null }> {
+    const mine = (r: ReferralRow) => r.status === "rewarded" && ((r.referrer_id === userId && r.referrer_reward === "pending") || (r.referred_user_id === userId && r.referred_reward === "pending"));
+    const pending = this.referrals.filter(mine);
+    const current = () => this.subscriptions.get(userId)?.next_charge_at ?? null;
+    if (!pending.length || !this.referralPush(userId, days * pending.length)) return { applied: 0, nextChargeAt: current() };
+    for (const r of pending) {
+      if (r.referrer_id === userId && r.referrer_reward === "pending") r.referrer_reward = "applied";
+      if (r.referred_user_id === userId && r.referred_reward === "pending") r.referred_reward = "applied";
+    }
+    return { applied: pending.length, nextChargeAt: current() };
+  }
+
+  async adminReferrals(limit: number): Promise<AdminReferralRow[]> {
+    return this.referrals
+      .slice()
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit)
+      .map((r) => ({ ...r, referrer_email: this.users.get(r.referrer_id)?.email ?? null, referred_email: this.users.get(r.referred_user_id)?.email ?? null }));
+  }
+
   // ---- test helpers ----
   seedConnection(userId: string, provider: ConnectionRow["provider"], accountEmail: string): ConnectionRow {
     const row: ConnectionRow = {
@@ -1344,6 +1476,8 @@ export class MemoryDb implements Db {
       started_at: iso(),
       charge_failures: 0,
       hyp_tokef: null,
+      billing_cycle: "monthly",
+      scheduled_cycle: null,
     };
     this.subscriptions.set(userId, row);
     return row;

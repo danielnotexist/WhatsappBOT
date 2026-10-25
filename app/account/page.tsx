@@ -26,6 +26,10 @@ import { Banner } from "./_components/banner";
 import { OverviewRows } from "./_components/overview";
 import { Section } from "./_components/parts";
 import { PlanIncludes, PlanSlip, ProAdds } from "./_components/plan-slip";
+import { AnnualOffer } from "./_components/annual-offer";
+import { ReferralSection } from "./_components/referrals";
+import { annualSwitchView } from "@/lib/billing/annual-switch";
+import { referralLinkOf, referralStats } from "@/lib/referrals/service";
 import { ConnectionItem, NoPhoneItem, ONE_ACCOUNT_LINE, PausedNotice, PhoneItem, DemoChatItem, type ProviderGate } from "./_components/rows";
 import { SettingsArea } from "./_components/settings";
 import { signOutAction } from "./actions";
@@ -123,6 +127,11 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   });
   const slip = { subscription, meter, payHref, timeZone: tz };
   const pausedLabel = (p: "microsoft" | "google") => (paused.includes(p) ? "מושהה" : undefined);
+  // round 3: monthly → annual (an active monthly plan), and "חבר מביא חבר" (the link is made on the first visit)
+  const annualView = await annualSwitchView({ db, now: () => now }, user, subscription);
+  const appUrl = process.env.APP_URL || "http://localhost:3000";
+  const [referral, brought, ownReferral] = await Promise.all([referralLinkOf(db, user.id, appUrl), db.listReferralsBy(user.id), db.getReferralOf(user.id)]);
+  const referralNumbers = referralStats(user.id, brought, ownReferral);
 
   return (
     <>
@@ -208,10 +217,14 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
           <AreaPanel area="plan">
             {bannerFor("plan")}
             <div className="grid gap-x-12 gap-y-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:pt-[6.75rem]">
-              <PlanSlip variant="full" {...slip} className="lg:self-start" />
+              <div className="grid gap-6 lg:self-start">
+                <PlanSlip variant="full" {...slip} />
+                <AnnualOffer view={annualView} timeZone={tz} />
+              </div>
               <PlanIncludes plan={plan} className="lg:pt-2" />
             </div>
             <ProAdds plan={plan} className="mt-14" />
+            <ReferralSection link={referral.link} stats={referralNumbers} className="mt-16 border-t border-line pt-12" />
           </AreaPanel>
 
           <AreaPanel area="settings">

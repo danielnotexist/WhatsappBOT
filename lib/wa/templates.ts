@@ -59,35 +59,48 @@ export function morningSummaryTemplate(p: { dayLabel: string; meetings: string[]
  * `payment_failed`: {{1}} amount, {{2}} next automatic try. Quick reply [ניסיון חוזר] carries the 10-minute retry
  * approval (`bill:ok:<id>` — a later press gets a fresh offer); URL [עדכון כרטיס] → /pay/card/<token>.
  */
-export function paymentFailedTemplate(p: { amount: string; nextTry: string; approvalId: string | null; cardToken: string }): TemplateSend {
+export function paymentFailedTemplate(p: { amount: string; nextTry: string; approvalId: string | null; cardToken: string; annual?: boolean }): TemplateSend {
   return {
-    name: "payment_failed",
+    name: p.annual ? "payment_failed_annual" : "payment_failed",
     params: [templateParam(p.amount, 20), templateParam(p.nextTry, 40)],
     buttons: [...(p.approvalId ? [{ index: 0, subType: "quick_reply" as const, text: `bill:ok:${p.approvalId}` }] : []), { index: 1, subType: "url", text: p.cardToken }],
   };
 }
 
-/** `card_update_needed`: {{1}} amount, {{2}} the day the account would pause; URL [עדכון כרטיס]. */
-export function cardUpdateNeededTemplate(p: { amount: string; until: string; cardToken: string }): TemplateSend {
-  return { name: "card_update_needed", params: [templateParam(p.amount, 20), templateParam(p.until, 40)], buttons: [{ index: 0, subType: "url", text: p.cardToken }] };
+/** `card_update_needed` (`_annual` for the yearly charge): {{1}} amount, {{2}} the day the account would pause; URL [עדכון כרטיס]. */
+export function cardUpdateNeededTemplate(p: { amount: string; until: string; cardToken: string; annual?: boolean }): TemplateSend {
+  return { name: p.annual ? "card_update_needed_annual" : "card_update_needed", params: [templateParam(p.amount, 20), templateParam(p.until, 40)], buttons: [{ index: 0, subType: "url", text: p.cardToken }] };
 }
 
-/** `account_paused`: {{1}} amount. Quick reply [ניסיון חוזר] (retry approval), URL [עדכון כרטיס]. */
-export function accountPausedTemplate(p: { amount: string; approvalId: string | null; cardToken: string }): TemplateSend {
+/** `account_paused` (`_annual` for the yearly charge): {{1}} amount. Quick reply [ניסיון חוזר] (retry approval), URL [עדכון כרטיס]. */
+export function accountPausedTemplate(p: { amount: string; approvalId: string | null; cardToken: string; annual?: boolean }): TemplateSend {
   return {
-    name: "account_paused",
+    name: p.annual ? "account_paused_annual" : "account_paused",
     params: [templateParam(p.amount, 20)],
     buttons: [...(p.approvalId ? [{ index: 0, subType: "quick_reply" as const, text: `bill:ok:${p.approvalId}` }] : []), { index: 1, subType: "url", text: p.cardToken }],
   };
 }
 
-/** `payment_receipt`: {{1}} amount, {{2}} plan, {{3}} next charge; URL [לקבלה] → /invoice/<token> (the receipt PDF). */
-export function paymentReceiptTemplate(p: { amount: string; plan: string; nextCharge: string; invoiceToken: string }): TemplateSend {
+/** `payment_receipt` (`_annual` after a yearly charge): {{1}} amount, {{2}} plan, {{3}} next charge; URL [לקבלה] → /invoice/<token> (the receipt PDF). */
+export function paymentReceiptTemplate(p: { amount: string; plan: string; nextCharge: string; invoiceToken: string; annual?: boolean }): TemplateSend {
   return {
-    name: "payment_receipt",
+    name: p.annual ? "payment_receipt_annual" : "payment_receipt",
     params: [templateParam(p.amount, 20), templateParam(p.plan, 20), templateParam(p.nextCharge, 40)],
     buttons: [{ index: 0, subType: "url", text: p.invoiceToken }],
   };
+}
+
+/**
+ * `payment_success` (`_annual` for a yearly plan): {{1}} plan, {{2}} the price of the period, {{3}} the next charge —
+ * the first payment on the HYP page, and an upgrade / a switch to annual approved on the site, outside the window.
+ */
+export function paymentSuccessTemplate(p: { plan: string; amount: string; nextCharge: string; annual?: boolean }): TemplateSend {
+  return { name: p.annual ? "payment_success_annual" : "payment_success", params: [templateParam(p.plan, 20), templateParam(p.amount, 20), templateParam(p.nextCharge, 40)], buttons: [] };
+}
+
+/** `referral_reward` ("חבר מביא חבר", lib/referrals): {{1}} the next charge after the free month. No buttons. */
+export function referralRewardTemplate(p: { nextCharge: string }): TemplateSend {
+  return { name: "referral_reward", params: [templateParam(p.nextCharge, 40)], buttons: [] };
 }
 
 /**
@@ -152,7 +165,7 @@ const quickAndUrl = (quickText: string, urlText: string, url: string, example: s
   ],
 });
 
-/** All 13 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
+/** All 19 templates; `appUrl` replaces APP_DOMAIN and the product name (lib/brand.ts) is fixed text, not a variable. */
 export function templateDefinitions(appUrl: string, productName: string = PRODUCT_NAME): TemplateDefinition[] {
   const base = appUrl.replace(/\/+$/, "");
   const def = (name: string, ...components: Record<string, unknown>[]): TemplateDefinition => ({ name, language: TEMPLATE_LANGUAGE, category: "UTILITY", components });
@@ -209,6 +222,29 @@ export function templateDefinitions(appUrl: string, productName: string = PRODUC
       quick("לראות את הסיכום", "בלי סיכומי פגישות"),
     ),
     def("owner_alert", body(`התראה לבעלים ב${productName}: {{1}}\n\nהפרטים המלאים במייל ובפאנל הניהול.`, ["נרשם חדש: dana@example.co.il (מקור: google)"])),
+    // ---- round 3: the annual cycle (the same messages, with the yearly wording) and "חבר מביא חבר" ----
+    def("payment_success_annual", body("התשלום התקבל והחשבון פעיל. מסלול {{1}} שנתי, {{2}} ₪ לשנה. החיוב הבא: {{3}}.\nקבלה נשלחה אוטומטית למייל. ממשיכים מאותו מקום — אפשר לכתוב כאן.", ["בסיסי", "990", "20.11.2027"])),
+    def(
+      "payment_failed_annual",
+      body("החיוב השנתי ({{1}} ₪) לא עבר. ננסה שוב ב-{{2}}.\nאפשר לנסות שוב כבר עכשיו או לעדכן כרטיס. אחרי שבוע בלי תשלום השירות מושהה, וכל ההגדרות נשמרות.", ["990", "יום ה׳ 23.10"]),
+      quickAndUrl("ניסיון חוזר", "עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "card_update_needed_annual",
+      body("החיוב השנתי ({{1}} ₪) לא עבר: הכרטיס השמור לא אושר לחיוב, ולכן לא ננסה אותו שוב.\nהשירות ממשיך עד {{2}}. אחרי עדכון הכרטיס אפשר לחייב בלחיצה בשיחה.", ["990", "יום ב׳ 26.10"]),
+      urlButton("עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "account_paused_annual",
+      body(`החיוב השנתי ({{1}} ₪) לא עבר גם בניסיון האחרון, ולכן החשבון ב${productName} מושהה.\nכל ההגדרות, החיבורים והתזכורות שמורים — ברגע שהתשלום יוסדר, ממשיכים מאותו מקום.`, ["990"]),
+      quickAndUrl("ניסיון חוזר", "עדכון כרטיס", `${base}/pay/card/{{1}}`, `${base}/pay/card/c_7f3a9c`),
+    ),
+    def(
+      "payment_receipt_annual",
+      body("החיוב השנתי עבר: {{1}} ₪, מסלול {{2}} שנתי. החיוב הבא: {{3}}.\nהקבלה זמינה בכפתור, ונשלחה גם למייל.", ["990", "בסיסי", "20.12.2027"]),
+      urlButton("לקבלה", `${base}/invoice/{{1}}`, `${base}/invoice/i_7f3a9c`),
+    ),
+    def("referral_reward", body(`עדכון במנוי ב${productName}: חודש חינם מ״חבר מביא חבר״ נוסף למנוי, והחיוב הבא נדחה ל-{{1}}.\nאין צורך לעשות דבר.`, ["20.12.2026"])),
   ];
 }
 

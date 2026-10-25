@@ -1,13 +1,25 @@
 import { BRAND } from "@/lib/brand";
 import type { ConnectionProvider, SubscriptionRow } from "@/lib/db/types";
 
-/** Pricing decided after the plan (PROGRESS.md): 99 ₪ / 750 messages, 299 ₪ / fair use 3,000. Prices include VAT. */
+/**
+ * Pricing decided after the plan (PROGRESS.md): 99 ₪ / 750 messages, 299 ₪ / fair use 3,000. Prices include VAT.
+ * Annual billing (round 3, "מסלול שנתי"): 10 months for 12 — 990 ₪ / 2,990 ₪ a year, VAT included, one charge a year.
+ * The message allowance stays monthly (the calendar month in the user's zone) on both cycles.
+ */
 export type PaidPlan = "basic" | "pro";
 /** The plan in force right now (mirrors SQL `user_plan`): a paid plan, or the trial. */
 export type EffectivePlan = "trial" | PaidPlan;
+/** How often a paid plan is charged: every month, or once a year (subscriptions.billing_cycle, migration 0018). */
+export type BillingCycle = "monthly" | "annual";
+export const BILLING_CYCLES = ["monthly", "annual"] as const satisfies readonly BillingCycle[];
+/** The annual price is this many monthly prices: two months free. */
+export const ANNUAL_MONTHS_CHARGED = 10;
 
 export interface PlanSpec {
+  /** one month, VAT included */
   priceIls: number;
+  /** one year, charged at once, VAT included (ANNUAL_MONTHS_CHARGED × priceIls) */
+  annualPriceIls: number;
   messages: number;
   nameHe: string;
   /** custom agents the user may create (SQL `agent_custom_limit` — docs/design/agents.md §2.2) */
@@ -17,9 +29,49 @@ export interface PlanSpec {
 }
 
 export const PLANS: Record<PaidPlan, PlanSpec> = {
-  basic: { priceIls: 99, messages: 750, nameHe: "בסיסי", customAgents: 1, builtinAgents: false },
-  pro: { priceIls: 299, messages: 3000, nameHe: "פרו", customAgents: 3, builtinAgents: true },
+  basic: { priceIls: 99, annualPriceIls: 990, messages: 750, nameHe: "בסיסי", customAgents: 1, builtinAgents: false },
+  pro: { priceIls: 299, annualPriceIls: 2990, messages: 3000, nameHe: "פרו", customAgents: 3, builtinAgents: true },
 };
+
+export function isBillingCycle(c: unknown): c is BillingCycle {
+  return c === "monthly" || c === "annual";
+}
+
+/** The price of one billing period of `plan` on `cycle`, VAT included: 99 / 990 / 299 / 2,990. */
+export function priceOf(plan: PaidPlan, cycle: BillingCycle = "monthly"): number {
+  return cycle === "annual" ? PLANS[plan].annualPriceIls : PLANS[plan].priceIls;
+}
+
+/** What the annual price comes to per month, to the agora: 990 → 82.5, 2,990 → 249.17. */
+export function annualPerMonthIls(plan: PaidPlan): number {
+  return Math.round((PLANS[plan].annualPriceIls / 12) * 100) / 100;
+}
+
+/** What the annual cycle saves against twelve monthly charges: 198 / 598. */
+export function annualSavingIls(plan: PaidPlan): number {
+  return PLANS[plan].priceIls * 12 - PLANS[plan].annualPriceIls;
+}
+
+/** "חודשי" / "שנתי" — the cycle as an adjective ("מסלול בסיסי שנתי"). */
+export const CYCLE_HE: Record<BillingCycle, string> = { monthly: "חודשי", annual: "שנתי" };
+/** "לחודש" / "לשנה" — after a price ("99 ₪ לחודש"). */
+export const PER_CYCLE_HE: Record<BillingCycle, string> = { monthly: "לחודש", annual: "לשנה" };
+
+/** The cycle a subscription is on now (rows from before migration 0018 are monthly). */
+export function cycleOf(sub: Pick<SubscriptionRow, "billing_cycle"> | null | undefined): BillingCycle {
+  return sub?.billing_cycle === "annual" ? "annual" : "monthly";
+}
+
+/** The cycle of the next renewal: a scheduled change (annual → monthly) takes effect there. */
+export function renewalCycleOf(sub: Pick<SubscriptionRow, "billing_cycle" | "scheduled_cycle"> | null | undefined): BillingCycle {
+  const scheduled = sub?.scheduled_cycle;
+  return isBillingCycle(scheduled) ? scheduled : cycleOf(sub);
+}
+
+/** "מסלול בסיסי" / "מסלול פרו שנתי" — the plan with its cycle, as the chat and the receipts name it. */
+export function planNameHe(plan: PaidPlan, cycle: BillingCycle = "monthly"): string {
+  return cycle === "annual" ? `${PLANS[plan].nameHe} שנתי` : PLANS[plan].nameHe;
+}
 
 export const TRIAL_MESSAGES = 10;
 /** Trial: the built-ins as they are (no editing), no custom agents (docs/design/agents.md §0.3). */
@@ -252,6 +304,22 @@ export const PAUSE_DAY = CHARGE_RETRY_DAYS[CHARGE_RETRY_DAYS.length - 1];
 export function chargeAttemptAt(due: Date, attempt: number): Date {
   const day = CHARGE_RETRY_DAYS[Math.min(attempt, CHARGE_RETRY_DAYS.length - 1)]!;
   return new Date(due.getTime() + (day - 1) * 86_400_000);
+}
+
+/** Next annual due date: the same day next year (29.2 → 28.2 of a common year). */
+export function addOneYear(d: Date): Date {
+  const out = new Date(d);
+  const day = out.getUTCDate();
+  out.setUTCDate(1);
+  out.setUTCFullYear(out.getUTCFullYear() + 1);
+  const last = new Date(Date.UTC(out.getUTCFullYear(), out.getUTCMonth() + 1, 0)).getUTCDate();
+  out.setUTCDate(Math.min(day, last));
+  return out;
+}
+
+/** The end of one billing period that starts at `d`. */
+export function addCycle(d: Date, cycle: BillingCycle): Date {
+  return cycle === "annual" ? addOneYear(d) : addOneMonth(d);
 }
 
 /** Next monthly due date: same day next month, clamped to the month's length. */

@@ -1,3 +1,4 @@
+import { cycleOf, isPaidPlan, priceOf } from "@/lib/billing/plans";
 import type { ConnectionRow, Db } from "@/lib/db/types";
 import { revokeAtProvider } from "@/lib/google/revoke";
 import { setAlertsEnabled } from "@/lib/proactive/actions";
@@ -56,9 +57,40 @@ export async function cancelSubscriptionFor(db: Db, userId: string): Promise<Acc
   if (!sub || sub.status === "trial") return { ok: false, message: "אין מנוי פעיל לבטל." };
   if (sub.status === "cancelled") return { ok: false, message: "המנוי כבר בוטל." };
   const row = await db.cancelSubscription(userId);
+  // a change scheduled for the renewal has nothing to take effect on any more
+  if (sub.scheduled_plan || sub.scheduled_cycle) await db.upsertSubscription(userId, { scheduled_plan: null, scheduled_cycle: null });
   await db.addAudit({ user_id: userId, action: "subscription.cancel", result: row ? "ok" : "noop" });
   const until = row?.next_charge_at ? formatDate(row.next_charge_at) : "סוף התקופה";
-  return { ok: true, message: `המנוי בוטל ויישאר פעיל עד ${until}. לא יהיה חיוב נוסף.` };
+  // annual: the same cancel — the service runs to the end of the paid year, without a refund for the rest of it
+  const annual = cycleOf(sub) === "annual" ? " על החלק שנותר מהשנה אין החזר." : "";
+  return { ok: true, message: `המנוי בוטל ויישאר פעיל עד ${until}. לא יהיה חיוב נוסף.${annual}` };
+}
+
+/**
+ * /account → מנוי: an annual plan moves to the monthly cycle at the renewal (scheduled_cycle). Nothing is charged or
+ * refunded now: the year that was paid runs to its end, then the plan is charged monthly.
+ */
+export async function scheduleMonthlyFor(db: Db, userId: string): Promise<AccountActionResult> {
+  const sub = await db.getSubscription(userId);
+  if (!sub || !isPaidPlan(sub.plan) || sub.status === "trial") return { ok: false, message: "אין מנוי פעיל." };
+  if (sub.status === "cancelled") return { ok: false, message: "המנוי בוטל, ולכן אין חידוש לשנות." };
+  if (cycleOf(sub) !== "annual") return { ok: false, message: "החיוב כבר חודשי." };
+  if (sub.scheduled_cycle === "monthly") return { ok: false, message: "המעבר לחיוב חודשי כבר נקבע." };
+  await db.upsertSubscription(userId, { scheduled_cycle: "monthly" });
+  await db.addAudit({ user_id: userId, action: "subscription.cycle_monthly_scheduled", target: sub.next_charge_at ?? null, result: "ok" });
+  const plan = sub.scheduled_plan && isPaidPlan(sub.scheduled_plan) ? sub.scheduled_plan : sub.plan;
+  const from = sub.next_charge_at ? formatDate(sub.next_charge_at) : "החידוש";
+  return { ok: true, message: `נקבע. מ-${from} החיוב יהיה חודשי: ${priceOf(plan, "monthly")} ₪ לחודש. עד אז המנוי השנתי נמשך כרגיל, ועל החלק שנותר מהשנה אין החזר.` };
+}
+
+/** Undo of scheduleMonthlyFor: the plan stays annual, and the renewal charges a year again. */
+export async function keepAnnualFor(db: Db, userId: string): Promise<AccountActionResult> {
+  const sub = await db.getSubscription(userId);
+  if (!sub || sub.scheduled_cycle !== "monthly" || cycleOf(sub) !== "annual") return { ok: false, message: "לא נקבע מעבר לחיוב חודשי." };
+  if (sub.status === "cancelled") return { ok: false, message: "המנוי בוטל, ולכן אין חידוש לשנות." };
+  await db.upsertSubscription(userId, { scheduled_cycle: null });
+  await db.addAudit({ user_id: userId, action: "subscription.cycle_monthly_cleared", result: "ok" });
+  return { ok: true, message: "המעבר לחיוב חודשי בוטל. המנוי נשאר שנתי." };
 }
 
 export async function deleteAccountFor(db: Db, userId: string, confirmWord: string, revoke: ProviderRevoker = revokeAtProvider): Promise<AccountActionResult> {

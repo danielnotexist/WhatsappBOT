@@ -46,9 +46,10 @@ export const NOINDEX = { index: false, follow: false } as const;
 
 /**
  * Never indexed: robots.txt disallows them, proxy.ts adds `X-Robots-Tag: noindex` to every answer under them (route
- * handlers too, such as the invoice link), and the pages carry robots noindex.
+ * handlers too, such as the invoice link), and the pages carry robots noindex. `/r` — the personal "חבר מביא חבר"
+ * links (round 3): a redirect that sets the referral cookie, never a page to index.
  */
-export const PRIVATE_PREFIXES = ["/admin", "/account", "/api", "/pay", "/invoice", "/login", "/demo"] as const;
+export const PRIVATE_PREFIXES = ["/admin", "/account", "/api", "/pay", "/invoice", "/login", "/demo", "/r"] as const;
 
 export function isPrivatePath(path: string): boolean {
   return PRIVATE_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));

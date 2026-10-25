@@ -21,6 +21,7 @@ import { handleUnlinkedPhone } from "./linking";
 import { afterFirstTask, awaitingAnswer, handleOnboarding, onboardingOf } from "./onboarding";
 import { handlePendingButton, presentPendingAction } from "./pending";
 import { handleLoginKeyword } from "./login-link";
+import { handleReferralKeyword } from "@/lib/referrals/commands";
 import { transcribeVoiceNote } from "./voice";
 import { connectRequestProvider, providerLabel, reconnectProviderFor } from "./connect-intent";
 import { connectHeadsUpSuffix } from "@/lib/google/user-cap";
@@ -182,6 +183,8 @@ async function afterStored(
 
   // 3. "כניסה" → one-time sign-in link for the site (before onboarding and billing: it must always work)
   if (await handleLoginKeyword(ctx, user.id, msg, say)) return { handled: true, note: "login link" };
+  // 3'. "חבר מביא חבר" / "הזמנת חבר" → the personal referral link (lib/referrals) — no model, not counted, any plan
+  if (msg.type === "text" && (await handleReferralKeyword(ctx.db, user.id, ctx.appUrl, msg.text, say))) return { handled: true, note: "referral link" };
 
   // 3a. billing commands ("קבלה", "שדרוג", "ביטול מנוי", "עדכון כרטיס"…) — not counted, work even while paused.
   //     Not while the agent flow waits for typed text: "חשבוניות" there is an agent's name, not "send my receipts".

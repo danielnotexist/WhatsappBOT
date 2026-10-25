@@ -1,31 +1,41 @@
 import { ownerAlert } from "@/lib/admin/alerts";
 import { copy } from "@/lib/copy/bot";
 import { chargeReason } from "@/lib/copy/owner-alerts";
-import { billButtons, billCopy } from "@/lib/copy/bot-billing";
+import { billButtons, billCopy, renewalWhatHe } from "@/lib/copy/bot-billing";
 import type { UserRow } from "@/lib/db/types";
 import { classifyHypFailure, tokenLast4 } from "@/lib/hyp/codes";
 import { formatHeshDesc } from "@/lib/hyp/sign";
-import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate } from "@/lib/wa/templates";
+import { announceCredit, announceReward, rewardReferralAfterFirstPayment } from "@/lib/referrals/service";
+import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate, paymentSuccessTemplate } from "@/lib/wa/templates";
 import type { BillingContext } from "./context";
 import { cardLinkFor, createCardLinkToken } from "./links";
 import { formatIls, vatOf } from "./money";
-import { activePhone, deliver, isWindowOpen, sendInvoice } from "./notify";
+import { activePhone, deliver, isWindowOpen, sendInvoice, shortDateHe } from "./notify";
 import { payLinkFor } from "./pay-link";
-import { PLANS, isPaidPlan, type PaidPlan } from "./plans";
-import { activateSubscription, chargeSubscription, nextChargeRun, resumeAfterCardUpdate, saveCardToken, type ChargeOutcome } from "./subscription";
+import { PLANS, cycleOf, isBillingCycle, isPaidPlan, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
+import { activateSubscription, applyPendingCredit, chargeSubscription, nextChargeRun, resumeAfterCardUpdate, saveCardToken, type ChargeOutcome } from "./subscription";
 import { createRetryApproval, dayLabel } from "./whatsapp";
 
 export type { BillingContext } from "./context";
 
-/** Builds the HYP payment page for a user + plan (PLAN §4 SIGN params). `Order` carries user id + plan back to us. */
-export async function startPayment(ctx: BillingContext, user: UserRow, plan: PaidPlan): Promise<string> {
-  const price = PLANS[plan].priceIls;
+/**
+ * The HYP `Order` of a first payment: `<user>:<plan>` (monthly, as before 0018) or `<user>:<plan>:annual`. The
+ * redirect carries it back signed (VERIFY), so the cycle cannot be changed on the way.
+ */
+export function paymentOrder(userId: string, plan: PaidPlan, cycle: BillingCycle): string {
+  return cycle === "annual" ? `${userId}:${plan}:annual` : `${userId}:${plan}`;
+}
+
+/** Builds the HYP payment page for a user + plan + cycle (PLAN §4 SIGN params). `Order` carries user id + plan (+ cycle) back to us. */
+export async function startPayment(ctx: BillingContext, user: UserRow, plan: PaidPlan, cycle: BillingCycle = "monthly"): Promise<string> {
+  const price = priceOf(plan, cycle);
+  const annual = cycle === "annual";
   const [first, ...rest] = (user.name ?? "").trim().split(/\s+/);
   return ctx.hyp.createPaymentPage({
     Amount: price,
     Coin: 1,
-    Order: `${user.id}:${plan}`,
-    Info: `מנוי ${PLANS[plan].nameHe} — חודש ראשון`,
+    Order: paymentOrder(user.id, plan, cycle),
+    Info: annual ? `מנוי ${planNameHe(plan, "annual")} — שנה ראשונה` : `מנוי ${PLANS[plan].nameHe} — חודש ראשון`,
     Sign: true,
     MoreData: true,
     SendHesh: true,
@@ -35,7 +45,7 @@ export async function startPayment(ctx: BillingContext, user: UserRow, plan: Pai
     email: user.email,
     ClientName: first || undefined,
     ClientLName: rest.join(" ") || undefined,
-    heshDesc: formatHeshDesc([{ description: `מנוי ${PLANS[plan].nameHe} — חודש`, quantity: 1, price }]),
+    heshDesc: formatHeshDesc([{ description: annual ? `מנוי ${planNameHe(plan, "annual")} — שנה` : `מנוי ${PLANS[plan].nameHe} — חודש`, quantity: 1, price }]),
     Pritim: true,
   });
 }
@@ -66,7 +76,7 @@ export async function startCardUpdate(ctx: BillingContext, user: UserRow): Promi
 }
 
 export type PaymentReturn =
-  | { ok: true; userId: string; plan: PaidPlan; transId: string; firstTime: boolean; mode: "payment" | "card" }
+  | { ok: true; userId: string; plan: PaidPlan; cycle?: BillingCycle; transId: string; firstTime: boolean; mode: "payment" | "card" }
   | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription" | "charged_not_checked"; userId?: string; message: string; mode?: "payment" | "card" };
 
 /**
@@ -75,13 +85,17 @@ export type PaymentReturn =
  */
 export async function completePayment(ctx: BillingContext, redirectQuery: string): Promise<PaymentReturn> {
   const params = Object.fromEntries(new URLSearchParams(redirectQuery));
-  const orderMatch = (params.Order ?? "").match(/^([0-9a-f-]{36}):(basic|pro|card)$/);
+  const orderMatch = (params.Order ?? "").match(/^([0-9a-f-]{36}):(basic|pro|card)(?::(monthly|annual))?$/);
   if (!orderMatch) return { ok: false, reason: "bad_order", message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין." };
   const userId = orderMatch[1]!;
   const user = await ctx.db.getUser(userId);
   if (!user) return { ok: false, reason: "no_user", userId, message: "החשבון לא נמצא." };
-  if (orderMatch[2] === "card") return completeCardUpdate(ctx, user, redirectQuery, params);
+  if (orderMatch[2] === "card") {
+    if (orderMatch[3]) return { ok: false, reason: "bad_order", userId, message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין.", mode: "card" };
+    return completeCardUpdate(ctx, user, redirectQuery, params);
+  }
   const plan = orderMatch[2] as PaidPlan;
+  const requestedCycle: BillingCycle = isBillingCycle(orderMatch[3]) ? orderMatch[3] : "monthly";
 
   const verified = await ctx.hyp.verifyRedirect(redirectQuery);
   if (!verified.ok || params.CCode !== "0") {
@@ -104,16 +118,35 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
     return { ok: false, reason: "token_failed", userId, message: "התשלום התקבל אבל שמירת אמצעי התשלום לחיובים הבאים נכשלה. נטפל בזה ידנית." };
   }
   const invoiceUrl = await ctx.hyp.invoiceUrl(transId).catch(() => null);
-  const amountIls = Number(params.Amount ?? PLANS[plan].priceIls);
-  const { firstTime, subscription, duplicate } = await activateSubscription(ctx.db, user, { plan, transId, amountIls, acode: params.ACode ?? null, token: token.token, tokef: token.tokef, invoiceUrl, raw: params }, ctx.now());
-  if (duplicate) return { ok: true, userId, plan, transId, firstTime, mode: "payment" }; // already handled (and announced)
+  const amountIls = Number(params.Amount ?? priceOf(plan, requestedCycle));
+  // the annual cycle only for (at least) the annual price — a safety net: HYP signs the amount into the page at SIGN
+  // and VERIFY checks the whole redirect, so a real mismatch means a bug on our side, never a year for a month's price
+  const cycle: BillingCycle = requestedCycle === "annual" && !(amountIls + 0.005 >= priceOf(plan, "annual")) ? "monthly" : requestedCycle;
+  if (cycle !== requestedCycle) {
+    console.error(`[billing] payment ${transId} of ${user.id}: Order asks for the annual cycle but ${amountIls} ₪ < ${priceOf(plan, "annual")} ₪ — activated monthly; check it in the HYP portal`);
+    await ctx.db.addAudit({ user_id: user.id, action: "payment.amount_mismatch", target: transId, result: `annual:${amountIls}` });
+  }
+  const now = ctx.now();
+  const { firstTime, subscription, duplicate, paymentId } = await activateSubscription(ctx.db, user, { plan, cycle, transId, amountIls, acode: params.ACode ?? null, token: token.token, tokef: token.tokef, invoiceUrl, raw: params }, now);
+  if (duplicate) return { ok: true, userId, plan, cycle: cycleOf(subscription), transId, firstTime, mode: "payment" }; // already handled (and announced)
+
+  // "חבר מביא חבר": the friend's first real payment rewards both sides (once — referral_reward() is atomic), and the
+  // payer's own free months waiting for a paid subscription go onto it now
+  const reward = firstTime ? await rewardReferralAfterFirstPayment(ctx, user, paymentId) : { kind: "none" as const };
+  const credit = await applyPendingCredit(ctx.db, user.id, now);
+  const fresh = (await ctx.db.getSubscription(user.id)) ?? subscription;
+  const nextChargeAt = fresh.next_charge_at ? new Date(fresh.next_charge_at) : undefined;
 
   const pendingInput = typeof user.profile.pending_input === "string" ? user.profile.pending_input : null;
-  const text = pendingInput ? copy["bill.payment_success"](PLANS[plan].nameHe, "הקבלה נשלחה למייל.") : copy["bill.payment_success_no_pending"](PLANS[plan].nameHe, "הקבלה נשלחה למייל.");
-  const where = await notify(ctx, user, text, { name: "payment_success", params: [PLANS[plan].nameHe, String(PLANS[plan].priceIls), "בעוד חודש"] });
+  const name = planNameHe(plan, cycle);
+  const text = pendingInput ? copy["bill.payment_success"](name, "הקבלה נשלחה למייל.") : copy["bill.payment_success_no_pending"](name, "הקבלה נשלחה למייל.");
+  const template = cycle === "annual" ? paymentSuccessTemplate({ plan: PLANS[plan].nameHe, amount: formatIls(priceOf(plan, cycle)), nextCharge: nextChargeAt ? shortDateHe(nextChargeAt) : "בעוד שנה", annual: true }) : { name: "payment_success", params: [PLANS[plan].nameHe, String(PLANS[plan].priceIls), "בעוד חודש"], buttons: [] };
+  const where = await deliver(ctx, user, { text, template });
   // the receipt in chat (inside the window: a document; the template above already says it was emailed)
-  if (where?.windowOpen) await sendInvoice(ctx, user, { transId, amountIls, date: ctx.now(), plan, nextChargeAt: subscription.next_charge_at ? new Date(subscription.next_charge_at) : undefined }, where);
-  return { ok: true, userId, plan, transId, firstTime, mode: "payment" };
+  if (where?.windowOpen) await sendInvoice(ctx, user, { transId, amountIls, date: now, plan, nextChargeAt, cycle }, where);
+  await announceReward(ctx, user, reward);
+  if (credit.nextChargeAt) await announceCredit(ctx, user, credit.nextChargeAt);
+  return { ok: true, userId, plan, cycle, transId, firstTime, mode: "payment" };
 }
 
 /**
@@ -162,14 +195,15 @@ async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQu
   if (approval) {
     const windowOpen = await isWindowOpen(ctx, user.id);
     const amount = formatIls(approval.amount_ils);
-    const offer = billCopy["bill.retry_offer"]({ amount, vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? "") });
+    const annual = approval.billing_cycle === "annual";
+    const offer = billCopy["bill.retry_offer"]({ amount, vat: formatIls(vatOf(approval.amount_ils)), last4: String(approval.details.last4 ?? ""), what: renewalWhatHe(annual) });
     const cardToken = createCardLinkToken(user.id);
     const nextTry = nextChargeRun(fresh, ctx.now());
     // outside the window the user (who just left the HYP page) still gets [ניסיון חוזר]: the matching template
     const template =
       fresh.status === "past_due" || !nextTry
-        ? accountPausedTemplate({ amount, approvalId: approval.id, cardToken })
-        : paymentFailedTemplate({ amount, nextTry: dayLabel(nextTry), approvalId: approval.id, cardToken });
+        ? accountPausedTemplate({ amount, approvalId: approval.id, cardToken, annual })
+        : paymentFailedTemplate({ amount, nextTry: dayLabel(nextTry), approvalId: approval.id, cardToken, annual });
     await deliver(ctx, user, { text: `${text}\n\n${offer}`, buttons: billButtons.offer(approval.id, "חיוב עכשיו"), template }, { phone: phone!, windowOpen });
   } else {
     await deliver(ctx, user, { text });
@@ -187,28 +221,31 @@ export async function runChargeJob(ctx: BillingContext, userId: string): Promise
   if (!user) return { kind: "skipped", reason: "no user" };
   const outcome = await chargeSubscription(ctx.db, ctx.hyp, user, ctx.now());
   const cardToken = () => createCardLinkToken(user.id);
+  // the failures are of the renewal in force — its cycle names the charge ("החיוב השנתי") and picks the template
+  const annual = outcome.kind === "charged" ? outcome.cycle === "annual" : outcome.kind === "skipped" ? false : renewalCycleOf(await ctx.db.getSubscription(user.id)) === "annual";
+  const what = renewalWhatHe(annual);
 
   if (outcome.kind === "charged") {
-    const where = await deliver(ctx, user, { text: billCopy["bill.renewal_charged"]({ plan: PLANS[outcome.plan].nameHe, amount: formatIls(outcome.amountIls), nextDate: dayLabel(outcome.nextChargeAt) }) });
+    const where = await deliver(ctx, user, { text: billCopy["bill.renewal_charged"]({ plan: planNameHe(outcome.plan, outcome.cycle), amount: formatIls(outcome.amountIls), nextDate: dayLabel(outcome.nextChargeAt), what }) });
     // in the window: the text above + the document; outside: the payment_receipt template (link behind a button)
-    await sendInvoice(ctx, user, { transId: outcome.transId, amountIls: outcome.amountIls, date: ctx.now(), plan: outcome.plan, nextChargeAt: outcome.nextChargeAt }, where ?? undefined);
+    await sendInvoice(ctx, user, { transId: outcome.transId, amountIls: outcome.amountIls, date: ctx.now(), plan: outcome.plan, nextChargeAt: outcome.nextChargeAt, cycle: outcome.cycle }, where ?? undefined);
   } else if (outcome.kind === "retry") {
     const amount = formatIls(outcome.amountIls);
     const nextTry = dayLabel(outcome.retryAt);
     const text =
       outcome.failures === 1
-        ? billCopy["bill.renewal_failed_day1"]({ amount, nextTry })
+        ? billCopy["bill.renewal_failed_day1"]({ amount, nextTry, what })
         : outcome.failures === 2
           ? billCopy["bill.renewal_failed_day3"]({ amount, nextTry })
           : billCopy["bill.renewal_failed_day5"]({ amount, lastTry: nextTry });
-    await nudge(ctx, user, text, (approvalId) => paymentFailedTemplate({ amount, nextTry, approvalId, cardToken: cardToken() }));
+    await nudge(ctx, user, text, (approvalId) => paymentFailedTemplate({ amount, nextTry, approvalId, cardToken: cardToken(), annual }));
   } else if (outcome.kind === "card_invalid") {
     const amount = formatIls(outcome.amountIls);
     const until = dayLabel(outcome.pauseAt);
-    await deliver(ctx, user, { text: billCopy["bill.renewal_card_invalid"]({ amount, until, code: outcome.ccode }), buttons: billButtons.card, template: cardUpdateNeededTemplate({ amount, until, cardToken: cardToken() }) });
+    await deliver(ctx, user, { text: billCopy["bill.renewal_card_invalid"]({ amount, until, code: outcome.ccode, what }), buttons: billButtons.card, template: cardUpdateNeededTemplate({ amount, until, cardToken: cardToken(), annual }) });
   } else if (outcome.kind === "paused") {
     const amount = formatIls(outcome.amountIls);
-    await nudge(ctx, user, billCopy["bill.renewal_paused"](amount), (approvalId) => accountPausedTemplate({ amount, approvalId, cardToken: cardToken() }));
+    await nudge(ctx, user, billCopy["bill.renewal_paused"](amount, what), (approvalId) => accountPausedTemplate({ amount, approvalId, cardToken: cardToken(), annual }));
   }
   return outcome;
 }

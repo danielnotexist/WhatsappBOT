@@ -41,7 +41,8 @@ export function robotsRules(env: Env = process.env): MetadataRoute.Robots {
   if (!indexable(env)) return { rules: { userAgent: "*", disallow: "/" } };
   return {
     // a robots path is a prefix: "/admin" also closes everything under it
-    rules: { userAgent: "*", allow: "/", disallow: [...PRIVATE_PREFIXES] },
+    // a robots path is a prefix: the short "/r" closes only the referral links (/r/<code>), never a page that starts with r
+    rules: { userAgent: "*", allow: "/", disallow: PRIVATE_PREFIXES.map((p) => (p === "/r" ? "/r/" : p)) },
     sitemap: absoluteUrl("/sitemap.xml", env),
   };
 }
