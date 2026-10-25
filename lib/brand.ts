@@ -13,7 +13,7 @@ export const BRAND = {
   tagline: "העוזרת האישית שלך, בוואטסאפ.",
   /** Short description for metadata and link previews. */
   description: "עוזרת אישית בוואטסאפ שמטפלת במייל, ביומן ובקבצים של העסק שלך - בעברית, עם חיבור ל-Microsoft 365 ול-Google.",
-  /** Placeholder until the domain is purchased ("probably free" by DNS — verify with the registrar). */
+  /** Placeholder until the domain is purchased - alze.ai is taken (DNS, 24.10.2026), so it is never shown publicly. */
   domain: "alze.ai",
 } as const;
 

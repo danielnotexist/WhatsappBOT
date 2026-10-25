@@ -76,13 +76,13 @@ export async function ogImage(card: OgCard): Promise<ImageResponse> {
           color: C.cream,
         }}
       >
-        {/* the name at the inline start (right), the address at the end */}
+        {/* the name at the inline start (right) */}
         <div style={{ display: "flex", flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", flexDirection: "row-reverse", alignItems: "center" }}>
             <Crest size={52} />
             <div style={{ display: "flex", marginRight: 14, fontSize: 52, lineHeight: 1, color: C.cream }}>{rtlUnits(BRAND.name)[0]}</div>
           </div>
-          <div style={{ display: "flex", fontSize: 26, color: C.muted, letterSpacing: 1 }}>{BRAND.domain}</div>
+          {/* the address returns here once the domain is bought (BRAND.domain is a placeholder; alze.ai is taken) */}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
