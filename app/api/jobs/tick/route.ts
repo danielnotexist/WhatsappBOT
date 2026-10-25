@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { connection } from "next/server";
 import { scheduleOwnerAlertsJob } from "@/lib/admin/alerts";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
@@ -26,6 +27,25 @@ export async function POST(request: Request) {
     const given = request.headers.get(INTERNAL_SECRET_HEADER) ?? "";
     if (!given || !safeEqual(given, internalSecret())) return new Response("invalid internal secret", { status: 401 });
   }
+  return tick(request);
+}
+
+/**
+ * GET: Vercel Cron (vercel.json "crons", every minute) — the scheduler in production: pg_cron's dispatch_due_jobs needs
+ * Vault secrets that are not set. Vercel sends `Authorization: Bearer <CRON_SECRET>`; without CRON_SECRET nothing runs.
+ */
+export async function GET(request: Request) {
+  await connection();
+  const secret = process.env.CRON_SECRET?.trim() ?? "";
+  if (!secret) {
+    console.error("[jobs] CRON_SECRET חסר: Vercel Cron לא יכול להפעיל את /api/jobs/tick. להגדיר CRON_SECRET (16 תווים לפחות) ב-Vercel.");
+    return new Response("CRON_SECRET חסר", { status: 503 });
+  }
+  if (!safeEqual(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) return new Response("invalid cron secret", { status: 401 });
+  return tick(request);
+}
+
+async function tick(request: Request): Promise<Response> {
   const workerUrl = new URL("/api/jobs/run", process.env.APP_URL || request.url).toString();
   const queue = getQueue();
   const db = getDb();

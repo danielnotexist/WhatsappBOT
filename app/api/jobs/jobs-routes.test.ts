@@ -8,7 +8,9 @@ import type { Queue, QueueJob } from "@/lib/queue/types";
 import { RecordingWaSender } from "@/lib/wa/sender";
 import { setWaSenderForTests } from "@/lib/wa";
 import { POST as runPost } from "./run/route";
-import { POST as tickPost } from "./tick/route";
+import { GET as tickGet, POST as tickPost } from "./tick/route";
+
+vi.mock("next/server", async (orig) => ({ ...(await orig<typeof import("next/server")>()), connection: async () => {} }));
 
 class FakeQueue implements Queue {
   readonly kind = "local" as const;
@@ -95,5 +97,23 @@ describe("/api/jobs/run (Milestone 5 kinds) and /api/jobs/tick", () => {
 
     vi.stubEnv("DATA_MODE", "supabase");
     expect((await tickPost(new Request("https://app.example.co.il/api/jobs/tick", { method: "POST" }))).status).toBe(401);
+  });
+
+  it("Vercel Cron: GET with the CRON_SECRET bearer runs the tick; a wrong or missing secret does not", async () => {
+    vi.stubEnv("DATA_MODE", "supabase");
+    const get = (auth?: string) =>
+      tickGet(new Request("https://app.example.co.il/api/jobs/tick", { headers: auth ? { authorization: auth } : {} }));
+    vi.stubEnv("CRON_SECRET", "");
+    expect((await get("Bearer anything")).status).toBe(503);
+    vi.stubEnv("CRON_SECRET", "cron-secret-0123456789");
+    expect((await get()).status).toBe(401);
+    expect((await get("Bearer wrong-secret-0123456789")).status).toBe(401);
+    expect(queue.jobs).toHaveLength(0);
+    vi.stubEnv("DATA_MODE", "memory");
+    await dueReminder();
+    const res = await get("Bearer cron-secret-0123456789");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, failed: 0 });
+    expect(queue.jobs.some((j) => (j.body as { kind: string }).kind === "reminder")).toBe(true);
   });
 });

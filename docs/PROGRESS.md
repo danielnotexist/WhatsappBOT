@@ -1134,3 +1134,8 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **פתוח**
 - נוסח "חבר מביא חבר" ותקרת 12 החודשים - לאישור דניאל; ביטול שנתי בלי החזר - לעו"ד.
 - `alze_ref` ו-`alze_cycle` נוספו לסעיף העוגיות במדיניות הפרטיות (טיוטה, לעו"ד).
+
+## מעבר לחשבונות האמיתיים - הכנה (25.10)
+- **באג בייצור:** המתזמן לא רץ. ב-pg_cron רץ `wabot_dispatch_due_jobs`, אבל ב-Vault אין `jobs_worker_url` / `qstash_token`, ואין Vercel Cron - תזכורות, סיכומי בוקר, סריקות יזומות ומייל הבוקר לבעלים לא נשלחו.
+- **התיקון:** `vercel.json` → `crons` כל דקה ל-`/api/jobs/tick`; ב-`app/api/jobs/tick/route.ts` נוסף `GET` שבודק `Authorization: Bearer <CRON_SECRET>` (בלי `CRON_SECRET` → 503 עם הודעה בעברית). בדיקה ב-`app/api/jobs/jobs-routes.test.ts`. דורש Vercel Pro, ולכן נכנס רק ל-`main` (הפרויקט הישן ב-Hobby).
+- **`main`:** נוצר מ-`claude/preview` + התיקון. מדריך המעבר: `docs/migration-he.md`.
