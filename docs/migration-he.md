@@ -1,6 +1,15 @@
 # מעבר לחשבונות האמיתיים (GitHub + Vercel)
 
-Supabase נשאר במקומו (`wrlmfpixcpqezakslzwz`, פרנקפורט). הכתובת זמנית `<project>.vercel.app` עד שיהיה דומיין.
+Supabase נשאר במקומו (`wrlmfpixcpqezakslzwz`, פרנקפורט). הכתובת החדשה: **https://alze-nine.vercel.app** (זמנית, עד שיהיה דומיין).
+
+## מצב (25.10)
+- ✅ הריפו: `danielnotexist/WhatsappBOT`, ענף ברירת מחדל `main`.
+- ✅ Vercel החדש (Hobby, `danielnotexist's projects`): 29 משתנים, פריסת ייצור מ-`main`, בדיקת עשן עברה.
+- ✅ Supabase: Vault `tick_url` + `cron_secret`, 0019 (`wabot_tick` כל דקה מחזיר 200), ובלוקי ה-pg_cron של 0013–0017.
+- ✅ Meta: ה-webhook מצביע ל-`https://alze-nine.vercel.app/api/wa/webhook` (אומת).
+- ⏳ Entra + Google: להוסיף את כתובות החזרה (טבלה 4).
+- ⏳ טוקן וואטסאפ קבוע (הנוכחי פג).
+- ⏳ להשבית את הפרויקט הישן אחרי 24 שעות תקינות.
 הסימון ✋ = דניאל, 🤖 = Claude.
 
 ## 1. לפני המעבר
@@ -22,7 +31,7 @@ Supabase נשאר במקומו (`wrlmfpixcpqezakslzwz`, פרנקפורט). הכ�
 - ⚠️ `TOKEN_ENC_KEY` של הפרויקט הישן מוגדר sensitive ואי אפשר לקרוא אותו (בדקנו: העותק שאצל Claude לא תואם). בפרויקט החדש נוצר
   מפתח חדש, ולכן אחרי המעבר: כולם נכנסים שוב לאתר, מחברים מחדש Google / Microsoft, וכרטיס בדיקה ב-HYP מוזן מחדש. בסביבת טסט זה בסדר.
 
-## 4. כתובות חזרה (`<new>` = הכתובת החדשה)
+## 4. כתובות חזרה (`<new>` = `https://alze-nine.vercel.app`)
 | שירות | מה | מי |
 |---|---|---|
 | Microsoft Entra → App registrations → האפליקציה → Authentication | להוסיף Redirect URI: `<new>/api/auth/microsoft/callback` (להשאיר את הישן עד סוף המעבר). ב-API permissions להוסיף: Tasks.ReadWrite, Sites.Read.All, OnlineMeetings.Read, OnlineMeetingTranscript.Read.All | ✋ |
