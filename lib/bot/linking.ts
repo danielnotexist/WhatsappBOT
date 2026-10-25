@@ -1,3 +1,4 @@
+import { trackServerEvent } from "@/lib/analytics/track";
 import { extractLinkToken } from "@/lib/auth/link-token";
 import { copy, buttons } from "@/lib/copy/bot";
 import type { UserRow } from "@/lib/db/types";
@@ -54,6 +55,7 @@ export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage):
  */
 export async function welcomeLinkedPhone(ctx: BotContext, user: UserRow, phone: string, source: "whatsapp" | "demo_chat" = "whatsapp"): Promise<void> {
   await ctx.db.addAudit({ user_id: user.id, action: "wa.link", target: source === "demo_chat" ? "demo-chat" : maskPhone(phone), result: "ok" });
+  trackServerEvent(ctx.db, "wa_linked", user.id, ctx.now()); // the signup funnel (lib/analytics)
   await ctx.wa.sendText(phone, copy["link.success"]());
   await ctx.wa.sendButtons(phone, copy["onb.welcome"](user.name), buttons.welcome);
   await startOnboarding(ctx, user.id);

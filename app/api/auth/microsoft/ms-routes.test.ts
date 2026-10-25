@@ -9,6 +9,7 @@ import { setGlobalSingleton } from "@/lib/global-singleton";
 import { POST as notifyPost } from "../../graph/notify/route";
 import { GET as callbackGet } from "./callback/route";
 import { GET as startGet } from "./start/route";
+import { flushServerEvents } from "@/lib/analytics/track";
 
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
 
@@ -53,6 +54,8 @@ describe("Microsoft connect routes (memory mode)", () => {
     expect(await db.listGraphSubscriptionsForConnection(conns[0]!.id)).toHaveLength(1);
     expect(wa.texts.at(-1)).toContain("החיבור ל-Microsoft 365 הושלם");
     expect((await db.getUser(user.id))!.name).toBe("דנה לוי");
+    await flushServerEvents(); // the signup funnel's "mail connected" step
+    expect(db.pageEvents.filter((e) => e.event === "mail_connected").map((e) => e.user_id)).toEqual([user.id]);
 
     // state is single-use
     const again = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?code=abc&state=${state}`));

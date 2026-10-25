@@ -9,11 +9,13 @@ import { spendLimits } from "@/lib/ai/budget";
 import { getDb } from "@/lib/db";
 import type { SupportTicketStatus } from "@/lib/db/types";
 import { addDays, dateKey, localDateOf } from "@/lib/time/zoned";
+import { rangeFrom } from "@/lib/analytics/report";
 import { AlertsTab } from "./_components/alerts-tab";
 import { CodeStep } from "./_components/code-step";
 import { HelpTab, OverviewTab, UsersTab } from "./_components/dashboard";
 import { ChatsTab, ErrorsTab, TicketsTab } from "./_components/inbox";
 import { Notice } from "./_components/parts";
+import { TrafficTab } from "./_components/traffic-tab";
 import { AdminHeader, AdminNav } from "./_components/shell";
 import { ADMIN_TABS, tabFrom } from "./tabs";
 
@@ -75,6 +77,10 @@ async function Admin({ searchParams }: { searchParams: PageProps<"/admin">["sear
       budgetUsd = null;
     }
     body = <OverviewTab k={kpis(rows, daily, now)} daily={daily} rows={rows} openTickets={openTickets.length} errors24h={errors.filter((e) => Date.parse(e.at) >= now.getTime() - 86_400_000).length} budgetUsd={budgetUsd} />;
+  } else if (tab === "traffic") {
+    const range = rangeFrom(sp);
+    const today = localDateOf(now);
+    body = <TrafficTab report={await db.analyticsReport(dateKey(addDays(today, -(range - 1))), dateKey(today), { top: 10 })} range={range} />;
   } else if (tab === "users") {
     body = <UsersTab rows={rows} query={userQueryFrom(sp)} now={now} />;
   } else if (tab === "help") {

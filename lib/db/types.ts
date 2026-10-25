@@ -6,6 +6,8 @@
  * Only the server ever talks to this layer. Row shapes mirror supabase/migrations/0001_init.sql.
  */
 
+import type { DeviceClass, FunnelEvent } from "@/lib/analytics/events";
+
 export type ConnectionProvider = "microsoft" | "google";
 export type ConnectionStatus = "active" | "expired" | "revoked" | "error";
 export type PlanKind = "trial" | "basic" | "pro";
@@ -613,6 +615,50 @@ export interface NewOwnerAlert {
 /** claimed = send it now; queued = kept for the digest; limited = over the type's rate limit (recorded); duplicate = known */
 export type OwnerAlertClaimResult = "claimed" | "queued" | "limited" | "duplicate";
 
+// ---- first-party analytics (migration 0017, lib/analytics) ----
+
+/** A page view (event null) or a funnel step. No IP, no User-Agent: `visitor` is the anonymous daily hash. */
+export interface NewPageEvent {
+  /** "YYYY-MM-DD" in Asia/Jerusalem - also the day of the salt */
+  day: string;
+  /** sha256 hex (lib/analytics/visitor.ts) */
+  visitor: string;
+  user_id: string | null;
+  path: string | null;
+  referrer_host: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  device: DeviceClass | null;
+  event: FunnelEvent | null;
+  /** defaults to now */
+  at?: string;
+}
+
+export interface PageEventRow extends NewPageEvent {
+  id: string;
+  at: string;
+}
+
+export type FunnelStep = "visit" | FunnelEvent;
+
+/**
+ * The "תנועה" tab's numbers for a range of days (SQL analytics_daily / _top_pages / _sources / _devices / _funnel).
+ * A visitor id lasts one day, so every "visitors" figure over a range counts visitor-days.
+ */
+export interface AnalyticsReport {
+  /** every day of the range, oldest first, also the empty ones */
+  daily: { day: string; visitors: number; views: number }[];
+  /** most viewed first */
+  pages: { path: string; views: number; visitors: number }[];
+  /** per visitor-day: the first source seen that day - utm_source, else the referring host; null = direct */
+  sources: { source: string | null; kind: "utm" | "referrer" | "direct"; visitors: number }[];
+  /** mobile, then desktop */
+  devices: { device: DeviceClass; visitors: number }[];
+  /** visit, signup_start ... paid, in order */
+  funnel: { step: FunnelStep; count: number }[];
+}
+
 export interface NewSupportTicket {
   user_id: string | null;
   name: string;
@@ -823,6 +869,12 @@ export interface Db {
   takeQueuedOwnerAlerts(limit: number): Promise<OwnerAlertRow[]>;
   /** newest first */
   listOwnerAlerts(limit: number): Promise<OwnerAlertRow[]>;
+
+  // first-party analytics (migration 0017) - lib/analytics, the admin tab "תנועה"
+  /** one page view or funnel step; a user id that no longer exists is stored as null */
+  insertPageEvent(row: NewPageEvent): Promise<void>;
+  /** the tab's numbers for fromDay..toDay inclusive ("YYYY-MM-DD", Asia/Jerusalem); `top` caps pages and sources */
+  analyticsReport(fromDay: string, toDay: string, opts?: { top?: number }): Promise<AnalyticsReport>;
 
   // proactive alerts (migration 0013) — lib/proactive
   /**

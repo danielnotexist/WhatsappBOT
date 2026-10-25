@@ -13,6 +13,9 @@ import type {
   OwnerAlertClaimResult,
   OwnerAlertRow,
   OwnerAlertStatus,
+  AnalyticsReport,
+  FunnelStep,
+  NewPageEvent,
   PendingActionMeta,
   BillingApprovalKind,
   BillingApprovalRow,
@@ -833,6 +836,44 @@ export class SupabaseDb implements Db {
       ai_cost_30d: Number(r.ai_cost_30d ?? 0),
       charge_failures: Number(r.charge_failures ?? 0),
     }));
+  }
+
+  // ---- page_events (migration 0017) ----
+
+  async insertPageEvent(row: NewPageEvent): Promise<void> {
+    const insert = (r: NewPageEvent) => this.client.from("page_events").insert(r);
+    let { error } = await insert(row);
+    // a session cookie of an account deleted since: keep the anonymous row, without the link (FK violation)
+    if (error && (error as { code?: string }).code === "23503" && row.user_id) ({ error } = await insert({ ...row, user_id: null }));
+    if (error) this.fail("insertPageEvent", error);
+  }
+
+  async analyticsReport(fromDay: string, toDay: string, opts: { top?: number } = {}): Promise<AnalyticsReport> {
+    const range = { p_from: fromDay, p_to: toDay };
+    const top = Math.min(Math.max(opts.top ?? 10, 1), 100);
+    const [daily, pages, sources, devices, funnel] = await Promise.all([
+      this.client.rpc("analytics_daily", range),
+      this.client.rpc("analytics_top_pages", { ...range, p_limit: top }),
+      this.client.rpc("analytics_sources", { ...range, p_limit: top }),
+      this.client.rpc("analytics_devices", range),
+      this.client.rpc("analytics_funnel", range),
+    ]);
+    for (const r of [daily, pages, sources, devices, funnel]) if (r.error) this.fail("analyticsReport", r.error);
+    const rows = (r: { data: unknown }) => (r.data ?? []) as Record<string, unknown>[];
+    return {
+      daily: rows(daily).map((r) => ({ day: String(r.day), visitors: Number(r.visitors ?? 0), views: Number(r.views ?? 0) })),
+      pages: rows(pages).map((r) => ({ path: String(r.path), views: Number(r.views ?? 0), visitors: Number(r.visitors ?? 0) })),
+      sources: rows(sources).map((r) => ({
+        source: r.source === null || r.source === undefined ? null : String(r.source),
+        kind: r.kind === "utm" || r.kind === "referrer" ? r.kind : "direct",
+        visitors: Number(r.visitors ?? 0),
+      })),
+      devices: (["mobile", "desktop"] as const).map((device) => ({ device, visitors: Number(rows(devices).find((r) => r.device === device)?.visitors ?? 0) })),
+      funnel: rows(funnel)
+        .slice()
+        .sort((a, b) => Number(a.ord) - Number(b.ord))
+        .map((r) => ({ step: String(r.step) as FunnelStep, count: Number(r.actors ?? 0) })),
+    };
   }
 
   async adminDailyStats(fromDay: string, toDay: string): Promise<AdminDailyRow[]> {

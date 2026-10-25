@@ -5,8 +5,14 @@ import { Handwritten } from "@/components/brand/handwritten";
 import { IncomingCall } from "@/components/brand/incoming-call";
 import { PhoneMockup } from "@/components/brand/phone-mockup";
 import { BRAND } from "@/lib/brand";
+import { TRIAL_MESSAGES } from "@/lib/billing/plans";
+import { pageMetadata } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "הרשמה", description: BRAND.description };
+export const metadata: Metadata = pageMetadata({
+  path: "/start",
+  title: "הרשמה",
+  description: `הרשמה ל-${BRAND.name} בדקה: מייל, קוד, חיבור ל-Outlook או ל-Gmail, ו-${TRIAL_MESSAGES} הודעות ראשונות בחינם בוואטסאפ.`,
+});
 
 /**
  * Step 1 (round plan §3): עלזה is calling — phone first, then the handwritten line, the headline, "about a minute",

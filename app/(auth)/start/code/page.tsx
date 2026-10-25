@@ -3,8 +3,9 @@ import { Suspense } from "react";
 import { CodeStep, CodeStepFromUrl } from "@/components/auth/code-step";
 import { DemoCodeNoteLive } from "@/components/demo/demo-flag";
 import { isDemo } from "@/lib/demo";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "קוד אימות" };
+export const metadata: Metadata = { title: "קוד אימות", robots: NOINDEX };
 
 /**
  * Step 3: the six-digit code. Static: email / opt-in / cooldown come in the URL from the email card and are read on the

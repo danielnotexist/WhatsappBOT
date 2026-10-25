@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
+import { PageBeacon } from "@/components/analytics/page-beacon";
 import { A11yMotion } from "@/components/brand/a11y-motion";
 import { AccessibilityWidget } from "@/components/brand/accessibility-widget";
 import { DemoBar } from "@/components/demo/DemoBar";
@@ -8,16 +10,21 @@ import { A11Y_INIT_SCRIPT } from "@/lib/a11y/settings";
 import { BRAND } from "@/lib/brand";
 import { isDemo } from "@/lib/demo";
 import { fontVariables } from "@/lib/fonts";
+import { HOME_TITLE, SITE_IMAGE, siteOrigin } from "@/lib/seo/site";
 import "./globals.css";
 
 const APP_NAME = BRAND.name;
-const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "http://localhost:3000";
 
+/**
+ * The site's defaults (lib/seo/site.ts): every URL field resolves against APP_URL, the title template adds the name,
+ * and a page without its own share image gets the site's (app/opengraph-image.tsx). Public pages set their own full
+ * metadata with pageMetadata(); private ones are noindex.
+ */
 export const metadata: Metadata = {
-  metadataBase: new URL(appUrl),
+  metadataBase: new URL(siteOrigin()),
   applicationName: APP_NAME,
   title: {
-    default: `${APP_NAME} - ${BRAND.tagline}`,
+    default: HOME_TITLE,
     template: `%s · ${APP_NAME}`,
   },
   description: BRAND.description,
@@ -25,7 +32,11 @@ export const metadata: Metadata = {
     type: "website",
     locale: "he_IL",
     siteName: APP_NAME,
+    title: HOME_TITLE,
+    description: BRAND.description,
+    images: [{ url: SITE_IMAGE, width: 1200, height: 630, alt: HOME_TITLE, type: "image/png" }],
   },
+  twitter: { card: "summary_large_image", title: HOME_TITLE, description: BRAND.description, images: [SITE_IMAGE] },
   formatDetection: { telephone: false },
   // מצב הדגמה: noindex כבר ב-<head> (נקבע ב-build; ב-Vercel אותם משתנים ל-build ול-runtime). בזמן ריצה — X-Robots-Tag ב-proxy.ts.
   ...(isDemo() ? { robots: { index: false, follow: false } } : {}),
@@ -61,6 +72,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <AccessibilityWidget />
           <Toaster />
         </DirectionProvider>
+        {/* cookie-less page views (lib/analytics): reads the URL on the client, so it waits in its own boundary */}
+        <Suspense fallback={null}>
+          <PageBeacon />
+        </Suspense>
       </body>
     </html>
   );

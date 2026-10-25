@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { EmailStep, EmailStepFromUrl } from "@/components/auth/email-step";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "כניסה עם מייל" };
+export const metadata: Metadata = { title: "כניסה עם מייל", robots: NOINDEX };
 
 /** Login with email → the same code flow as signup, landing on /account. Static, like the signup email card. */
 export default function LoginEmailPage() {

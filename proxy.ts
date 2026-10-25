@@ -3,6 +3,8 @@ import { SOURCE_COOKIE, SOURCE_MAX_AGE, encodeSource, sourceFromVisit } from "@/
 import { ADMIN_COOKIE, ADMIN_GATE_COOKIE, isGatedAdminPath, verifyAdminToken, verifyGateToken } from "@/lib/admin/tokens";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 import { DEMO_COPY, isDemo } from "@/lib/demo";
+import { unknownProfessionPath } from "@/lib/seo/professions";
+import { isPrivatePath } from "@/lib/seo/site";
 
 /**
  * proxy.ts — כותרות אבטחה לכל תשובה (ב-Next 16 הקובץ `middleware.ts` הוחלף ב-`proxy.ts`; אותה פונקציונליות).
@@ -120,7 +122,7 @@ export function proxy(request: NextRequest) {
   const home = codeCardWithoutEmail(request);
   const response = home
     ? NextResponse.redirect(new URL(home, request.url))
-    : demoChatHidden(request) || adminHidden(request)
+    : demoChatHidden(request) || adminHidden(request) || unknownProfessionPath(request.nextUrl.pathname)
       ? NextResponse.rewrite(new URL("/_demo-chat-unavailable", request.url)) // no such page → the site's 404
       : NextResponse.next();
   const source = home ? null : visitSource(request);
@@ -130,7 +132,8 @@ export function proxy(request: NextRequest) {
   }
   if (MIC_PAGES.has(request.nextUrl.pathname)) response.headers.set("Permissions-Policy", PERMISSIONS_POLICY_WITH_MIC);
   // מצב הדגמה (lib/demo.ts): לא לאינדוקס בשום מנוע חיפוש — נבדק בכל בקשה, גם אם ה-build נעשה בלי DEMO_MODE
-  if (isDemo() || request.nextUrl.pathname.startsWith("/admin")) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
+  // and the private pages (the panel, the personal area, payment, invoice and sign-in links — lib/seo/site.ts), always
+  if (isDemo() || isPrivatePath(request.nextUrl.pathname)) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
   return response;
 }
 

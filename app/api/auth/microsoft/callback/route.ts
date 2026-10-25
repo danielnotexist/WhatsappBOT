@@ -1,3 +1,4 @@
+import { trackServerEvent } from "@/lib/analytics/track";
 import { reportError } from "@/lib/errors/report";
 import type { Route } from "next";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
@@ -118,6 +119,7 @@ export async function GET(request: Request) {
     const connection = await db.upsertConnection({ user_id: user.id, provider: "microsoft", account_email: accountEmail, tenant_id: claims.tid, scopes: tokens.scope, consent_type: pending.admin ? "admin" : "user", ...sealTokens(user.id, tokens) });
     if (pending.meetings && msHasScope(tokens.scope, "OnlineMeetingTranscript.Read.All")) await db.mergeUserProfile(user.id, { ms_meetings_consent: "granted" });
     await db.addAudit({ user_id: user.id, action: "ms.connect", target: accountEmail, result: "ok" });
+    trackServerEvent(db, "mail_connected", user.id); // the signup funnel (lib/analytics)
     await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[ms:callback] replacing older connections failed:", (e as Error).message));
     try {
       const graph = graphForConnection(db, activeMicrosoftConnection([connection]) ?? connection);

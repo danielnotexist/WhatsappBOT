@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
+import { trackEvent } from "@/lib/analytics/send";
 import { CODE_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp-constants";
 import { cn } from "@/lib/utils";
 import { authPaths, type AuthMode } from "./email-step";
@@ -156,6 +157,7 @@ export function CodeStep({
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; next?: string; message?: string; attemptsLeft?: number };
         if (data.ok && data.next) {
+          if (mode === "signup") trackEvent("code_ok"); // the session cookie is set: this step is linked to the account
           markSignedIn(); // the shell header switches to "לאזור האישי" (the layout's cookie check ran before the code)
           router.replace(data.next as Route);
           return;
@@ -174,7 +176,7 @@ export function CodeStep({
       }
       setBusy(false);
     },
-    [animateCells, busy, cells, email, markSignedIn, reduce, router, updates],
+    [animateCells, busy, cells, email, markSignedIn, mode, reduce, router, updates],
   );
 
   async function resend() {

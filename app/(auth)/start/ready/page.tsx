@@ -8,8 +8,9 @@ import { issueLinkToken, waMeUrl } from "@/lib/auth/link-token";
 import { getDb } from "@/lib/db";
 import { publicWaNumber } from "@/lib/wa/public-number";
 import { switchEmailAction } from "../actions";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "העוזרת שלך מוכנה" };
+export const metadata: Metadata = { title: "העוזרת שלך מוכנה", robots: NOINDEX };
 
 /**
  * Step 6: the step is static and drawn at once; the wa.me link with its one-time token (and the QR, the confetti) is

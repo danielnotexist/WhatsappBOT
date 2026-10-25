@@ -1,4 +1,5 @@
 import "server-only";
+import { trackServerEvent } from "@/lib/analytics/track";
 import { gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionRow, Db, UserRow } from "@/lib/db/types";
 import { isDemo } from "@/lib/demo";
@@ -32,6 +33,7 @@ export async function demoConnect(db: Db, user: UserRow, provider: ConnectProvid
       ...sealTokens(user.id, tokens),
     });
     await db.addAudit({ user_id: user.id, action: "ms.connect", target: email, result: "ok:demo" });
+    trackServerEvent(db, "mail_connected", user.id);
     return { notice: `החיבור ל-Microsoft 365 הושלם (${email}).`, connection };
   }
   const tokens = await exchangeGoogleCode(getGoogleConfig(), "demo", "demo");
@@ -45,5 +47,6 @@ export async function demoConnect(db: Db, user: UserRow, provider: ConnectProvid
     ...sealGoogleTokens(user.id, tokens),
   });
   await db.addAudit({ user_id: user.id, action: "google.connect", target: email, result: "ok:demo" });
+  trackServerEvent(db, "mail_connected", user.id);
   return { notice: gcopy["g.web.connected"](email), connection };
 }

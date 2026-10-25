@@ -1,13 +1,19 @@
+import Link from "next/link";
+import type { Route } from "next";
 import { CrestMark } from "@/components/brand/wordmark";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { PROFESSIONS } from "./content";
+import { PROFESSION_PAGES } from "./profession-pages";
 import { CONTAINER, H2, LEDE } from "./ui";
 
 /**
  * "לפי מקצוע": four real one-line exchanges, set as a transcript — who asks, what they write (large, in the serif),
- * what she answers (marked with her crest). No cards, no icons: the words are the content.
+ * what she answers (marked with her crest). No cards, no icons: the words are the content. Each profession links to
+ * its own page (/for/<slug>, components/brand/landing/profession-pages.ts).
  */
+const slugOf = (profession: string) => PROFESSION_PAGES.find((p) => p.profession === profession)?.slug ?? null;
+
 export function Professions() {
   return (
     <section
@@ -31,9 +37,17 @@ export function Professions() {
               key={p.profession}
               className="grid gap-4 border-b border-line py-10 sm:py-14 lg:grid-cols-[minmax(0,3fr)_minmax(0,9fr)] lg:gap-12"
             >
-              <h3 className="font-sans text-[1.0625rem] leading-snug font-semibold text-sage lg:pt-3">
-                {p.profession}
-              </h3>
+              <div className="lg:pt-3">
+                <h3 className="font-sans text-[1.0625rem] leading-snug font-semibold text-sage">{p.profession}</h3>
+                {slugOf(p.profession) ? (
+                  <Link
+                    href={`/for/${slugOf(p.profession)}` as Route}
+                    className="mt-2 inline-block text-[0.9375rem] text-cream-muted underline underline-offset-4 transition-colors hover:text-cream"
+                  >
+                    עוד על {BRAND.name} ל{p.profession}
+                  </Link>
+                ) : null}
+              </div>
               <div>
                 <p className="max-w-[24ch] font-heading text-[clamp(1.625rem,1.15rem+1.9vw,2.75rem)] leading-[1.18] font-bold text-balance text-cream">
                   ״{p.ask}״

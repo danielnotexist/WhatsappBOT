@@ -11,13 +11,16 @@ import { PlanSheet } from "@/components/brand/landing/pricing";
 import { CONTAINER, LEDE } from "@/components/brand/landing/ui";
 import { SupportChat } from "@/components/brand/support-chat";
 import { BRAND } from "@/lib/brand";
+import { pageMetadata } from "@/lib/seo/site";
 import { cn } from "@/lib/utils";
 import "@/components/brand/landing/landing.css";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
+  path: "/pricing",
   title: "מחירים",
   description: `המסלולים של ${BRAND.name}, בסיסי ופרו: מה כל אחד כולל, עם אילו מערכות הוא עובד, ושאלות על התשלום.`,
-};
+  image: "/pricing/opengraph-image",
+});
 
 /**
  * /pricing - the details the landing's compact price list leaves out (Daniel, 23.10.2026): the two plans on their paper

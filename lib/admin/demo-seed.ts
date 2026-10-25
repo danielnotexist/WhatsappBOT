@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { MemoryDb } from "@/lib/db/memory";
 import type { ConnectionRow, PlanKind, SignupSource, SubscriptionRow } from "@/lib/db/types";
 import { dateKey, localDateOf } from "@/lib/time/zoned";
@@ -283,5 +283,109 @@ export function seedAdminDemo(db: MemoryDb, now: Date = new Date()): { users: nu
   err(user(9).id, "billing", "HYP CCode 33: card declined", 48, { kind: "renewal", stage: "no_answer" });
   err(null, "request.render", "TypeError: Cannot read properties of undefined (reading 'scopes')", 30, { path: "/account", method: "GET" });
   err(null, "wa.worker", "fetch failed: ECONNRESET", 70, { kind: "inbound" });
+  seedTraffic(db, now);
   return { users: ids.length };
+}
+
+// ---------------------------------------------------------------------------------------------
+// the "תנועה" tab: 90 days of page views and signup steps (page_events, migration 0017)
+// ---------------------------------------------------------------------------------------------
+
+/** Where the made-up visitors come from, with their weight (utm_source campaigns, referring sites, direct). */
+const TRAFFIC_SOURCES: { w: number; ref?: string; utm?: [string, string, string] }[] = [
+  { w: 34 },
+  { w: 21, ref: "www.google.com" },
+  { w: 13, utm: ["facebook", "paid_social", "lawyers-oct"] },
+  { w: 7, utm: ["google", "cpc", "accountants"] },
+  { w: 6, ref: "www.linkedin.com" },
+  { w: 5, utm: ["instagram", "story", "launch"] },
+  { w: 4, utm: ["newsletter", "email", "launch"] },
+  { w: 3, ref: "www.bing.com" },
+  { w: 3, ref: "chat.whatsapp.com" },
+  { w: 2, ref: "unknown" },
+  { w: 2, ref: "www.facebook.com" },
+];
+
+/** The first page of a visit, with its weight. */
+const LANDINGS: { w: number; path: string }[] = [
+  { w: 58, path: "/" },
+  { w: 14, path: "/pricing" },
+  { w: 7, path: "/for/lawyers" },
+  { w: 6, path: "/for/accountants" },
+  { w: 4, path: "/for/consultants" },
+  { w: 4, path: "/for/clinics" },
+  { w: 4, path: "/start" },
+  { w: 2, path: "/privacy" },
+  { w: 1, path: "/terms" },
+];
+
+/** A small deterministic generator, so the screenshots look the same on every seed. */
+function rng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 2 ** 32;
+  };
+}
+
+function pick<T extends { w: number }>(list: readonly T[], r: number): T {
+  const total = list.reduce((s, x) => s + x.w, 0);
+  let x = r * total;
+  for (const item of list) if ((x -= item.w) < 0) return item;
+  return list.at(-1)!;
+}
+
+const demoVisitor = (n: string) => createHash("sha256").update(`alze-demo-visitor:${n}`).digest("hex");
+
+function seedTraffic(db: MemoryDb, now: Date): void {
+  if (db.pageEvents.some((e) => e.visitor === demoVisitor("89:0"))) return; // seeded already (the oldest day is always in the past)
+  const rand = rng(20261024);
+  const hour = 3_600_000;
+  const rows: MemoryDb["pageEvents"] = [];
+  const push = (at: number, visitor: string, fields: Partial<MemoryDb["pageEvents"][number]>) => {
+    if (at > now.getTime()) return;
+    rows.push({ id: randomUUID(), at: iso(at), day: dateKey(localDateOf(new Date(at))), visitor, user_id: null, path: null, referrer_host: null, utm_source: null, utm_medium: null, utm_campaign: null, device: null, event: null, ...fields });
+  };
+  for (let back = 89; back >= 0; back--) {
+    const dayStart = Date.parse(`${dateKey(localDateOf(new Date(now.getTime() - back * 86_400_000)))}T00:00:00+03:00`);
+    const weekday = new Date(dayStart + 12 * hour).getUTCDay(); // 5 = Friday, 6 = Saturday: a quiet weekend
+    const growth = 1 + (89 - back) / 70; // the site grows over the quarter
+    const visitors = Math.round((weekday === 6 ? 14 : weekday === 5 ? 22 : 38) * growth + rand() * 12);
+    for (let n = 0; n < visitors; n++) {
+      const visitor = demoVisitor(`${back}:${n}`);
+      const source = pick(TRAFFIC_SOURCES, rand());
+      const mobile = rand() < 0.61;
+      const device = mobile ? ("mobile" as const) : ("desktop" as const);
+      let at = dayStart + (7 + rand() * 15) * hour;
+      const landing = pick(LANDINGS, rand()).path;
+      push(at, visitor, { path: landing, device, referrer_host: source.ref ?? null, utm_source: source.utm?.[0] ?? null, utm_medium: source.utm?.[1] ?? null, utm_campaign: source.utm?.[2] ?? null });
+      // a few more pages
+      const more = rand() < 0.45 ? 1 + Math.floor(rand() * 3) : 0;
+      for (let k = 0; k < more; k++) {
+        at += (20 + rand() * 160) * 1000;
+        push(at, visitor, { path: ["/pricing", "/", "/for/lawyers", "/privacy", "/start"][Math.floor(rand() * 5)]!, device });
+      }
+      // the signup: a campaign visitor starts more often; every step loses some
+      if (rand() > (source.utm ? 0.24 : 0.13)) continue;
+      at += 40_000;
+      push(at, visitor, { path: "/start/email", device });
+      push(at + 500, visitor, { path: "/start/email", device, event: "signup_start" });
+      if (rand() > 0.72) continue;
+      push((at += 35_000), visitor, { path: "/start/email", device, event: "code_sent" });
+      push(at + 800, visitor, { path: "/start/code", device });
+      if (rand() > 0.84) continue;
+      push((at += 50_000), visitor, { path: "/start/code", device, event: "code_ok" });
+      push(at + 900, visitor, { path: "/start/connect", device });
+      // the server-side steps: the user's own daily id (lib/analytics/track.ts)
+      const user = demoVisitor(`user:${back}:${n}`);
+      const linked = rand() < 0.71;
+      const mail = rand() < (linked ? 0.6 : 0.08);
+      if (mail) push((at += 90_000), user, { event: "mail_connected" });
+      push(at + 1000, visitor, { path: "/start/ready", device });
+      if (!linked) continue;
+      push((at += 120_000), user, { event: "wa_linked" });
+      if (rand() < (mail ? 0.36 : 0.1)) push(at + (3 + rand() * 6) * hour, user, { event: "paid" });
+    }
+  }
+  db.pageEvents.push(...rows.sort((a, b) => a.at.localeCompare(b.at)));
 }

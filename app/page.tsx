@@ -13,13 +13,11 @@ import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
 import { SupportChat } from "@/components/brand/support-chat";
 import { Trust } from "@/components/brand/landing/trust";
 import { BRAND } from "@/lib/brand";
+import { jsonLdString, organizationJsonLd, softwareApplicationJsonLd } from "@/lib/seo/json-ld";
+import { HOME_TITLE, SITE_IMAGE, pageMetadata } from "@/lib/seo/site";
 import "@/components/brand/landing/landing.css";
 
-export const metadata: Metadata = {
-  title: { absolute: `${BRAND.name} - ${BRAND.tagline}` },
-  description: BRAND.description,
-  openGraph: { title: `${BRAND.name} - ${BRAND.tagline}`, description: BRAND.description },
-};
+export const metadata: Metadata = pageMetadata({ path: "/", title: HOME_TITLE, absoluteTitle: true, description: BRAND.description, image: SITE_IMAGE });
 
 /**
  * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo (and the "עובדת עם" strip) → "נעים להכיר"
@@ -31,6 +29,8 @@ export const metadata: Metadata = {
 export default function HomePage() {
   return (
     <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
+      {/* structured data for search engines: who we are and what the plans cost (lib/seo/json-ld.ts) */}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString([organizationJsonLd(), softwareApplicationJsonLd()]) }} />
       <SmoothScroll />
       <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
       <main id="main" className="flex-1">

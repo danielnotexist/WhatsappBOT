@@ -8,8 +8,9 @@ import { QrCode } from "@/components/brand/qr-code";
 import { WaLinkButton } from "@/components/brand/wa-link-button";
 import { BRAND } from "@/lib/brand";
 import { publicWaNumber, waMeText } from "@/lib/wa/public-number";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "כניסה דרך וואטסאפ" };
+export const metadata: Metadata = { title: "כניסה דרך וואטסאפ", robots: NOINDEX };
 
 /** "הצטרפת דרך וואטסאפ?" — write "כניסה" to עלזה and get a one-time sign-in link back (round plan §3 row 7). */
 export default function LoginWhatsappPage() {

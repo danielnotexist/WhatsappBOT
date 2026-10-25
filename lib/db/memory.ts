@@ -56,6 +56,10 @@ import type {
   OwnerAlertClaimResult,
   OwnerAlertRow,
   OwnerAlertStatus,
+  AnalyticsReport,
+  FunnelStep,
+  NewPageEvent,
+  PageEventRow,
   SignupSource,
   SupportChatRow,
   SupportChatTurn,
@@ -99,6 +103,7 @@ export class MemoryDb implements Db {
   supportChats: SupportChatRow[] = [];
   appErrors: AppErrorRow[] = [];
   ownerAlerts: OwnerAlertRow[] = [];
+  pageEvents: PageEventRow[] = [];
   /** test clock */
   now: () => Date = () => new Date();
   /** user id for a new email — random by default; DEMO_MODE derives it from the email (lib/auth/demo-user.ts) */
@@ -200,6 +205,7 @@ export class MemoryDb implements Db {
     this.meetingSummaries = this.meetingSummaries.filter((s) => s.user_id !== id);
     this.supportChats = this.supportChats.filter((c) => c.user_id !== id); // SQL: on delete cascade
     this.appErrors = this.appErrors.filter((e) => e.user_id !== id);
+    for (const e of this.pageEvents) if (e.user_id === id) e.user_id = null; // SQL: on delete set null (the anonymous row stays)
   }
 
   async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
@@ -831,6 +837,69 @@ export class MemoryDb implements Db {
           open_tickets: this.supportTickets.filter((t) => t.user_id === u.id && t.status !== "closed").length,
         };
       });
+  }
+
+  // ---- page_events (migration 0017): mirrors analytics_daily / _top_pages / _sources / _devices / _funnel ----
+
+  async insertPageEvent(row: NewPageEvent): Promise<void> {
+    const userId = row.user_id && this.users.has(row.user_id) ? row.user_id : null; // SQL: the FK; the route retries without it
+    this.pageEvents.push({ ...structuredClone(row), user_id: userId, id: randomUUID(), at: row.at ?? iso(this.now()) });
+  }
+
+  async analyticsReport(fromDay: string, toDay: string, opts: { top?: number } = {}): Promise<AnalyticsReport> {
+    const from = parseDateKey(fromDay);
+    const to = parseDateKey(toDay);
+    if (!from || !to || compareDates(to, from) < 0 || compareDates(addDays(from, 366), to) < 0) throw new Error("analytics: bad range");
+    const top = Math.min(Math.max(opts.top ?? 10, 1), 100);
+    const inRange = this.pageEvents.filter((e) => e.day >= fromDay && e.day <= toDay).sort((a, b) => a.at.localeCompare(b.at));
+    const views = inRange.filter((e) => e.event === null);
+    const visitDay = (e: PageEventRow) => `${e.day}|${e.visitor}`;
+
+    const daily: AnalyticsReport["daily"] = [];
+    for (let d = from; compareDates(d, to) <= 0; d = addDays(d, 1)) {
+      const key = dateKey(d);
+      const day = views.filter((e) => e.day === key);
+      daily.push({ day: key, visitors: new Set(day.map((e) => e.visitor)).size, views: day.length });
+    }
+
+    const byPath = new Map<string, { views: number; visits: Set<string> }>();
+    for (const e of views) {
+      const p = byPath.get(e.path!) ?? { views: 0, visits: new Set<string>() };
+      p.views++;
+      p.visits.add(visitDay(e));
+      byPath.set(e.path!, p);
+    }
+    const pages = [...byPath.entries()]
+      .map(([path, p]) => ({ path, views: p.views, visitors: p.visits.size }))
+      .sort((a, b) => b.views - a.views || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+      .slice(0, top);
+
+    // per visitor-day: the first source and the first device seen that day (views are in time order)
+    const visits = new Map<string, { source: string | null; kind: "utm" | "referrer" | "direct"; device: PageEventRow["device"] }>();
+    for (const e of views) {
+      const v = visits.get(visitDay(e)) ?? { source: null, kind: "direct" as const, device: null };
+      if (v.source === null && (e.utm_source || e.referrer_host)) {
+        v.source = e.utm_source ?? e.referrer_host;
+        v.kind = e.utm_source ? "utm" : "referrer";
+      }
+      if (!v.device && e.device) v.device = e.device;
+      visits.set(visitDay(e), v);
+    }
+    const bySource = new Map<string, AnalyticsReport["sources"][number]>();
+    for (const v of visits.values()) {
+      const key = `${v.kind}|${v.source ?? ""}`;
+      const s = bySource.get(key) ?? { source: v.source, kind: v.kind, visitors: 0 };
+      s.visitors++;
+      bySource.set(key, s);
+    }
+    const sources = [...bySource.values()]
+      .sort((a, b) => b.visitors - a.visitors || (a.source === null ? 1 : b.source === null ? -1 : a.source < b.source ? -1 : a.source > b.source ? 1 : 0))
+      .slice(0, top);
+    const devices: AnalyticsReport["devices"] = (["mobile", "desktop"] as const).map((device) => ({ device, visitors: [...visits.values()].filter((v) => v.device === device).length }));
+
+    const steps: FunnelStep[] = ["visit", "signup_start", "code_sent", "code_ok", "wa_linked", "mail_connected", "paid"];
+    const funnel = steps.map((step) => ({ step, count: new Set(inRange.filter((e) => (e.event ?? "visit") === step).map(visitDay)).size }));
+    return { daily, pages, sources, devices, funnel };
   }
 
   async adminDailyStats(fromDay: string, toDay: string): Promise<AdminDailyRow[]> {

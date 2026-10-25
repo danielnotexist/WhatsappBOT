@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SupportChat } from "@/components/brand/support-chat";
 import { Wordmark } from "@/components/brand/wordmark";
+import { LEGAL_INDEXED, NOINDEX } from "@/lib/seo/site";
 
-// Drafts until a lawyer signs off: keep them out of search engines (round plan §3).
-export const metadata: Metadata = { robots: { index: false, follow: false } };
+// Drafts until a lawyer signs off: kept out of search engines (round plan §3) until LEGAL_INDEXED (lib/seo/site.ts).
+export const metadata: Metadata = LEGAL_INDEXED ? {} : { robots: NOINDEX };
 
 const DOCS = [
   { href: "/terms", label: "תנאי שימוש" },

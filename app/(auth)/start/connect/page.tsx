@@ -7,8 +7,9 @@ import { getSession } from "@/lib/auth/current-user";
 import { effectivePlan, entitlements, primaryProvider } from "@/lib/billing/plans";
 import { getDb } from "@/lib/db";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "חיבור המייל" };
+export const metadata: Metadata = { title: "חיבור המייל", robots: NOINDEX };
 
 /**
  * Step 4: connect Microsoft / Gmail or skip. The card is static (drawn at once, mounted once); only the session check

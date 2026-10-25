@@ -3,10 +3,12 @@
  *   /admin                → סקירה        /admin?tab=users   → משתמשים     /admin?tab=help   → צריך עזרה
  *   /admin?tab=tickets    → פניות        /admin?tab=chats   → צ'אט באתר   /admin?tab=errors → תקלות
  *   /admin?tab=alerts     → התראות (מה נשלח לבעלים במייל, מתגים ושעות שקט — lib/admin/alerts.ts)
+ *   /admin?tab=traffic    → תנועה (מבקרים, דפים, מקורות ומשפך ההרשמה — lib/analytics; &range=7|30|90)
  * Each tab is rendered by the server for its own data; the user page is /admin/users/<id>.
  */
 export const ADMIN_TABS = [
   { id: "overview", label: "סקירה" },
+  { id: "traffic", label: "תנועה" },
   { id: "users", label: "משתמשים" },
   { id: "help", label: "צריך עזרה" },
   { id: "tickets", label: "פניות" },

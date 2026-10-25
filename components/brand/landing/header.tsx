@@ -20,10 +20,10 @@ export function AccountCta() {
  * The landing header: wordmark and the section links (wide screens). Signed out, sign-in lives next to the hero's call
  * to action and the header carries no buttons; signed in, `account` (a request-time hole in app/page.tsx) puts
  * "לאזור האישי" at the inline end. Not sticky - the hero owns the first frame.
- * On another page (/pricing) `page` is its path: the in-page links lead back to the landing's sections ("/#day"), and
- * the link to this page is marked current.
+ * On another page (/pricing, a profession page under /for) `page` is its path: the in-page links lead back to the
+ * landing's sections ("/#day"), and the link to this page is marked current.
  */
-export function LandingHeader({ account, page }: { account?: ReactNode; page?: "/pricing" }) {
+export function LandingHeader({ account, page }: { account?: ReactNode; page?: "/pricing" | "/for" }) {
   return (
     <header className="relative z-10 mx-auto flex h-[4.75rem] w-full max-w-[84rem] items-center justify-between gap-6 px-4 sm:px-8 lg:px-12">
       <Wordmark />
@@ -31,7 +31,8 @@ export function LandingHeader({ account, page }: { account?: ReactNode; page?: "
         <nav aria-label={page ? "ניווט באתר" : "בדף הזה"} className="max-lg:hidden">
           <ul className="flex items-center gap-1 text-[0.9375rem]">
             {SECTIONS.map((s) => {
-              const current = s.href === page;
+              // a profession page (/for/<slug>) belongs to the landing's "לפי מקצוע"
+              const current = s.href === page || (page === "/for" && s.href === "#professions");
               return (
                 <li key={s.href}>
                   <a

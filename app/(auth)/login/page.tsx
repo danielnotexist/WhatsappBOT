@@ -8,8 +8,9 @@ import { Mascot } from "@/components/brand/mascot";
 import { WhatsappGlyph } from "@/components/brand/provider-logo";
 import { Wordmark } from "@/components/brand/wordmark";
 import { BRAND } from "@/lib/brand";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "כניסה" };
+export const metadata: Metadata = { title: "כניסה", robots: NOINDEX };
 
 /** A real morning summary, in the bot's own template (lib/copy/bot-m5.ts → act.morning.summary). */
 const MORNING: SnippetLine[] = [

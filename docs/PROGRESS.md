@@ -1046,3 +1046,44 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **לפני הפריסה**
 - להריץ את `0016_owner_alerts.sql` ב-Supabase **לפני** פריסת הקוד, בלי בלוק ה-pg_cron שבסוף. את הבלוק (`wabot_schedule_owner_alerts` כל רבע שעה, `wabot_purge_owner_alerts`) מריצים בקידום לייצור, כמו ב-0013 עד 0015. בלי המיגרציה ההתראות נכשלות בשקט (נרשם ב"תקלות"), ושום פעולה של משתמש לא נפגעת.
 - משתני סביבה: אין חדש חובה. המייל יוצא אל `ADMIN_EMAILS` (ריק = danielnotexist@gmail.com) דרך `RESEND_API_KEY` + `MAIL_FROM`; בהדגמה צריך `LIVE_SUPPORT_MAIL=1`. וואטסאפ בהמשך: `OWNER_ALERT_WA=1` + `ADMIN_PHONE` (למשל 972501234567), רק אחרי אישור `owner_alert` ב-Meta.
+
+
+## אנליטיקה ו-SEO (25.10, סבב 2 בתוכנית "התראות, אנליטיקה, שנתי")
+> הבקשה של דניאל: לדעת מי מגיע, מאיפה ואיפה נוטשים בהרשמה, וש-Google ימצא את האתר. בלי חבילות חדשות ובלי עוגיות מעקב.
+
+**אנליטיקה משלנו, בלי עוגיות (`lib/analytics`)**
+- **הדפדפן:** `PageBeacon` (`components/analytics/page-beacon.tsx`, ב-root layout בתוך Suspense) שולח `navigator.sendBeacon('/api/a')` בכל מעבר דף: הנתיב בלבד (השאילתה נזרקת; utm_source / utm_medium / utm_campaign בשדות משלהם), הדומיין המפנה בדף הראשון של הביקור בלבד, טלפון או מחשב לפי רוחב החלון. בונה ה-payload טהור ונבדק (`lib/analytics/beacon.ts`). Do-Not-Track או Global Privacy Control - לא נשלח כלום. לא נשלח כלום מ-`/admin`, `/api`, `/dev`, `/pay`, `/invoice`, `/login/w` (טוקן בכתובת).
+- **שלבי המשפך:** `signup_start` (כרטיס המייל על המסך), `code_sent`, `code_ok` - מהדפדפן (`email-step.tsx`, `code-step.tsx`, רק בהרשמה). `wa_linked` (`welcomeLinkedPhone`, גם בצ'אט ההדגמה), `mail_connected` (החזרה מ-Google ומ-Microsoft, וחיבור ההדגמה), `paid` (התשלום הראשון ב-`activateSubscription`, פעם אחת לעסקה) - נכתבים בשרת ישירות (`lib/analytics/track.ts`, אחרי התשובה, בלי לעכב ובלי לזרוק).
+- **`POST /api/a`:** zod (שדות ידועים בלבד, נתיב בלי שאילתה, שלב שרת לא יכול להגיע מהדפדפן), מגבלת קצב 120 לדקה לכל IP (`lib/rate-limit`), רובוטים לפי User-Agent נזרקים (Googlebot, תצוגות קישור, HeadlessChrome, curl...), DNT/GPC גם ככותרת, 204 מיד והכתיבה ב-`after()`. **המזהה:** `visitor = sha256(מלח יומי + IP + User-Agent)`; המלח נגזר ב-HKDF מ-`TOKEN_ENC_KEY` ומהתאריך (`derivedKey("analytics")`), מתחלף כל יום ולא נשמר. ה-IP וה-User-Agent לא נשמרים - רק ה-hash וסוג המכשיר. מקושר למשתמש רק כשיש session תקף (משתמש שנמחק - בלי קישור).
+- **מיגרציה `0017_analytics.sql`** (מוסיפה בלבד, **בלי `alter type ... add value`** - אפשר להריץ בטרנזקציה אחת): `page_events` (id, at, day בשעון ישראל, visitor, user_id עם on delete set null, path, referrer_host, utm_source/medium/campaign, device, event), אינדקסים על (day) ועל (event, day), RLS בלי policy ו-service_role בלבד כמו 0007-0016; `analytics_daily()`, `analytics_top_pages()`, `analytics_sources()`, `analytics_devices()`, `analytics_funnel()` (service_role בלבד); `purge_page_events()` אחרי 13 חודשים; בלוק pg_cron נפרד בסוף (`wabot_purge_page_events` פעם ביום). בדיקה: `supabase/tests/analytics.test.sql`.
+- **Db:** `insertPageEvent` / `analyticsReport` ב-MemoryDb (אותן תשובות כמו ה-SQL, אותו יום לדוגמה בשתי הבדיקות) וב-SupabaseDb (חמש הפונקציות במקביל; הפרת FK של משתמש שנמחק - שוב בלי הקישור).
+
+**הטאב "תנועה" ב-`/admin`** (`app/admin/_components/traffic-tab.tsx`, `?tab=traffic&range=7|30|90`, אותו שער ואותו עיצוב)
+- מבקרים, צפיות, דפים לביקור, התחילו הרשמה, שילמו; שני גרפים יומיים (מבקרים ייחודיים, צפיות) כ-small multiples ב-SVG, עם tooltip וטבלה; המשפך ביקור ← התחלת הרשמה ← קוד נשלח ← קוד אומת ← וואטסאפ ← מייל ← תשלום עם המספר, האחוז מהשלב הקודם, והנפילה הגדולה ביותר **בתוך ההרשמה** במילים (ביקור ← התחלת הרשמה הוא ההמרה של האתר ומוצג לבד, אחרת הוא היה מנצח תמיד); הדפים המובילים עם שם בעברית; מקורות (utm או אתר מפנה, "ישיר (בלי מפנה)" ו"לא ידוע"); טלפון מול מחשב. גוון אחד (דבש) לפי ה-dataviz skill; עובד ב-390.
+- "מבקרים" על פני טווח = מבקרים-ביום (המזהה מתחלף כל יום) - כתוב בטאב.
+- דמו לצילומים: `POST /api/dev/admin-seed` מוסיף 90 יום של תנועה (`lib/admin/demo-seed.ts`, דטרמיניסטי, פעם אחת).
+
+**SEO (`lib/seo`)**
+- **metadata מלא** (`pageMetadata`): כותרת עם התבנית "· עלזה", תיאור, `alternates.canonical` לפי `APP_URL` (`metadataBase`), Open Graph ב-he_IL עם תמונת השיתוף של הדף (מפורשת: Next ממזג metadata שטוח, ו-openGraph של דף מחליף את של ה-layout), `twitter: summary_large_image`. לדפים: `/`, `/pricing`, `/start`, עמודי "לפי מקצוע", והמסמכים המשפטיים.
+- **עמודי "לפי מקצוע" חדשים:** `/for/lawyers`, `/for/accountants`, `/for/consultants`, `/for/clinics` (`app/for/[profession]`, הטקסט ב-`components/brand/landing/profession-pages.ts`): כותרת למשרד, שלוש שאלות מהיום-יום עם התשובה (הראשונה מהסקציה בדף הבית), מה היא עושה במשרד, אמון, קריאה לפעולה. הסקציה בדף הבית מקשרת אליהם. slug לא מוכר - 404 אמיתי כבר ב-`proxy.ts` (`lib/seo/professions.ts`).
+- **noindex:** `/admin`, `/account`, `/pay`, `/login` (כולל כרטיסי הקוד והמייל ו-`/login/w`), `/demo`, שלבי ההרשמה אחרי `/start`. בנוסף `X-Robots-Tag: noindex, nofollow` מ-`proxy.ts` לכל `/admin`, `/account`, `/api`, `/pay`, `/invoice`, `/login`, `/demo` (גם ל-route handlers כמו החשבונית).
+- **המסמכים המשפטיים** עדיין noindex ומחוץ ל-sitemap (טיוטות לעו"ד); מתג אחד: `LEGAL_INDEXED` ב-`lib/seo/site.ts`.
+- **תמונות שיתוף** 1200×630 (`app/opengraph-image.tsx`, `app/pricing/opengraph-image.tsx`, `app/for/[profession]/opengraph-image.tsx`, `lib/og/card.tsx`): לילה ירוק, קרם ודבש, הסמל והשם. הפונט Varela Round מקובץ TTF בריפו (`assets/fonts`, OFL) - next/og לא קורא woff2. satori בלי bidi, ולכן כל שורה עברית נבנית בסדר ויזואלי (`lib/og/rtl.ts`: מילה לפריט, row-reverse + wrap, לטינית ומספרים בסדר שלהם, סוגריים מתהפכים). נבדק בעין: העברית נקראת נכון מימין לשמאל.
+- **`app/sitemap.ts`** (הדפים הציבוריים עם lastModified) ו-**`app/robots.ts`**: בייצור פתוח, הנתיבים הפרטיים חסומים, וכתובת ה-sitemap. **כש-`VERCEL_ENV !== "production"`** (Preview, הרצה מקומית) או ב-DEMO_MODE - `Disallow: /`, כדי שאתר הבדיקה לא ייכנס לחיפוש.
+- **JSON-LD** בדף הבית: Organization (שם מ-BRAND, כתובת, לוגו `/icon.png`) ו-SoftwareApplication (BusinessApplication, he, הצעה לבסיסי 99 ולפרו 299 ₪ מ-`lib/billing/plans.ts`). המחירים כוללים מע"מ (`valueAddedTaxIncluded`), כמו במחירון וב-`lib/billing/money.ts`.
+
+**פרטיות:** שורות חדשות ב-`docs/legal/privacy-policy-he.md` (גרסה 0.3) - בטבלה בסעיף 2, תקופת שמירה של 13 חודשים בסעיף 5, וסעיף 10 (עוגיות) - עם סימון לעו"ד, ופריט 9 ברשימת הפריטים לעו"ד. הדף `/privacy` מוצג מהקובץ, אז השינוי שם.
+
+**בדיקות**
+- יחידה: `lib/analytics/beacon.test.ts` (השאילתה נזרקת, utm, המפנה, נתיבים מוחרגים, DNT/GPC), `lib/analytics/send.test.ts` (jsdom: sendBeacon, DNT, GPC), `app/api/a/route.test.ts` (zod, מגבלת קצב, ה-hash ביום ובין ימים, אין IP ואין UA בשורה, רובוטים, 204, session, משתמש שנמחק), `lib/analytics/report.test.ts` (חשבון המשפך והנפילה הגדולה), `lib/analytics/track.test.ts` (השלבים בצד השרת, וואטסאפ ותשלום ראשון פעם אחת), `lib/db/memory-analytics.test.ts`, `lib/db/supabase-analytics.test.ts`, `app/admin/traffic-tab.test.tsx`, `lib/seo/seo.test.ts` (metadata של כל דף ציבורי, noindex בפרטיים, X-Robots-Tag, sitemap, robots כולל Preview, JSON-LD), `lib/og/rtl.test.ts`; וה-callbacks של Google ו-Microsoft (mail_connected).
+- SQL: `supabase/tests/analytics.test.sql`.
+- e2e: `e2e/analytics-seo.spec.ts` - ביקור עם `?utm_source=e2e` והרשמה דרך המסכים ← הבעלים רואה את המקור "e2e" ואת שלבי המשפך בטאב; `/robots.txt` ו-`/sitemap.xml` תקינים ו-`/admin` חסום; `/opengraph-image` הוא PNG ב-1200×630; עמוד מקצוע ב-1440 וב-390 בלי גלילה אופקית ו-axe נקי. `CAPTURE_TRAFFIC=<dir>` שומר צילומים.
+
+**לפני הפריסה**
+- להריץ את `0017_analytics.sql` ב-Supabase **לפני** פריסת הקוד, **בלי בלוק ה-pg_cron שבסוף** (`wabot_purge_page_events`); את הבלוק מריצים בקידום לייצור, כמו ב-0013 עד 0016. אין בה `alter type ... add value`. בלי המיגרציה הביקורים לא נשמרים (שורת אזהרה בלוג) ושום דבר באתר לא נשבר.
+- משתני סביבה: אין חדש. `TOKEN_ENC_KEY` כבר קיים (ממנו נגזר המלח), `APP_URL` לכתובות ה-canonical וה-sitemap, ו-`VERCEL_ENV` ש-Vercel מגדיר לבד.
+
+**פתוח**
+- המלח נגזר מ-`TOKEN_ENC_KEY`: מי שמחזיק במפתח ובטבלה יכול בעיקרון לנסות לשחזר IP מתוך מזהה (מרחב IPv4 קטן). החלופה - מלח אקראי ב-`ops_flags` שנמחק כל יום - חזקה יותר לפרטיות; אפשר לעבור אליה אם עו"ד ידרוש.
+- `/start` ועמודי המקצוע ב-sitemap; המסמכים המשפטיים ייכנסו כש-`LEGAL_INDEXED = true`.
+- נתוני הדמו של הפאנל (תשלומים של 116.82 ₪) ותשובת הדוגמה בצ'אט הדמו ("לפני מע״מ") מניחים מחיר לפני מע"מ, בעוד שהמחירון והחיוב כוללים מע"מ - לא נגעתי, כדאי ליישר.

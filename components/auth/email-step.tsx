@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
+import { trackEvent } from "@/lib/analytics/send";
 import { cn } from "@/lib/utils";
 import { StepHeading } from "./step-heading";
 import { StepAside, StepBody, StepMascot } from "./step-slots";
@@ -37,6 +38,10 @@ export const fieldClass =
 export function EmailStepFromUrl({ mode = "signup" }: { mode?: AuthMode }) {
   const params = useSearchParams();
   const { bfcacheId } = useRouter();
+  // the signup funnel's first step: the email card is on the screen (not the page's static fallback)
+  useEffect(() => {
+    if (mode === "signup") trackEvent("signup_start");
+  }, [mode, bfcacheId]);
   return <EmailStep key={bfcacheId} mode={mode} initialEmail={params.get("email") ?? ""} initialUpdates={mode === "signup" && params.get("updates") !== "0"} />;
 }
 
@@ -89,6 +94,7 @@ export function EmailStep({
       const res = await fetch("/api/auth/otp/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }) });
       const data = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; code?: string; retryAfterSeconds?: number };
       // A cooldown means a code was sent less than a minute ago — the code screen can still take it.
+      if (data.ok && mode === "signup") trackEvent("code_sent");
       if (data.ok || data.code === "cooldown") {
         const qs = new URLSearchParams({
           email: email.trim().toLowerCase(),

@@ -4,8 +4,9 @@ import { Suspense } from "react";
 import { ConnectTransition, HandoffSheet } from "@/components/auth/connect-transition";
 import { Wordmark } from "@/components/brand/wordmark";
 import { isConnectProvider, type ConnectProvider } from "@/lib/auth/oauth-providers";
+import { NOINDEX } from "@/lib/seo/site";
 
-export const metadata: Metadata = { title: "מתחברים", robots: { index: false } };
+export const metadata: Metadata = { title: "מתחברים", robots: NOINDEX };
 
 export function generateStaticParams(): { provider: ConnectProvider }[] {
   return [{ provider: "microsoft" }, { provider: "google" }];

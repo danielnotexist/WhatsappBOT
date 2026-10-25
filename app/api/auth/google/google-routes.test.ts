@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { flushServerEvents } from "@/lib/analytics/track";
 import { createSessionToken } from "@/lib/auth/session";
 import { decryptToken } from "@/lib/crypto";
 import { setDbForTests } from "@/lib/db";
@@ -82,6 +83,9 @@ describe("Google connect routes (memory mode)", () => {
     expect(wa.texts.at(-1)).toContain("את תיבת ה-Gmail עצמה אני לא קורא");
     expect((await db.getUser(user.id))!.name).toBe("דנה לוי");
     expect(db.audit.at(-1)).toMatchObject({ action: "google.connect", target: "dana.levi@gmail.com", result: "ok" });
+    // the signup funnel's "mail connected" step (lib/analytics/track.ts)
+    await flushServerEvents();
+    expect(db.pageEvents.filter((e) => e.event === "mail_connected").map((e) => e.user_id)).toEqual([user.id]);
 
     // state is single-use; bad or Microsoft chat tokens are refused
     const again = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=x`));

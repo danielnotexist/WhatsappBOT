@@ -1,3 +1,4 @@
+import { trackServerEvent } from "@/lib/analytics/track";
 import { reportError } from "@/lib/errors/report";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
 import { GOOGLE_CAPABILITY_SCOPES, gcopy } from "@/lib/copy/bot-google";
@@ -130,6 +131,7 @@ export async function GET(request: Request) {
     const refreshToken = tokens.refreshToken ?? (existing ? await storedGoogleRefreshToken(db, existing).catch(() => null) : null);
     const connection = await db.upsertConnection({ user_id: user.id, provider: "google", account_email: email, tenant_id: null, scopes, consent_type: "user", ...sealGoogleTokens(user.id, { ...tokens, refreshToken }) });
     await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[google:callback] replacing older connections failed:", (e as Error).message));
+    trackServerEvent(db, "mail_connected", user.id); // the signup funnel (lib/analytics)
 
     // the restricted reads riding along a plain connect are optional: unticking them is a choice, not a failed connect
     const optional: string[] = feature ? [] : [GOOGLE_SCOPES.gmailReadonly, GOOGLE_SCOPES.driveReadonly];

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ownerAlert } from "@/lib/admin/alerts";
+import { trackServerEvent } from "@/lib/analytics/track";
 import { chargeReason, renewalNext } from "@/lib/copy/owner-alerts";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import type { BillingApprovalRow, Db, SubscriptionRow, UserRow } from "@/lib/db/types";
@@ -54,7 +55,10 @@ export async function activateSubscription(db: Db, user: UserRow, input: Activat
   });
   await scheduleCharge(db, user.id, nextChargeAt);
   await db.addAudit({ user_id: user.id, action: "subscription.activate", target: input.plan, result: payment ? "ok" : "duplicate_payment" });
-  return { subscription, firstTime: !previous || previous.status === "trial", duplicate: !payment };
+  const firstTime = !previous || previous.status === "trial";
+  // the signup funnel's last step: the first real payment (lib/analytics), once per transaction
+  if (payment && firstTime) trackServerEvent(db, "paid", user.id, now);
+  return { subscription, firstTime, duplicate: !payment };
 }
 
 /** Replaces the saved card (HYP J2 card check → getToken). The plan, dates and failure count stay as they are. */
