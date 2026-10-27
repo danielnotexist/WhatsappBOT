@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoHasSupabase, isDemo, liveGoogleFlag, liveMsFlag, liveSupportMailFlag, liveWaFlag } from "@/lib/demo";
+import { demoHasSupabase, isDemo, liveGoogleFlag, liveHypFlag, liveMsFlag, liveSupportMailFlag, liveWaFlag } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -219,6 +219,19 @@ export function googleMocked(source: Record<string, string | undefined> = proces
 /** מצב "מייל תמיכה חי" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_SUPPORT_MAIL=1` — only the support-ticket email is real. */
 export function liveSupportMailInDemo(source: Record<string, string | undefined> = process.env): boolean {
   return liveSupportMailFlag(source) && isDemo(source);
+}
+
+/**
+ * מצב "סליקה חיה" בתוך ההדגמה: `DEMO_MODE=1` + `LIVE_HYP=1` + מסוף בדיקה של HYP (00100…) — real HYP pages, tokens and
+ * receipts with no real money (lib/demo.ts allows HYP_KEY / HYP_PASSP only next to a test terminal).
+ */
+export function liveHypInDemo(source: Record<string, string | undefined> = process.env): boolean {
+  return liveHypFlag(source) && isDemo(source);
+}
+
+/** HYP (lib/hyp) uses its mock gateway: in DATA_MODE=memory and in the demo, except the demo with LIVE_HYP=1. */
+export function hypMocked(source: Record<string, string | undefined> = process.env): boolean {
+  return integrationsMocked(source) && !liveHypInDemo(source);
 }
 
 /** The owner (Daniel) — who opens /admin when ADMIN_EMAILS is not set. */

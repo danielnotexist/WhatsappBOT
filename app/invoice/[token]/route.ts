@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { verifyInvoiceToken } from "@/lib/billing/links";
-import { EnvError, integrationsMocked } from "@/lib/env";
+import { EnvError, hypMocked } from "@/lib/env";
 
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
@@ -24,7 +24,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/invoice/[token]
     if (!payment) return notFound();
     const url = await billing.hyp.invoiceUrl(v.transId);
     if (!url) return text("HYP לא החזיר חתימה לקבלה. אפשר לנסות שוב בעוד רגע.", 502);
-    if (integrationsMocked()) return Response.redirect(url, 302);
+    if (hypMocked()) return Response.redirect(url, 302);
     const res = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(15_000) });
     if (res.ok && /pdf/i.test(res.headers.get("content-type") ?? "")) {
       return new Response(res.body, {

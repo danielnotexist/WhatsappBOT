@@ -9,7 +9,7 @@ import { DemoConfigError } from "@/lib/demo";
 import { setGlobalSingleton } from "@/lib/global-singleton";
 import { getGoogleConfig, getGoogleFetch } from "@/lib/google";
 import { getHyp } from "@/lib/hyp";
-import { MockHypGateway } from "@/lib/hyp/client";
+import { HypClient, MockHypGateway } from "@/lib/hyp/client";
 import { getMailer } from "@/lib/mail";
 import { ConsoleMailer } from "@/lib/mail/console";
 import { getGraphFetch, getMsConfig } from "@/lib/ms";
@@ -18,7 +18,7 @@ import { LocalQueue } from "@/lib/queue/local";
 import { getSttProvider } from "@/lib/stt";
 import { MockStt } from "@/lib/stt/mock";
 import { FallbackStt } from "@/lib/stt/fallback";
-import { EnvError, aiMocked, googleMocked, liveSupportMailInDemo, liveAiInDemo, liveGoogleInDemo, liveMsInDemo, liveWaInDemo, msMocked, sttMocked, waMocked } from "@/lib/env";
+import { EnvError, aiMocked, googleMocked, hypMocked, liveHypInDemo, liveSupportMailInDemo, liveAiInDemo, liveGoogleInDemo, liveMsInDemo, liveWaInDemo, msMocked, sttMocked, waMocked } from "@/lib/env";
 import { getWaSender } from "@/lib/wa";
 import { DEV_PUBLIC_NUMBER, publicWaNumber } from "@/lib/wa/public-number";
 import { WaClient } from "@/lib/wa/client";
@@ -205,6 +205,32 @@ describe("DEMO_MODE=1 forces every integration factory to its mock", () => {
     reset();
     stubDemo({ RESEND_API_KEY: "re-real" });
     expect(() => getMailer()).toThrow(/RESEND_API_KEY/);
+  });
+
+  it("LIVE_HYP=1 in the demo with a HYP test terminal (00100…): HYP_KEY / HYP_PASSP allowed and HYP is real, nothing else", () => {
+    stubDemo({ LIVE_HYP: "1", HYP_MASOF: "0010012345", HYP_KEY: "hyp-key", HYP_PASSP: "hyp-passp" });
+    expect(liveHypInDemo()).toBe(true);
+    expect(hypMocked()).toBe(false);
+    expect(getHyp()).toBeInstanceOf(HypClient);
+    // only HYP: WhatsApp, mail, Microsoft and Google stay mocked
+    expect(getWaSender()).toBeInstanceOf(RecordingWaSender);
+    expect(getMailer()).toBeInstanceOf(ConsoleMailer);
+    expect(getMsConfig().clientId).toBe("memory-client");
+  });
+
+  it("LIVE_HYP=1 next to a real terminal is refused (no real money in the demo); without LIVE_HYP the keys are refused too", () => {
+    stubDemo({ LIVE_HYP: "1", HYP_MASOF: "4500123456", HYP_KEY: "hyp-key", HYP_PASSP: "hyp-passp" });
+    expect(() => getHyp()).toThrow(DemoConfigError);
+    expect(() => getHyp()).toThrow(/HYP_KEY/);
+    vi.unstubAllEnvs();
+    reset();
+    stubDemo({ HYP_MASOF: "0010012345", HYP_KEY: "hyp-key", HYP_PASSP: "hyp-passp" });
+    expect(() => getHyp()).toThrow(/HYP_PASSP/);
+    vi.unstubAllEnvs();
+    reset();
+    stubDemo({ LIVE_HYP: "1" });
+    expect(hypMocked()).toBe(false);
+    expect(() => getHyp()).toThrow(EnvError);
   });
 
   it("without DEMO_MODE the same keys mean the real clients (the switch is the demo, not the keys)", () => {

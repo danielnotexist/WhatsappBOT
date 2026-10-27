@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { integrationsMocked } from "@/lib/env";
+import { hypMocked } from "@/lib/env";
 
 /** A one-page placeholder PDF for the mock invoice link (ASCII only — no fonts needed). */
 function mockInvoicePdf(transId: string): Uint8Array {
@@ -28,7 +28,7 @@ function mockInvoicePdf(transId: string): Uint8Array {
 export async function GET(request: Request) {
   // request-time: otherwise Cache Components prerenders this GET at build (a frozen 404 or a frozen redirect)
   await connection();
-  if (!integrationsMocked()) return new Response("not found", { status: 404 });
+  if (!hypMocked()) return new Response("not found", { status: 404 });
   // The server action's redirect() reaches this same-origin URL as a client-side (RSC) navigation, which cannot follow
   // a route handler (the address bar would keep this URL). Answer it with a plain page so the router falls back to a
   // full load — like the real HYP page, which is always a full, cross-origin navigation.

@@ -23,8 +23,9 @@
  * and without LIVE_AI=1 they are not used at all. With `LIVE_WA=1` WA_ACCESS_TOKEN is allowed too: WhatsApp is real
  * (Meta's test number, which only reaches the recipients registered in Meta); `LIVE_MS=1` allows MS_CLIENT_SECRET and
  * `LIVE_GOOGLE=1` allows GOOGLE_CLIENT_SECRET (real OAuth with the real tenant / GCP project); `LIVE_SUPPORT_MAIL=1` allows
- * RESEND_API_KEY for the support-ticket email only (sign-in codes and every other mail stay on the console).
- * Everything else stays refused.
+ * RESEND_API_KEY for the support-ticket email only (sign-in codes and every other mail stay on the console);
+ * `LIVE_HYP=1` allows HYP_KEY and HYP_PASSP only next to a HYP test terminal (HYP_MASOF starting with 00100 - no real
+ * money moves there). Everything else stays refused.
  *
  * Dependency-free on purpose: lib/env.ts and proxy.ts import it.
  */
@@ -76,6 +77,19 @@ export function liveSupportMailFlag(source: EnvSource = process.env): boolean {
   return flagOn(source.LIVE_SUPPORT_MAIL);
 }
 
+/** The raw LIVE_HYP switch: inside the demo, HYP is real - but only a test terminal (`hypTestTerminal()`). */
+export function liveHypFlag(source: EnvSource = process.env): boolean {
+  return flagOn(source.LIVE_HYP);
+}
+
+/** HYP test terminals start with 00100 (docs/hyp-setup.md §1): payments there never move real money. */
+export const HYP_TEST_TERMINAL_PREFIX = "00100";
+
+/** HYP_MASOF is a HYP test terminal. */
+export function hypTestTerminal(source: EnvSource = process.env): boolean {
+  return (source.HYP_MASOF?.trim() ?? "").startsWith(HYP_TEST_TERMINAL_PREFIX);
+}
+
 /** A Supabase project is configured (any of its server variables) — the demo then keeps its data there. */
 export function demoHasSupabase(source: EnvSource = process.env): boolean {
   return ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].some((key) => Boolean(source[key]?.trim()));
@@ -124,6 +138,8 @@ export function demoProblems(source: EnvSource = process.env): { forbidden: stri
     ...(liveMsFlag(source) ? ["MS_CLIENT_SECRET"] : []),
     ...(liveGoogleFlag(source) ? ["GOOGLE_CLIENT_SECRET"] : []),
     ...(liveSupportMailFlag(source) ? ["RESEND_API_KEY"] : []),
+    // a real terminal never runs in the demo, even with LIVE_HYP: HYP_KEY / HYP_PASSP stay forbidden next to it
+    ...(liveHypFlag(source) && hypTestTerminal(source) ? ["HYP_KEY", "HYP_PASSP"] : []),
   ];
   const forbidden = DEMO_FORBIDDEN_KEYS.filter((key) => !allowed.includes(key) && Boolean(source[key]?.trim()));
   const missing = isBase64Key32(source.TOKEN_ENC_KEY) ? [] : ["TOKEN_ENC_KEY"];
