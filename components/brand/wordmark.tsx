@@ -36,16 +36,20 @@ export function Emblem({ className }: { className?: string }) {
 }
 
 /**
- * The logo: emblem + "עלזה" in Fredoka Bold, and with `slogan` the company line under the name ("מבקשים בוואטסאפ. היא
- * על זה."). Links home unless `href` is null.
+ * The logo: emblem + "עלזה" in the site's face (regular weight - Daniel, 28.10.2026), and under it the company slogan
+ * ("מבקשים בוואטסאפ. היא על זה.") on every page. `slogan={false}` drops it where there is no room. On a light surface
+ * (`className` with text-ink) the slogan takes the ink's muted tone. Links home unless `href` is null.
  */
-export function Wordmark({ href = "/", className, slogan = false }: { href?: "/" | null; className?: string; slogan?: boolean }) {
+export function Wordmark({ href = "/", className, slogan = true }: { href?: "/" | null; className?: string; slogan?: boolean }) {
+  const light = className?.split(/\s+/).includes("text-ink") ?? false;
   const content = (
     <span className={cn("inline-flex items-center gap-2.5 text-cream", className)}>
       <Emblem className="size-9" />
       <span className="flex flex-col">
-        <span className="alze-logo-type text-[1.7rem] leading-none">{BRAND.name}</span>
-        {slogan ? <span className="mt-1 text-[0.75rem] leading-none text-cream-muted">{BRAND.slogan}</span> : null}
+        <span className="font-heading text-[1.7rem] leading-none">{BRAND.name}</span>
+        {slogan ? (
+          <span className={cn("mt-1 text-[0.75rem] leading-none", light ? "text-ink-muted" : "text-cream-muted")}>{BRAND.slogan}</span>
+        ) : null}
       </span>
     </span>
   );

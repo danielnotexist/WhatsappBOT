@@ -29,6 +29,7 @@ export function Mascot({
   eager = false,
   idle = true,
   className,
+  flip = false,
 }: {
   pose: MascotPoseName;
   alt?: string;
@@ -38,6 +39,8 @@ export function Mascot({
   eager?: boolean;
   idle?: boolean;
   className?: string;
+  /** Mirror the pose so the hoopoe looks the other way (toward the content next to it). */
+  flip?: boolean;
 }) {
   const reduce = useReducedMotion();
   const move = idle && !reduce;
@@ -57,7 +60,7 @@ export function Mascot({
         sizes={sizes}
         loading={eager ? "eager" : "lazy"}
         draggable={false}
-        className="block h-auto w-full"
+        className={cn("block h-auto w-full", flip && "-scale-x-100")}
       />
     </motion.div>
   );

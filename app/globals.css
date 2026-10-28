@@ -367,9 +367,3 @@ html[data-a11y-motion] [data-slot="step-body"] .group,
 html[data-a11y-motion] [data-slot="step-body"] .group svg {
   translate: none !important;
 }
-
-/* the wordmark's family (components/brand/wordmark.tsx): Fredoka Bold from lib/fonts.ts, only for "עלזה" */
-.alze-logo-type {
-  font-family: var(--font-fredoka), var(--font-body), Arial, Helvetica, sans-serif;
-  font-weight: 700;
-}

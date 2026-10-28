@@ -1148,3 +1148,4 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 
 ## לוגו וסלוגן (28.10)
 - דניאל בחר: סמל עם ראש הדוכיפת בטבעת דבש (`public/brand/mascot/emblem.webp`, חיתוך מ-`front.webp`) + "עלזה" ב-Fredoka Bold (`lib/fonts.ts` `logoFont`, המחלקה `.alze-logo-type` ב-`app/globals.css`), וסלוגן החברה `BRAND.slogan` = "מבקשים בוואטסאפ. היא על זה." מתחת לשם בכותרת ובתחתית דף הבית (`<Wordmark slogan />`). `components/brand/wordmark.tsx`: `Emblem` + `Wordmark`. נבדקה גם דבורה כקמע (השוואה ב-scratchpad) - דניאל נשאר עם עלזה והדוכיפת.
+- עדכון (28.10): "עלזה" בגופן הרגיל של האתר (בלי הדגשה, Fredoka הוסר), והסלוגן מופיע מתחת ללוגו בכל הדפים (`slogan` ברירת מחדל; על משטח בהיר בגוון הדיו). הדוכיפת בדף הכניסה מסתכלת אל התוכן (`<Mascot flip />`).

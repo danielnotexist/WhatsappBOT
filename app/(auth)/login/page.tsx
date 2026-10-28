@@ -136,6 +136,7 @@ export default function LoginPage() {
               pose="waving"
               alt={`הדוכיפת של ${BRAND.name} מנופפת לשלום`}
               eager
+              flip
               sizes="208px"
               className="absolute end-[-0.5rem] bottom-[-1.5rem] z-20 w-[min(13rem,26vh)]"
             />
