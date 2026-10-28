@@ -21,7 +21,7 @@ export function LandingFooter() {
         )}
       >
         <div>
-          <Wordmark />
+          <Wordmark slogan />
           <p className="mt-3 text-[0.9375rem] text-cream-muted">{BRAND.tagline}</p>
         </div>
         <nav aria-label="קישורים">

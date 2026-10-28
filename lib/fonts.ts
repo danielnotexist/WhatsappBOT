@@ -1,4 +1,4 @@
-import { Varela_Round } from "next/font/google";
+import { Fredoka, Varela_Round } from "next/font/google";
 
 /**
  * One family for the whole site: Varela Round (Daniel's choice, 21.10). next/font downloads the file at build time
@@ -18,12 +18,25 @@ export const bodyFont = Varela_Round({
   fallback: ["Arial", "Helvetica", "sans-serif"],
 });
 
-/** For <html className> — defines the CSS variable for the whole tree. */
-export const fontVariables = bodyFont.variable;
+/**
+ * The wordmark only (Daniel, 28.10.2026): "עלזה" in Fredoka Bold - rounded like Varela Round, with the weight a logo
+ * needs. Not used for running text. Applied by `.alze-logo-type` (app/globals.css).
+ */
+export const logoFont = Fredoka({
+  subsets: ["hebrew", "latin"],
+  weight: "700",
+  variable: "--font-fredoka",
+  display: "swap",
+  fallback: ["Arial", "Helvetica", "sans-serif"],
+});
+
+/** For <html className> — defines the CSS variables for the whole tree. */
+export const fontVariables = `${bodyFont.variable} ${logoFont.variable}`;
 
 /** The active families (for docs / design pages). */
 export const activeFonts = {
   heading: "Varela Round",
   hand: "Varela Round",
   body: "Varela Round",
+  logo: "Fredoka",
 } as const;

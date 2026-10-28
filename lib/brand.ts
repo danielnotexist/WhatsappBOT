@@ -11,6 +11,8 @@ export const BRAND = {
   latin: "Alze",
   /** One line under the logo / in metadata. */
   tagline: "העוזרת האישית שלך, בוואטסאפ.",
+  /** The company slogan under the wordmark (Daniel, 28.10.2026). */
+  slogan: "מבקשים בוואטסאפ. היא על זה.",
   /** Short description for metadata and link previews. */
   description: "עוזרת אישית בוואטסאפ שמטפלת במייל, ביומן ובקבצים של העסק שלך - בעברית, עם חיבור ל-Microsoft 365 ול-Google.",
   /** Placeholder until the domain is purchased - alze.ai is taken (DNS, 24.10.2026), so it is never shown publicly. */

@@ -26,7 +26,7 @@ export function AccountCta() {
 export function LandingHeader({ account, page }: { account?: ReactNode; page?: "/pricing" | "/for" }) {
   return (
     <header className="relative z-10 mx-auto flex h-[4.75rem] w-full max-w-[84rem] items-center justify-between gap-6 px-4 sm:px-8 lg:px-12">
-      <Wordmark />
+      <Wordmark slogan />
       <div className="flex items-center gap-4">
         <nav aria-label={page ? "ניווט באתר" : "בדף הזה"} className="max-lg:hidden">
           <ul className="flex items-center gap-1 text-[0.9375rem]">

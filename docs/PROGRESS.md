@@ -1145,3 +1145,6 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 ## סליקה חיה בהדגמה - מסוף בדיקה בלבד (27.10)
 - מתג חדש `LIVE_HYP=1` (`lib/demo.ts` `liveHypFlag`, `hypTestTerminal`; `lib/env.ts` `liveHypInDemo`, `hypMocked`): בהדגמה HYP אמיתי רק כש-`HYP_MASOF` מתחיל ב-`00100` (מסוף בדיקה, בלי כסף אמיתי). ליד מסוף אמיתי - `DemoConfigError`. `lib/hyp/index.ts`, `app/api/pay/mock`, `app/invoice/[token]` עברו ל-`hypMocked()`. בדיקות: `lib/demo-factories.test.ts`. מדריך: `docs/hyp-setup.md` §3.
 - מדניאל: מספר מסוף הבדיקה, KEY ו-PassP מהפורטל, "אימות על ידי חתימה" מופעל, והפנייה לאחר עסקה מוצלחת ל-`https://alze-nine.vercel.app/api/pay/return`.
+
+## לוגו וסלוגן (28.10)
+- דניאל בחר: סמל עם ראש הדוכיפת בטבעת דבש (`public/brand/mascot/emblem.webp`, חיתוך מ-`front.webp`) + "עלזה" ב-Fredoka Bold (`lib/fonts.ts` `logoFont`, המחלקה `.alze-logo-type` ב-`app/globals.css`), וסלוגן החברה `BRAND.slogan` = "מבקשים בוואטסאפ. היא על זה." מתחת לשם בכותרת ובתחתית דף הבית (`<Wordmark slogan />`). `components/brand/wordmark.tsx`: `Emblem` + `Wordmark`. נבדקה גם דבורה כקמע (השוואה ב-scratchpad) - דניאל נשאר עם עלזה והדוכיפת.

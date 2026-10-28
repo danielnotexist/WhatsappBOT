@@ -16,12 +16,37 @@ export function CrestMark({ className }: { className?: string }) {
   );
 }
 
-/** The wordmark: crest + "עלזה" in the headline serif. Links home unless `href` is null. */
-export function Wordmark({ href = "/", className }: { href?: "/" | null; className?: string }) {
+/**
+ * The emblem (Daniel, 28.10.2026): the hoopoe's head in a honey ring, on the night. Decorative - the name next to it
+ * says it. `public/brand/mascot/emblem.webp` is cut from the front pose.
+ */
+export function Emblem({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "relative block flex-none overflow-hidden rounded-full border-2 border-honey bg-[radial-gradient(circle_at_50%_35%,#24402f,#0c1712)]",
+        className,
+      )}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- a 15 KB decorative crop, same file everywhere */}
+      <img src="/brand/mascot/emblem.webp" alt="" width={256} height={256} className="block size-full" decoding="async" />
+    </span>
+  );
+}
+
+/**
+ * The logo: emblem + "עלזה" in Fredoka Bold, and with `slogan` the company line under the name ("מבקשים בוואטסאפ. היא
+ * על זה."). Links home unless `href` is null.
+ */
+export function Wordmark({ href = "/", className, slogan = false }: { href?: "/" | null; className?: string; slogan?: boolean }) {
   const content = (
-    <span className={cn("inline-flex items-center gap-2 font-heading text-[1.6rem] leading-none font-bold text-cream", className)}>
-      <CrestMark className="size-6 text-honey" />
-      {BRAND.name}
+    <span className={cn("inline-flex items-center gap-2.5 text-cream", className)}>
+      <Emblem className="size-9" />
+      <span className="flex flex-col">
+        <span className="alze-logo-type text-[1.7rem] leading-none">{BRAND.name}</span>
+        {slogan ? <span className="mt-1 text-[0.75rem] leading-none text-cream-muted">{BRAND.slogan}</span> : null}
+      </span>
     </span>
   );
   if (href === null) return content;
