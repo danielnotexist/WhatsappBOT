@@ -75,7 +75,7 @@ export function PlanSheet({ className, tilesShown = TILES_SHOWN, headingLevel = 
   return (
     <CycleProvider>
       <div className={className}>
-        {/* monthly by default; the annual face: "990 ₪ לשנה · חודשיים מתנה" (./plan-cycle.tsx) */}
+        {/* monthly by default; the annual face: "82.50 ₪ לחודש", the yearly charge under it (./plan-cycle.tsx) */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <CycleToggle />
           <AnnualOnly>

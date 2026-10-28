@@ -60,11 +60,12 @@ test.describe("annual billing and referrals", () => {
     await capture(page, "pricing-monthly-1440");
     await page.getByText("שנתי", { exact: true }).first().click();
     await expect(page.getByRole("radio", { name: /שנתי/ })).toBeChecked();
-    await expect(basic.getByText("990", { exact: true })).toBeVisible();
-    await expect(basic.getByText("לשנה · חודשיים מתנה")).toBeVisible();
-    await expect(basic.getByText("82.50 ₪ לחודש")).toBeVisible();
-    await expect(pro.getByText("2,990", { exact: true })).toBeVisible();
-    await expect(pro.getByText("249.17 ₪ לחודש")).toBeVisible();
+    // the month's share big (agorot raised), the monthly price struck through, the yearly charge under it
+    await expect(basic.locator("[data-price-month]")).toHaveText("82.50");
+    await expect(basic.locator("s")).toHaveText("99 ₪");
+    await expect(basic.getByText("990 ₪ לשנה, בחיוב אחד")).toBeVisible();
+    await expect(pro.locator("[data-price-month]")).toHaveText("249.17");
+    await expect(pro.getByText("2,990 ₪ לשנה, בחיוב אחד")).toBeVisible();
     // both cards still fit one 1440×900 screen on the annual face too
     await page.goto("/#pricing");
     await page.locator("#pricing").evaluate((el) => el.scrollIntoView({ block: "start" }));
@@ -267,7 +268,7 @@ test.describe("annual billing and referrals", () => {
     await page.evaluate(() => window.scrollBy(0, -140));
     await capture(page, "pricing-monthly-390");
     await page.getByText("שנתי", { exact: true }).first().click();
-    await expect(page.getByRole("article", { name: "בסיסי" }).getByText("990", { exact: true })).toBeVisible();
+    await expect(page.getByRole("article", { name: "בסיסי" }).getByText("990 ₪ לשנה, בחיוב אחד")).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(0);
     await capture(page, "pricing-annual-390");
     await ctx.close();

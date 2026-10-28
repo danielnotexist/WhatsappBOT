@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * The monthly / annual switch of the price cards (round 3, "מסלול שנתי"): the landing and /pricing. Monthly by default;
- * the annual face shows the yearly price ("990 ₪ לשנה · חודשיים מתנה") and what it comes to per month. The choice is
+ * the annual face shows what the year comes to per month ("82.50 ₪ לחודש") and the yearly charge under it. The choice is
  * remembered in a first-party cookie (alze_cycle, 30 days) so the payment page opens on the same cycle — nothing is
  * charged from here; the plan is still chosen and paid on the pay page. The numbers come in as props from the server
  * (lib/billing/plans.ts), so this client file carries no prices of its own.
@@ -75,20 +75,42 @@ export function CycleToggle({ className }: { className?: string }) {
 }
 
 /**
- * One plan's price on its card. Monthly: "99 ₪ לחודש", and under it the annual offer. Annual: "990 ₪ לשנה ·
- * חודשיים מתנה", and under it the per-month equivalent. Both faces have the same two lines, so the cards keep their
- * height when the switch flips. The amounts arrive formatted ("99", "990", "82.50").
+ * One plan's price on its card. Monthly: "99 ₪ לחודש", and under it the annual offer. Annual (Daniel, 28.10.2026: the
+ * month's share reads cheaper than the year's total): "82.50 ₪ לחודש" with the monthly price struck through, and under
+ * it the yearly charge ("990 ₪ לשנה, בחיוב אחד"). Both faces have the same two lines, so the cards keep their height
+ * when the switch flips. The amounts arrive formatted ("99", "990", "82.50").
  */
 export function PlanPrice({ monthly, annual, perMonth }: { monthly: string; annual: string; perMonth: string }) {
   const yearly = useShownCycle() === "annual";
+  const [whole, agorot] = perMonth.split(".");
   return (
     <p className="flex flex-none items-end gap-1.5">
-      <span className="tabular font-heading text-[clamp(3.25rem,2.6rem+2vw,4.5rem)] leading-[0.85] font-bold tracking-[-0.02em]">{yearly ? annual : monthly}</span>
+      <span className="tabular font-heading text-[clamp(3.25rem,2.6rem+2vw,4.5rem)] leading-[0.85] font-bold tracking-[-0.02em]">
+        {yearly ? (
+          <>
+            <span className="sr-only">{perMonth}</span>
+            {/* the agorot small and raised, as on a price tag */}
+            <span aria-hidden="true" data-price-month="">
+              {whole}
+              {agorot ? <span className="align-top text-[0.42em] leading-none">.{agorot}</span> : null}
+            </span>
+          </>
+        ) : (
+          monthly
+        )}
+      </span>
       <span className="font-heading text-[1.75rem] leading-none font-bold">₪</span>
-      {/* two short lines beside the digits (no extra height): the period, then the other cycle / the month's share */}
+      {/* two short lines beside the digits (no extra height): the period, then the other cycle / the yearly charge */}
       <span className="ms-0.5 flex flex-col pb-0.5 text-[0.875rem] leading-[1.3] text-ink-muted">
-        <span className="whitespace-nowrap">{yearly ? `לשנה · ${CYCLE_LABELS.gift}` : "לחודש"}</span>
-        <span className="text-[0.8125rem] whitespace-nowrap">{yearly ? `${perMonth} ₪ לחודש` : `או ${annual} ₪ לשנה`}</span>
+        {yearly ? (
+          <span className="whitespace-nowrap">
+            לחודש · <span className="sr-only">במקום </span>
+            <s>{monthly} ₪</s>
+          </span>
+        ) : (
+          <span className="whitespace-nowrap">לחודש</span>
+        )}
+        <span className="text-[0.8125rem] whitespace-nowrap">{yearly ? `${annual} ₪ לשנה, בחיוב אחד` : `או ${annual} ₪ לשנה`}</span>
       </span>
     </p>
   );

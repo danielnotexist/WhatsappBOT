@@ -1170,3 +1170,11 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 - Microsoft (Entra → App registrations → עלזה): **Token configuration → Add optional claim → ID → `email` ו-`xms_edov`**. בלי זה חשבון עבודה קיים יקבל קוד במייל במקום כניסה ישירה. כדי שגם outlook.com / hotmail.com ייכנסו: Supported account types כולל personal Microsoft accounts. מדריך: `docs/microsoft-setup.md` §6.
 - Google: אין שינוי - אותו client ואותם Redirect URIs שכבר מוגדרים ל-`https://alze-nine.vercel.app/api/auth/google/callback` (`docs/google-setup.md` §12).
 - באנליטיקה: מי שנרשם עם ספק עובר "התחלת הרשמה" → "קוד אומת" בלי "קוד נשלח" - שלב "קוד נשלח" סופר רק את ההרשמה במייל.
+
+### 2026-10-28 — כרטיסי המחיר בשנתי: המחיר לחודש בגדול
+
+**מה נעשה** (בקשת דניאל: בשנתי הסכום לשנה נראה יקר, עדיף לראות כמה זה יוצא לחודש)
+- `components/brand/landing/plan-cycle.tsx` (`PlanPrice`): בפנים השנתיות המספר הגדול הוא המחיר לחודש (82.50 / 249.17, האגורות קטנות ומורמות כמו בתג מחיר), לידו "לחודש · ~~99 ₪~~" (המחיר החודשי מחוק, ולקורא מסך "במקום"), ומתחת "990 ₪ לשנה, בחיוב אחד" - הסכום שבאמת מחויב נשאר גלוי בכרטיס. החודשי בלי שינוי. אותן שתי שורות בשני המצבים, כך שגובה הכרטיסים לא קופץ.
+- דף התשלום (`/pay`) נשאר עם הסכום השנתי בגדול, כי זה הסכום שמחויב בפועל.
+
+**בדיקות:** `e2e/annual-referrals.spec.ts` עודכן (המחיר לחודש, המחיר המחוק, החיוב השנתי; ב-390 בלי גלילה אופקית).
