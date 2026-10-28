@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PageTransition } from "@/components/brand/page-transition";
 import { BRAND } from "@/lib/brand";
 import { LEGAL_DOCS, legalSource } from "@/lib/legal/docs";
 import { Markdown } from "@/lib/legal/markdown";
@@ -8,5 +9,12 @@ export const metadata: Metadata = pageMetadata({ path: "/terms", title: LEGAL_DO
 
 /** Rendered from docs/legal/terms-of-service-he.md (draft — see the banner in the layout). */
 export default function TermsPage() {
-  return <Markdown source={legalSource("terms")} />;
+  return (
+    // one snapshot per document: moving between the legal pages the article changes under the still header
+    <PageTransition>
+      <div>
+        <Markdown source={legalSource("terms")} />
+      </div>
+    </PageTransition>
+  );
 }

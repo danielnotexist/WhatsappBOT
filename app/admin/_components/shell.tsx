@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Route } from "next";
 import { Cta } from "@/components/brand/cta";
+import { HEADER_BAR } from "@/components/brand/frame";
 import { Wordmark } from "@/components/brand/wordmark";
 import { cn } from "@/lib/utils";
 import { closeAdminAction } from "../actions";
@@ -9,10 +10,11 @@ import { ADMIN_TABS, tabHref, type AdminTab } from "../tabs";
 /** The panel's header: the wordmark with "ניהול", the way back to the personal area and closing the panel. */
 export function AdminHeader({ open }: { open: boolean }) {
   return (
-    <header className="mx-auto flex h-[4.75rem] w-full max-w-7xl flex-none items-center justify-between gap-3 px-4 sm:px-8">
+    <header className={cn(HEADER_BAR, "gap-3")}>
       <div className="flex min-w-0 items-center gap-3">
         <Wordmark />
-        <span className="rounded-full border border-honey/50 px-2.5 py-0.5 text-[0.8125rem] leading-snug text-honey">ניהול</span>
+        {/* phones: the wordmark keeps its full size (it never moves between pages), so the label gives way */}
+        <span className="rounded-full border border-honey/50 px-2.5 py-0.5 text-[0.8125rem] leading-snug text-honey max-sm:hidden">ניהול</span>
       </div>
       <div className="flex items-center gap-2">
         <Cta tone="ghost" size="sm" href="/account" className="max-sm:hidden">

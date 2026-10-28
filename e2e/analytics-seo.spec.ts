@@ -77,7 +77,7 @@ test("a campaign visit and a signup show up in the owner's traffic tab: the sour
   expect(JSON.stringify(first)).not.toContain("?"); // the query never travels in the path
 
   await page.goto("/start");
-  await page.getByRole("link", { name: "בואו נתחיל" }).click();
+  await page.getByRole("link", { name: "המשך עם מייל" }).click();
   await expect(page).toHaveURL(/\/start\/email$/);
   await expect.poll(() => beacons.some((b) => b.includes('"signup_start"')), { message: "signup_start" }).toBe(true);
   const email = uniqueEmail("traffic");

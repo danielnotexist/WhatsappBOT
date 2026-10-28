@@ -23,7 +23,7 @@ const VIEWPORTS = [
 type Screen = { name: string; path: (email: string) => string; ready: (page: Page) => Promise<void> };
 
 const SCREENS: Screen[] = [
-  { name: "start", path: () => "/start", ready: (p) => expect(p.getByRole("link", { name: "בואו נתחיל" })).toBeVisible() },
+  { name: "start", path: () => "/start", ready: (p) => expect(p.getByRole("link", { name: "המשך עם Microsoft" })).toBeVisible() },
   { name: "email", path: () => "/start/email", ready: (p) => expect(p.getByRole("heading", { name: "מה המייל שלך?" })).toBeVisible() },
   { name: "code", path: (e) => `/start/code?email=${encodeURIComponent(e)}`, ready: (p) => expect(p.getByRole("heading", { name: "הזינו את הקוד" })).toBeVisible() },
   { name: "connect", path: () => "/start/connect", ready: (p) => expect(p.getByRole("link", { name: "חיבור Gmail" })).toBeVisible() },

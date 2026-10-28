@@ -4,12 +4,14 @@ import { entitlements } from "@/lib/billing/plans";
 import { planGateFor, planGateUrl } from "@/lib/connections/plan-gate";
 import { demoConnect } from "@/lib/auth/demo-connect";
 import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
+import { parseSsoFrom } from "@/lib/auth/sso";
 import { gcopy } from "@/lib/copy/bot-google";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { EnvError, googleMocked } from "@/lib/env";
 import { getGoogleConfig } from "@/lib/google";
 import { buildGoogleAuthorizeUrl, isGoogleFeature, pkcePair, scopesForRequest, type GoogleFeature, type RestrictedRead } from "@/lib/google/oauth";
+import { startGoogleSignIn } from "@/lib/google/sso";
 import { googleAccountOf, googleCapConfig, restrictedReadAccess, type GoogleCapConfig, type RestrictedReadAccess } from "@/lib/google/user-cap";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 
@@ -17,7 +19,11 @@ const text = (body: string, status: number) => new Response(body, { status, head
 
 /**
  * GET /api/auth/google/start[?t=<one-time chat token>][&returnTo=onboarding|account][&feature=gmail_read|drive_read|tasks]
+ *     /api/auth/google/start?intent=signin&from=start|login[&returnTo=…]
  * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat (same as Microsoft).
+ * `intent=signin` without a session ("המשך עם Google" on /start and /login): Sign in with Google — the state and PKCE
+ * verifier go into this browser's sealed cookie instead of a profile (lib/google/sso.ts, rules in lib/auth/sso.ts).
+ * With a session the intent changes nothing: the signed-in user connects, exactly as below.
  * Stores state + PKCE verifier (+ returnTo / feature) on the user profile — works from any device — then
  * redirects to Google's consent screen. `feature=…` = incremental consent for that capability's scopes only
  * (include_granted_scopes): `gmail_read` (gmail.readonly) and `drive_read` (drive.readonly) are restricted and refused
@@ -46,6 +52,9 @@ export async function GET(request: Request) {
     userId = link.userId;
   } else {
     userId = (await getSession())?.userId ?? null;
+    // "המשך עם Google" without a session: sign in / sign up and connect in one consent (lib/google/sso.ts)
+    // (a session whose account is gone counts as none)
+    if (url.searchParams.get("intent") === "signin" && !(userId && (await db.getUser(userId)))) return startGoogleSignIn(request, parseSsoFrom(url.searchParams.get("from")));
   }
   if (!userId) return Response.redirect(new URL("/start", appUrl).toString(), 303);
   const user = await db.getUser(userId);

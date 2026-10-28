@@ -5,6 +5,8 @@ import { BySession } from "@/components/auth/by-session";
 import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot, type MascotPoseName } from "@/components/brand/mascot";
+import { FRAME, HEADER_BAR } from "@/components/brand/frame";
+import { PageTransition } from "@/components/brand/page-transition";
 import { Wordmark } from "@/components/brand/wordmark";
 import { cn } from "@/lib/utils";
 
@@ -15,21 +17,23 @@ import { cn } from "@/lib/utils";
  */
 export function PayStage({ children }: { children: ReactNode }) {
   return (
-    <div className="stage flex min-h-dvh flex-col">
-      <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between gap-4 px-4 sm:px-8">
-        <Wordmark />
-        <BySession
-          signedIn={
-            <Cta href="/account" size="sm">
-              לאזור האישי
-            </Cta>
-          }
-        />
-      </header>
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-20 sm:px-8 sm:pb-28">
-        {children}
-      </main>
-    </div>
+    <PageTransition>
+      <div className="stage flex min-h-dvh flex-col">
+        <header className={HEADER_BAR}>
+          <Wordmark />
+          <BySession
+            signedIn={
+              <Cta href="/account" size="sm">
+                לאזור האישי
+              </Cta>
+            }
+          />
+        </header>
+        <main id="main" className={cn(FRAME, "flex-1 pb-20 sm:pb-28")}>
+          {children}
+        </main>
+      </div>
+    </PageTransition>
   );
 }
 

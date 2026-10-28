@@ -49,7 +49,7 @@ test.describe("accessibility menu", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/start");
     const fab = (await page.getByRole("button", { name: "תפריט נגישות" }).boundingBox())!;
-    const cta = (await page.getByRole("link", { name: "בואו נתחיל" }).boundingBox())!;
+    const cta = (await page.getByRole("link", { name: "המשך עם Microsoft" }).boundingBox())!;
     expect(fab.y + fab.height).toBeLessThanOrEqual(cta.y);
   });
 

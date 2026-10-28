@@ -10,6 +10,7 @@ import { Hero, SignInCta } from "@/components/brand/landing/hero";
 import { Pricing } from "@/components/brand/landing/pricing";
 import { Professions } from "@/components/brand/landing/professions";
 import { SmoothScroll } from "@/components/brand/landing/smooth-scroll";
+import { PageTransition } from "@/components/brand/page-transition";
 import { SupportChat } from "@/components/brand/support-chat";
 import { Trust } from "@/components/brand/landing/trust";
 import { BRAND } from "@/lib/brand";
@@ -28,23 +29,25 @@ export const metadata: Metadata = pageMetadata({ path: "/", title: HOME_TITLE, a
  */
 export default function HomePage() {
   return (
-    <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
-      {/* structured data for search engines: who we are and what the plans cost (lib/seo/json-ld.ts) */}
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString([organizationJsonLd(), softwareApplicationJsonLd()]) }} />
-      <SmoothScroll />
-      <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
-      <main id="main" className="flex-1">
-        <Hero signIn={<BySession signedIn={null} signedOut={<SignInCta />} />} />
-        <DaySection />
-        <Professions />
-        <Trust />
-        <Connectors />
-        <Pricing />
-        <Faq />
-        <FinalCta />
-      </main>
-      <LandingFooter />
-      <SupportChat />
-    </div>
+    <PageTransition>
+      <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
+        {/* structured data for search engines: who we are and what the plans cost (lib/seo/json-ld.ts) */}
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString([organizationJsonLd(), softwareApplicationJsonLd()]) }} />
+        <SmoothScroll />
+        <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
+        <main id="main" className="flex-1">
+          <Hero signIn={<BySession signedIn={null} signedOut={<SignInCta />} />} />
+          <DaySection />
+          <Professions />
+          <Trust />
+          <Connectors />
+          <Pricing />
+          <Faq />
+          <FinalCta />
+        </main>
+        <LandingFooter />
+        <SupportChat />
+      </div>
+    </PageTransition>
   );
 }

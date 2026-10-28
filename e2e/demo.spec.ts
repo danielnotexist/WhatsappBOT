@@ -53,7 +53,7 @@ test.describe("DEMO_MODE=1 — production build, zero keys", () => {
     await page.goto("/");
     await page.locator('a[href="/start"]').first().click();
     await expect(page).toHaveURL(/\/start$/);
-    await page.getByRole("link", { name: /בואו נתחיל/ }).first().click();
+    await page.getByRole("link", { name: "המשך עם מייל" }).first().click();
 
     // email card → code card: nothing is mailed, the card names the code
     await expect(page).toHaveURL(/\/start\/email$/);

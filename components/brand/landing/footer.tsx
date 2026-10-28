@@ -21,7 +21,8 @@ export function LandingFooter() {
         )}
       >
         <div>
-          <Wordmark />
+          {/* the header's wordmark is the page transition's anchor: this one is not */}
+          <Wordmark anchor={false} />
           <p className="mt-3 text-[0.9375rem] text-cream-muted">{BRAND.tagline}</p>
         </div>
         <nav aria-label="קישורים">

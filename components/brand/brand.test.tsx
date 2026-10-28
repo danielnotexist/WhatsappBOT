@@ -167,7 +167,8 @@ describe("frames and type", () => {
         <Handwritten>קודם כל</Handwritten>
       </>,
     );
-    expect(screen.getByRole("link", { name: "עלזה - לדף הבית" })).toHaveAttribute("href", "/");
+    // the accessible name holds all the visible text (label in name): the brand and the slogan
+    expect(screen.getByRole("link", { name: "עלזה מבקשים בוואטסאפ. היא על זה. - לדף הבית" })).toHaveAttribute("href", "/");
     expect(screen.getByText("קודם כל").className).toContain("font-hand");
   });
 

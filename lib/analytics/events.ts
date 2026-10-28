@@ -11,7 +11,11 @@ export type FunnelEvent = (typeof FUNNEL_EVENTS)[number];
 /** The steps the browser reports itself; the rest are written by the server where they happen. */
 export const CLIENT_EVENTS = ["signup_start", "code_sent", "code_ok"] as const satisfies readonly FunnelEvent[];
 export type ClientEvent = (typeof CLIENT_EVENTS)[number];
-export type ServerEvent = Exclude<FunnelEvent, ClientEvent>;
+/**
+ * What the server writes: its own steps, and `code_ok` of a sign-in with Microsoft / Google (lib/auth/sso-flow.ts) —
+ * that sign-in has no code card in the browser to report it, so the server marks the same step.
+ */
+export type ServerEvent = Exclude<FunnelEvent, ClientEvent> | "code_ok";
 
 /**
  * Named events outside the signup funnel (migration 0018): `referral_visit` — a visit through a friend's link

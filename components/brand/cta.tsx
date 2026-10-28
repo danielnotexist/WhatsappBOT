@@ -26,6 +26,9 @@ const tones = {
   outline: "border-2 border-ink-muted bg-transparent text-ink hover:border-ink hover:bg-ink/6 focus-visible:outline-ink",
   /** secondary action on the dark stage */
   ghost: "border-2 border-cream-muted/55 bg-transparent text-cream hover:border-cream hover:bg-cream/6 focus-visible:outline-honey",
+  /** a provider's own button on the dark stage ("המשך עם Microsoft / Google"): cream paper, ink type, the logo on white */
+  cream:
+    "bg-cream text-ink shadow-[inset_0_-2px_0_rgb(19_36_28/0.18)] hover:bg-[#F8F4EC] active:shadow-none focus-visible:outline-honey",
 } as const;
 
 export type CtaTone = keyof typeof tones;
@@ -41,14 +44,16 @@ export function ctaClass({ tone = "honey", size = "md", block, className }: Omit
 /**
  * A brand button. With `href` it renders a link: pages → next/link; external URLs, mailto: and our own /api/ routes
  * (OAuth starts that redirect away) → a plain <a>, in a new tab only with `external`.
+ * `transitionTypes` tags a page link's navigation for the page transition (app/globals.css, components/brand/page-transition.tsx).
  */
 export function Cta(
-  props: CommonProps & ({ href: Route | URL | string; external?: boolean; onClick?: () => void; "aria-label"?: string } | ButtonHTMLAttributes<HTMLButtonElement>),
+  props: CommonProps &
+    ({ href: Route | URL | string; external?: boolean; onClick?: () => void; "aria-label"?: string; transitionTypes?: string[] } | ButtonHTMLAttributes<HTMLButtonElement>),
 ) {
   const { tone = "honey", size = "md", className, children, block } = props;
   const cls = ctaClass({ tone, size, block, className });
   if ("href" in props && props.href !== undefined) {
-    const { href, external, onClick, "aria-label": ariaLabel } = props as { href: string; external?: boolean; onClick?: () => void; "aria-label"?: string };
+    const { href, external, onClick, "aria-label": ariaLabel, transitionTypes } = props as { href: string; external?: boolean; onClick?: () => void; "aria-label"?: string; transitionTypes?: string[] };
     if (external || /^https?:|^mailto:|^\/api\//.test(href)) {
       return (
         <a href={href} className={cls} target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined} onClick={onClick} aria-label={ariaLabel}>
@@ -57,7 +62,7 @@ export function Cta(
       );
     }
     return (
-      <Link href={href as Route} className={cls} onClick={onClick} aria-label={ariaLabel}>
+      <Link href={href as Route} className={cls} onClick={onClick} aria-label={ariaLabel} transitionTypes={transitionTypes}>
         {children}
       </Link>
     );

@@ -15,10 +15,19 @@ export function getMsConfig(): MsOAuthConfig {
   return msOAuthConfigFromEnv();
 }
 
+/**
+ * The memory-mode id_token's claims: a work account whose email the domain owner verified (`xms_edov`), so Sign in with
+ * Microsoft trusts it (lib/auth/sso.ts). Tests swap them through the global singleton "ms-fixture-claims" — a personal
+ * account, or one Microsoft does not vouch for.
+ */
+export const MS_FIXTURE_CLAIMS: Readonly<Record<string, unknown>> = { tid: "memory-tenant", oid: "u1", preferred_username: "dana@levi-law.co.il", email: "dana@levi-law.co.il", xms_edov: true, name: "דנה לוי" };
+
 /** In memory mode the token endpoint always succeeds (granting the full current scope set) and Graph is served from fixtures. */
 function memoryTokenFetch(): typeof fetch {
-  return (async () =>
-    new Response(JSON.stringify({ access_token: "memory-access", refresh_token: "memory-refresh", expires_in: 3600, scope: MS_SCOPES.filter((s) => s !== "offline_access").join(" "), id_token: "e30." + Buffer.from(JSON.stringify({ tid: "memory-tenant", oid: "u1", preferred_username: "dana@levi-law.co.il", name: "דנה לוי" })).toString("base64url") + ".x" }), { status: 200 })) as typeof fetch;
+  return (async () => {
+    const claims = globalSingleton<Record<string, unknown>>("ms-fixture-claims", () => ({ ...MS_FIXTURE_CLAIMS }));
+    return new Response(JSON.stringify({ access_token: "memory-access", refresh_token: "memory-refresh", expires_in: 3600, scope: MS_SCOPES.filter((s) => s !== "offline_access").join(" "), id_token: "e30." + Buffer.from(JSON.stringify(claims)).toString("base64url") + ".x" }), { status: 200 });
+  }) as typeof fetch;
 }
 
 export function getGraphFetch(): typeof fetch | undefined {

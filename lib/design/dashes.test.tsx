@@ -13,7 +13,7 @@ afterEach(cleanup);
 const ROOT = join(__dirname, "..", "..");
 
 /** Site text written by hand: every source file under app/ and components/, plus the lib modules the site renders. */
-const SITE_LIB = ["lib/brand.ts", "lib/demo.ts", "lib/agents/templates.ts", "lib/support/types.ts", "lib/support/knowledge.ts", "lib/support/http.ts", "lib/support/system-request.ts", "lib/connections/services.ts", "lib/integrations/catalogue.ts", "lib/billing/compare.ts"];
+const SITE_LIB = ["lib/brand.ts", "lib/copy/auth-sso.ts", "lib/demo.ts", "lib/agents/templates.ts", "lib/support/types.ts", "lib/support/knowledge.ts", "lib/support/http.ts", "lib/support/system-request.ts", "lib/connections/services.ts", "lib/integrations/catalogue.ts", "lib/billing/compare.ts"];
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {

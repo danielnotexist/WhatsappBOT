@@ -191,9 +191,10 @@ export class GoogleClient {
 
   // ---------- identity ----------
 
-  async userInfo(): Promise<{ sub: string; email: string | null; name: string | null }> {
-    const u = await this.json<{ sub: string; email?: string; name?: string }>("GET", GOOGLE_API.userinfo);
-    return { sub: u.sub, email: u.email?.toLowerCase() ?? null, name: u.name ?? null };
+  /** OIDC userinfo. `emailVerified` is Google's `email_verified` (true only when Google says so — Sign in with Google needs it). */
+  async userInfo(): Promise<{ sub: string; email: string | null; emailVerified: boolean; name: string | null }> {
+    const u = await this.json<{ sub: string; email?: string; email_verified?: boolean | string; name?: string }>("GET", GOOGLE_API.userinfo);
+    return { sub: u.sub, email: u.email?.toLowerCase() ?? null, emailVerified: u.email_verified === true || u.email_verified === "true", name: u.name ?? null };
   }
 
   // ---------- calendar ----------

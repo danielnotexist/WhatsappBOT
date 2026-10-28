@@ -4,7 +4,9 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
+import { HEADER_BAR } from "@/components/brand/frame";
 import { Wordmark } from "@/components/brand/wordmark";
+import { cn } from "@/lib/utils";
 import { spendLimits } from "@/lib/ai/budget";
 import { getSession } from "@/lib/auth/current-user";
 import { BRAND } from "@/lib/brand";
@@ -23,7 +25,7 @@ export const metadata: Metadata = { title: `הצ'אט עם ${BRAND.name}`, robot
 export default function DemoChatPage() {
   return (
     <div data-chat-page="" className="stage flex min-h-0 flex-1 flex-col">
-      <header className="mx-auto hidden h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between px-8 md:flex">
+      <header className={cn(HEADER_BAR, "hidden md:flex")}>
         <Wordmark />
         <Cta tone="ghost" size="sm" href="/account">
           לאזור האישי

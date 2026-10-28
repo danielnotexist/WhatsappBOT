@@ -1,11 +1,9 @@
 import { randomInt, timingSafeEqual } from "node:crypto";
-import { touchLastSeen } from "@/lib/admin/activity";
-import { ownerAlert } from "@/lib/admin/alerts";
 import type { Db, SignupSource } from "@/lib/db/types";
 import type { Mailer } from "@/lib/mail/types";
 import type { RateLimiter } from "@/lib/rate-limit";
-import { attachReferralOnSignup } from "@/lib/referrals/service";
 import { derivedKey, hmac } from "./keys";
+import { signInVerifiedEmail } from "./sign-in";
 
 /** Policy (PLAN §1): 6 digits, 10 minutes, resend after 60s, 5 wrong attempts, 5 codes per hour per email. */
 export const OTP_POLICY = {
@@ -162,28 +160,8 @@ export async function verifyOtp(deps: OtpDeps, rawEmail: unknown, rawCode: unkno
   return signIn(deps, email);
 }
 
-/**
- * The code checked out: the existing user (login) or a new one (signup), audited either way. A new user keeps the
- * browser's first-visit source and the owner is told (lib/admin/alerts.ts, after the response); both mark "last seen".
- * Those are best effort (the admin panel's data): a failure there never fails the sign-in.
- */
+/** The code checked out: the shared sign-in (lib/auth/sign-in.ts) — signup or login, audited, source, referral, alerts. */
 async function signIn(deps: OtpDeps, email: string): Promise<OtpVerifyResult> {
-  const db = deps.db;
-  let user = await db.findUserByEmail(email);
-  let isNewUser = false;
-  if (!user) {
-    user = await db.createUser(email);
-    isNewUser = true;
-    await db.addAudit({ user_id: user.id, action: "signup", target: email, result: "ok" });
-    if (deps.signupSource) {
-      await db.setSignupSource(user.id, deps.signupSource).catch((e: unknown) => console.warn("[otp] signup source not recorded:", (e as Error).message));
-    }
-    // "חבר מביא חבר": new users only — a login never attaches a referral (attachReferralOnSignup never throws)
-    if (deps.referralCode) await attachReferralOnSignup(db, user, deps.referralCode);
-    ownerAlert({ type: "signup", userId: user.id, email, name: user.name, business: user.business_name, source: deps.signupSource ?? null }, { db });
-  } else {
-    await db.addAudit({ user_id: user.id, action: "login", target: email, result: "ok" });
-  }
-  await touchLastSeen(db, user.id, deps.now?.() ?? new Date());
+  const { user, isNewUser } = await signInVerifiedEmail(deps, email, "otp");
   return { ok: true, userId: user.id, isNewUser, email };
 }

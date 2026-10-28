@@ -6,6 +6,8 @@ import { Cta, ctaClass } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { Mascot } from "@/components/brand/mascot";
 import { SupportChat } from "@/components/brand/support-chat";
+import { FRAME, HEADER_BAR } from "@/components/brand/frame";
+import { PageTransition } from "@/components/brand/page-transition";
 import { Wordmark } from "@/components/brand/wordmark";
 import { touchLastSeen } from "@/lib/admin/activity";
 import { isAdminEmail } from "@/lib/admin/auth";
@@ -47,27 +49,29 @@ export const metadata: Metadata = { title: "האזור האישי", robots: { in
  */
 export default function AccountPage(props: PageProps<"/account">) {
   return (
-    <div className="stage flex min-h-dvh flex-col">
-      <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between px-4 sm:px-8">
-        <Wordmark />
-        <div className="flex items-center gap-2">
-          <Suspense fallback={null}>
-            <AdminLink />
+    <PageTransition>
+      <div className="stage flex min-h-dvh flex-col">
+        <header className={HEADER_BAR}>
+          <Wordmark />
+          <div className="flex items-center gap-2">
+            <Suspense fallback={null}>
+              <AdminLink />
+            </Suspense>
+            <form action={signOutAction}>
+              <Cta tone="ghost" size="sm" type="submit">
+                יציאה
+              </Cta>
+            </form>
+          </div>
+        </header>
+        <main id="main" className={cn(FRAME, "flex-1 pb-24")}>
+          <Suspense fallback={<AccountSkeleton />}>
+            <Account searchParams={props.searchParams} />
           </Suspense>
-          <form action={signOutAction}>
-            <Cta tone="ghost" size="sm" type="submit">
-              יציאה
-            </Cta>
-          </form>
-        </div>
-      </header>
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-24 sm:px-8">
-        <Suspense fallback={<AccountSkeleton />}>
-          <Account searchParams={props.searchParams} />
-        </Suspense>
-      </main>
-      <SupportChat />
-    </div>
+        </main>
+        <SupportChat />
+      </div>
+    </PageTransition>
   );
 }
 

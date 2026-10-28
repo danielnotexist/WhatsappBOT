@@ -12,6 +12,7 @@ import { Cta } from "@/components/brand/cta";
 import { StepProgress } from "@/components/brand/step-card";
 import { trackEvent } from "@/lib/analytics/send";
 import { CODE_LENGTH, RESEND_SECONDS } from "@/lib/auth/otp-constants";
+import { SSO_OTP_FALLBACK, isSsoProviderId } from "@/lib/copy/auth-sso";
 import { cn } from "@/lib/utils";
 import { authPaths, type AuthMode } from "./email-step";
 import { StepHeading } from "./step-heading";
@@ -73,6 +74,8 @@ export function CodeStepFromUrl({ mode = "signup", demoNote }: { mode?: AuthMode
   const params = useSearchParams();
   const router = useRouter();
   const email = params.get("email") ?? "";
+  // a provider sign-in that could not vouch for this existing account sent the code instead (lib/auth/sso.ts)
+  const sso = params.get("sso");
 
   useEffect(() => {
     if (!email) router.replace(authPaths[mode].email);
@@ -86,6 +89,7 @@ export function CodeStepFromUrl({ mode = "signup", demoNote }: { mode?: AuthMode
       updates={mode === "signup" && params.get("updates") === "1"}
       initialWait={waitFromParam(params.get("wait"))}
       demoNote={demoNote}
+      ssoNotice={mode === "login" && isSsoProviderId(sso) ? SSO_OTP_FALLBACK[sso] : undefined}
     />
   );
 }
@@ -100,6 +104,7 @@ export function CodeStep({
   initialWait = RESEND_SECONDS,
   mode = "signup",
   demoNote,
+  ssoNotice,
   autoFocus = true,
 }: {
   email: string;
@@ -107,6 +112,8 @@ export function CodeStep({
   initialWait?: number;
   mode?: AuthMode;
   demoNote?: ReactNode;
+  /** why the code was sent instead of a provider sign-in (`?sso=` on /login/code): a fixed line, never text from the URL */
+  ssoNotice?: string;
   /** false on a page's static fallback, so the browser focuses the cells of the card that replaces it */
   autoFocus?: boolean;
 }) {
@@ -212,6 +219,11 @@ export function CodeStep({
         <Link href={changeHref} className="mt-2 self-start rounded-sm text-[0.9375rem] font-semibold text-foreground underline underline-offset-3">
           שינוי מייל
         </Link>
+        {ssoNotice ? (
+          <p role="note" className="mt-4 max-w-[30rem] rounded-field border border-current/25 px-4 py-3 text-[0.9375rem] leading-snug">
+            {ssoNotice}
+          </p>
+        ) : null}
       </StepAside>
 
       <StepBody>

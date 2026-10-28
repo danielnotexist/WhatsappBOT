@@ -78,6 +78,7 @@ const STATIC: Record<string, Entry> = {
   signup: ["נרשם", "login"],
   login: ["נכנס לאתר", "login"],
   "auth.login_whatsapp": ["נכנס לאתר מקישור בוואטסאפ", "login"],
+  "auth.sso": ["כניסה עם Microsoft או Google", "login"],
   "account.delete": ["מחק את החשבון", "login"],
 
   // וואטסאפ

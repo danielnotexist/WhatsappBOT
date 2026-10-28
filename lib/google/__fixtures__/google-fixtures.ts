@@ -301,6 +301,8 @@ export interface GoogleFixtureState {
   tokenMode: "ok" | "invalid_grant";
   /** scope string the token endpoint returns */
   grantedScope: string;
+  /** claims merged into the id_token the token endpoint returns (and the userinfo answer) — e.g. email_verified: false */
+  idClaims: Record<string, unknown>;
   /** simulate an expired access token once */
   unauthorizedOnce: boolean;
   /** API families that answer 403 insufficientPermissions (granular consent unticked); gmail = send, gmail_read = gmail.readonly */
@@ -396,6 +398,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
     revoked: [],
     tokenMode: "ok",
     grantedScope: FIXTURE_GOOGLE_SCOPE,
+    idClaims: {},
     unauthorizedOnce: false,
     denied: new Set(),
     taskLists: fixtureTaskLists(),
@@ -441,7 +444,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       if (url.pathname === "/token") {
         if (state.tokenMode === "invalid_grant" || form.code === "bad-code") return json({ error: "invalid_grant", error_description: "Token has been expired or revoked." }, 400);
         const fresh = { access_token: `ya29.fixture-${++n}`, expires_in: 3599, scope: state.grantedScope, token_type: "Bearer" };
-        if (form.grant_type === "authorization_code") return json({ ...fresh, refresh_token: `1//fixture-refresh-${n}`, id_token: fixtureIdToken() });
+        if (form.grant_type === "authorization_code") return json({ ...fresh, refresh_token: `1//fixture-refresh-${n}`, id_token: fixtureIdToken(state.idClaims) });
         return json(fresh);
       }
       if (url.pathname === "/revoke") {
@@ -458,7 +461,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       return json({ error: { code: 401, message: "Request had invalid authentication credentials.", status: "UNAUTHENTICATED", errors: [{ reason: "authError", domain: "global", message: "Invalid Credentials" }] } }, 401);
     }
 
-    if (url.href === "https://openidconnect.googleapis.com/v1/userinfo") return json({ ...FIXTURE_GOOGLE_ACCOUNT, email_verified: true });
+    if (url.href === "https://openidconnect.googleapis.com/v1/userinfo") return json({ ...FIXTURE_GOOGLE_ACCOUNT, email_verified: true, ...state.idClaims });
 
     // ---- Calendar v3 ----
     const cal = url.pathname.match(/^\/calendar\/v3\/calendars\/primary\/events(?:\/([^/]+))?$/);

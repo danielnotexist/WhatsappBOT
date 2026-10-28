@@ -214,6 +214,37 @@ export function parseIdToken(idToken: string | null): IdTokenClaims {
   }
 }
 
+/**
+ * What Sign in with Microsoft decides on (lib/auth/sso.ts `microsoftIdentity`), from the same id_token: the raw `email`
+ * claim (never preferred_username in its place, unlike parseIdToken), `preferred_username`, the tenant (`tid`), the
+ * object id (`oid`) and `xms_edov` — "the email's domain owner is verified", an optional claim the app registration
+ * must ask for (docs/microsoft-setup.md §SSO). A missing or non-true `xms_edov` is false.
+ */
+export interface MsSignInClaims {
+  tid: string | null;
+  oid: string | null;
+  email: string | null;
+  preferred_username: string | null;
+  name: string | null;
+  xms_edov: boolean;
+}
+
+export function parseMsSignInClaims(idToken: string | null): MsSignInClaims {
+  const empty: MsSignInClaims = { tid: null, oid: null, email: null, preferred_username: null, name: null, xms_edov: false };
+  if (!idToken) return empty;
+  const parts = idToken.split(".");
+  if (parts.length < 2) return empty;
+  try {
+    const p = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as Record<string, unknown>;
+    const s = (k: string) => (typeof p[k] === "string" && (p[k] as string).trim() ? (p[k] as string).trim() : null);
+    // Entra sends a JSON boolean; "true" / 1 are accepted as the same claim, anything else is not verified
+    const edov = p.xms_edov === true || p.xms_edov === "true" || p.xms_edov === 1 || p.xms_edov === "1";
+    return { tid: s("tid"), oid: s("oid"), email: s("email"), preferred_username: s("preferred_username"), name: s("name"), xms_edov: edov };
+  } catch {
+    return empty;
+  }
+}
+
 /** Hebrew EnvError when MS_CLIENT_ID / MS_CLIENT_SECRET / APP_URL are missing. */
 export function msOAuthConfigFromEnv(fetchImpl?: typeof fetch): MsOAuthConfig {
   const env = requireEnv(["MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_TENANT", "APP_URL"]);

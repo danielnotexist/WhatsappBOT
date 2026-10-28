@@ -3,17 +3,23 @@ import { getSession } from "@/lib/auth/current-user";
 import { planGateFor, planGateUrl } from "@/lib/connections/plan-gate";
 import { demoConnect } from "@/lib/auth/demo-connect";
 import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
+import { parseSsoFrom } from "@/lib/auth/sso";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { EnvError, msMocked } from "@/lib/env";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { getMsConfig } from "@/lib/ms";
 import { buildAdminConsentUrl, buildAuthorizeUrl, msAdminScopesFor, msScopesFor, pkcePair } from "@/lib/ms/oauth";
+import { startMicrosoftSignIn } from "@/lib/ms/sso";
 import { entitlements } from "@/lib/billing/plans";
 
 /**
  * GET /api/auth/microsoft/start[?t=<one-time chat token>][&admin=1][&returnTo=onboarding]
+ *     /api/auth/microsoft/start?intent=signin&from=start|login[&returnTo=…]
  * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat.
+ * `intent=signin` without a session ("המשך עם Microsoft" on /start and /login): Sign in with Microsoft — the state and
+ * PKCE verifier go into this browser's sealed cookie instead of a profile (lib/ms/sso.ts, rules in lib/auth/sso.ts).
+ * With a session the intent changes nothing: the signed-in user connects, exactly as below.
  * Stores state + PKCE verifier on the user profile (works from any device), then redirects to Microsoft.
  * `admin=1` → tenant-wide admin consent URL instead (PLAN §8 #2).
  * `returnTo=onboarding` → the callback lands on /start/ready (signup) instead of /account (lib/auth/oauth-return.ts).
@@ -35,6 +41,9 @@ export async function GET(request: Request) {
     userId = link.userId;
   } else {
     userId = (await getSession())?.userId ?? null;
+    // "המשך עם Microsoft" without a session: sign in / sign up and connect in one consent (lib/ms/sso.ts)
+    // (a session whose account is gone counts as none)
+    if (url.searchParams.get("intent") === "signin" && !(userId && (await db.getUser(userId)))) return startMicrosoftSignIn(request, parseSsoFrom(url.searchParams.get("from")));
   }
   if (!userId) return Response.redirect(new URL("/start", process.env.APP_URL || url.origin).toString(), 303);
   const user = await db.getUser(userId);

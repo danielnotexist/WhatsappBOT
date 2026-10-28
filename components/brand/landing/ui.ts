@@ -1,7 +1,9 @@
 /** Shared class strings for the landing sections, so the type scale and the grid stay one system. */
 
+import { FRAME } from "@/components/brand/frame";
+
 /** the page grid: 84rem wide, 16px gutter on phones (WCAG reflow at 320px), 48px on desktops */
-export const CONTAINER = "mx-auto w-full max-w-[84rem] px-4 sm:px-8 lg:px-12";
+export const CONTAINER = FRAME;
 
 /** section headline: Varela Round, 36 → 72px */
 export const H2 =

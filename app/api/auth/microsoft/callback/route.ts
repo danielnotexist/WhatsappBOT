@@ -1,16 +1,15 @@
-import { trackServerEvent } from "@/lib/analytics/track";
 import { reportError } from "@/lib/errors/report";
 import type { Route } from "next";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
+import { refuseSso, ssoCallbackState } from "@/lib/auth/sso-flow";
 import { getDb } from "@/lib/db";
 import { EnvError } from "@/lib/env";
 import { copy } from "@/lib/copy/bot";
-import { activeMicrosoftConnection, getMsConfig, graphForConnection } from "@/lib/ms";
+import { getMsConfig } from "@/lib/ms";
 import { randomBytes } from "node:crypto";
-import { MsOAuthError, buildAuthorizeUrl, exchangeCode, msHasScope, msScopesFor, parseIdToken, pkcePair } from "@/lib/ms/oauth";
-import { replaceOtherConnections } from "@/lib/account/service";
-import { ensureInboxSubscription } from "@/lib/ms/subscriptions";
-import { sealTokens } from "@/lib/ms/token-store";
+import { storeMicrosoftConnection } from "@/lib/ms/connect-store";
+import { MsOAuthError, buildAuthorizeUrl, exchangeCode, msScopesFor, parseIdToken, pkcePair } from "@/lib/ms/oauth";
+import { finishMicrosoftSignIn } from "@/lib/ms/sso";
 import { getWaSender } from "@/lib/wa";
 
 /**
@@ -30,15 +29,20 @@ function accountRedirect(request: Request, key: "notice" | "error", message: str
 }
 
 /**
- * GET /api/auth/microsoft/callback — both the user flow (code + state) and the admin-consent flow
- * (admin_consent=True & tenant & state). Looks the pending state up by scanning the user profile; because the
- * state is random and single-use we find the user through it.
+ * GET /api/auth/microsoft/callback — the user flow (code + state), the admin-consent flow (admin_consent=True & tenant
+ * & state) and Sign in with Microsoft. A sign-in is recognised by its cookie (lib/auth/sso.ts: the state in the URL is
+ * the one sealed in this browser's `wb_sso`) and finished by lib/ms/sso.ts. Otherwise the pending state is looked up
+ * by scanning the user profile; because the state is random and single-use we find the user through it. A state no
+ * one knows, in a browser that started a sign-in, is a failed sign-in — never a connect.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const state = url.searchParams.get("state") ?? "";
+  const sso = ssoCallbackState(request, "microsoft", state);
+  if (sso.pending) return finishMicrosoftSignIn(request, sso.pending);
   const db = getDb();
   const user = state ? await db.findUserByOauthState("microsoft", state) : null;
+  if (!user && sso.present) return refuseSso(request, sso.from, "state", { provider: "microsoft" });
   if (!user) return accountRedirect(request, "error", "החיבור לא הושלם: המצב לא זוהה (אולי הקישור פג). אפשר להתחיל שוב.");
   const pending = ((user.profile.oauth_pending as Record<string, unknown>)?.microsoft ?? {}) as { verifier?: string; admin?: boolean; meetings?: boolean; via?: string; returnTo?: string };
   const returnTo = parseReturnTo(pending.returnTo);
@@ -116,21 +120,8 @@ export async function GET(request: Request) {
     const tokens = await exchangeCode(cfg, url.searchParams.get("code")!, pending.verifier ?? "", msScopesFor({ meetings: pending.meetings === true }));
     const claims = parseIdToken(tokens.idToken);
     const accountEmail = (claims.email ?? claims.preferred_username ?? user.email).toLowerCase();
-    const connection = await db.upsertConnection({ user_id: user.id, provider: "microsoft", account_email: accountEmail, tenant_id: claims.tid, scopes: tokens.scope, consent_type: pending.admin ? "admin" : "user", ...sealTokens(user.id, tokens) });
-    if (pending.meetings && msHasScope(tokens.scope, "OnlineMeetingTranscript.Read.All")) await db.mergeUserProfile(user.id, { ms_meetings_consent: "granted" });
-    await db.addAudit({ user_id: user.id, action: "ms.connect", target: accountEmail, result: "ok" });
-    trackServerEvent(db, "mail_connected", user.id); // the signup funnel (lib/analytics)
-    await replaceOtherConnections(db, user.id, connection).catch((e) => console.error("[ms:callback] replacing older connections failed:", (e as Error).message));
-    try {
-      const graph = graphForConnection(db, activeMicrosoftConnection([connection]) ?? connection);
-      const me = await graph.me();
-      if (me.displayName && !user.name) await db.updateUserProfile(user.id, { name: me.displayName });
-      await ensureInboxSubscription(db, graph, connection, process.env.APP_URL || url.origin);
-    } catch (e) {
-      console.warn("[ms:callback] post-connect setup failed:", (e as Error).message);
-    }
-    await tell(copy["onb.connect_done"]("Microsoft 365", accountEmail));
-    return finish(request, returnTo, "notice", `החיבור ל-Microsoft 365 הושלם (${accountEmail}).`);
+    const { notice } = await storeMicrosoftConnection(db, user, tokens, { accountEmail, tenantId: claims.tid, admin: pending.admin === true, meetings: pending.meetings === true, appUrl: process.env.APP_URL || url.origin, tell });
+    return finish(request, returnTo, "notice", notice);
   } catch (e) {
     if (e instanceof MsOAuthError) {
       await db.addAudit({ user_id: user.id, action: "ms.connect", result: `token:${e.code}` });

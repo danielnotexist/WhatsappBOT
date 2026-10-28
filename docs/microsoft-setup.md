@@ -64,3 +64,24 @@
 ### Zoom
 
 לא נתמך בשלב הזה ("בקרוב" במחירון): תמלילי ענן של Zoom דורשים אפליקציית OAuth ב-Zoom Marketplace שעוברת את הבדיקה של Zoom (scopes `cloud_recording:read`), ואצל המשתמש מנוי Zoom בתשלום עם הקלטה לענן. לא נבנה שלד בלי זה.
+
+## 6. "המשך עם Microsoft" - כניסה והרשמה (28.10.2026)
+
+> הקוד: `lib/auth/sso.ts` (הכללים), `lib/auth/sso-flow.ts`, `lib/ms/sso.ts`, `lib/ms/connect-store.ts`, `app/api/auth/microsoft/{start,callback}` (`?intent=signin`). בדיקות: `lib/auth/sso.test.ts`, `app/api/auth/sso-routes.test.ts`, `e2e/sso-transitions.spec.ts`.
+
+הכפתור ב-`/start` וב-`/login` נכנס (או נרשם) עם חשבון Microsoft, ובאותו מסך הסכמה מחבר גם את המייל, היומן והקבצים. אותו Redirect URI (`/api/auth/microsoft/callback`), אותן הרשאות (`msScopesFor()` - הבסיס, בלי Teams של פרו), אותו סוד. ה-state וה-PKCE נשמרים בעוגייה מוצפנת בדפדפן (`wb_sso`, 15 דקות, רק ל-`/api/auth`), כי עוד אין משתמש לשמור עליו.
+
+**מתי סומכים על כתובת המייל (מניעת nOAuth):**
+- **חשבון אישי** (outlook.com, hotmail.com, live.com - ה-tenant `9188040d-6c67-4c5b-b112-36a304b66dad`): Microsoft מאמתת את הכתובת. נכנסים לחשבון קיים או נרשמים.
+- **חשבון עבודה עם `xms_edov=true`**: בעל הדומיין אימת את כתובת ה-`email`. נכנסים לחשבון קיים או נרשמים.
+- **כל השאר**: את ה-claim `email` מנהל ה-tenant יכול לכתוב כרצונו, ולכן לא משתמשים בו. משתמשים ב-`preferred_username` - **רק להרשמה חדשה**. אם כבר יש חשבון עם הכתובת הזו, לא נכנסים: נשלח קוד למייל ועוברים ל-`/login/code` עם הסבר. שום טוקן של Microsoft לא נשמר במקרה הזה.
+- כל כניסה נרשמת ב-audit (`auth.sso`): הספק, ה-`tid` וה-`oid`, ובסיס האמון (`msa` / `xms_edov` / `unverified`).
+
+### מה דניאל לוחץ ב-Entra (פעם אחת)
+
+1. https://entra.microsoft.com → **Identity → Applications → App registrations** → האפליקציה של עלזה.
+2. **Token configuration → Add optional claim → Token type: ID** → לסמן **email** ו-**xms_edov** → **Add**. אם מופיעה השאלה "Turn on the Microsoft Graph email permission" - לאשר.
+3. **Authentication → Supported account types**: כדי שגם חשבונות אישיים (outlook.com) יוכלו להיכנס, צריך "Accounts in any organizational directory and personal Microsoft accounts". אם הרישום מוגבל לארגונים בלבד, חשבון אישי יקבל שגיאה מ-Microsoft והכניסה תחזור עם "הכניסה לא הושלמה".
+4. אין סוד חדש, Redirect URI חדש או משתנה סביבה חדש.
+
+בלי סעיף 2 הכניסה עדיין עובדת: חשבונות אישיים כרגיל, וחשבונות עבודה יכולים להירשם, אבל חשבון קיים של חשבון עבודה יקבל קוד במייל במקום כניסה ישירה.

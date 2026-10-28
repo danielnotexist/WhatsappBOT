@@ -1,6 +1,10 @@
+import type { Route } from "next";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Cta } from "@/components/brand/cta";
+import { HEADER_BAR } from "@/components/brand/frame";
 import { Wordmark } from "@/components/brand/wordmark";
+import { cn } from "@/lib/utils";
 
 /** In-page sections of the landing (`#…`), and "מחירים" - its own page since the compact price list (/pricing). */
 const SECTIONS = [
@@ -25,7 +29,7 @@ export function AccountCta() {
  */
 export function LandingHeader({ account, page }: { account?: ReactNode; page?: "/pricing" | "/for" }) {
   return (
-    <header className="relative z-10 mx-auto flex h-[4.75rem] w-full max-w-[84rem] items-center justify-between gap-6 px-4 sm:px-8 lg:px-12">
+    <header className={cn(HEADER_BAR, "relative z-10 gap-6")}>
       <Wordmark />
       <div className="flex items-center gap-4">
         <nav aria-label={page ? "ניווט באתר" : "בדף הזה"} className="max-lg:hidden">
@@ -33,15 +37,19 @@ export function LandingHeader({ account, page }: { account?: ReactNode; page?: "
             {SECTIONS.map((s) => {
               // a profession page (/for/<slug>) belongs to the landing's "לפי מקצוע"
               const current = s.href === page || (page === "/for" && s.href === "#professions");
+              const className = current ? "rounded-full px-3.5 py-2 text-cream" : "rounded-full px-3.5 py-2 text-cream-muted transition-colors hover:text-cream";
               return (
                 <li key={s.href}>
-                  <a
-                    href={page && s.href.startsWith("#") ? `/${s.href}` : s.href}
-                    aria-current={current ? "page" : undefined}
-                    className={current ? "rounded-full px-3.5 py-2 text-cream" : "rounded-full px-3.5 py-2 text-cream-muted transition-colors hover:text-cream"}
-                  >
-                    {s.label}
-                  </a>
+                  {/* another page: a client navigation, so the page transition runs; a section of this page: a plain anchor (smooth scroll) */}
+                  {s.href.startsWith("#") ? (
+                    <a href={page ? `/${s.href}` : s.href} aria-current={current ? "page" : undefined} className={className}>
+                      {s.label}
+                    </a>
+                  ) : (
+                    <Link href={s.href as Route} aria-current={current ? "page" : undefined} className={className}>
+                      {s.label}
+                    </Link>
+                  )}
                 </li>
               );
             })}

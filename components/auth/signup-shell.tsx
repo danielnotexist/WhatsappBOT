@@ -2,6 +2,8 @@
 
 import { usePathname } from "next/navigation";
 import { useRef, type ReactNode } from "react";
+import { FRAME_CONTENT_MAX, HEADER_BAR } from "@/components/brand/frame";
+import { PageTransition } from "@/components/brand/page-transition";
 import { StepDeck, StepPaper, useLateResizeMorph } from "@/components/brand/step-card";
 import { Wordmark } from "@/components/brand/wordmark";
 import { cardTones, type CardTone } from "@/lib/design/tokens";
@@ -83,54 +85,59 @@ export function ShellFrame({
   useLateResizeMorph(grid, paper, deckRef);
   return (
     <ShellSessionProvider loginVisible={Boolean(tone && showLogin)}>
-      <div className="stage flex min-h-dvh flex-col">
-        <header className="mx-auto flex h-[4.75rem] w-full max-w-6xl flex-none items-center justify-between gap-4 px-4 sm:px-8">
-          <Wordmark />
-          {account ?? <ShellAccountLink signedIn={false} />}
-        </header>
-        <main
-          id="main"
-          className={cn(
-            "flex flex-1 flex-col",
-            tone
-              ? cn(
-                  "items-center sm:justify-center sm:px-6 sm:pb-16 lg:px-8",
-                  deck.length ? "pt-7 sm:pt-10" : "pt-2 sm:pt-4",
-                  // wide screens: centred, but never higher than the hoopoe standing on the paper allows — a taller card
-                  // (an error box) moves down instead of pushing her crest into the header. Two flex spacers: the top one
-                  // keeps a floor (paper top at least 10.5rem under the header, with the padding above), the bottom one
-                  // takes the rest.
-                  tone !== "ready" &&
-                    "lg:justify-start lg:before:flex-1 lg:before:content-[''] lg:after:flex-1 lg:after:content-['']",
-                  tone !== "ready" && (deck.length ? "lg:before:min-h-[8rem]" : "lg:before:min-h-[9.5rem]"),
-                )
-              : "px-4 sm:px-8",
-          )}
-        >
-          {tone ? (
-            <div
-              ref={grid}
-              data-tone={tone}
-              className={cn(
-                "relative grid w-full grid-cols-1 grid-rows-[auto_1fr] sm:max-w-[31rem]",
-                !ready && "max-sm:min-h-[calc(100dvh-4.75rem-1.75rem)]",
-                // 68rem = the header's 72rem minus its padding, so the question lines up with the wordmark
-                "lg:max-w-[68rem] lg:grid-rows-1 lg:gap-x-[clamp(3rem,7vw,7rem)]",
-                ready
-                  ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)]"
-                  : "lg:grid-cols-[minmax(0,1fr)_30rem]",
-                light && "surface-light",
-              )}
-            >
-              <StepDeck ref={deckRef} deck={deck} className={PAPER_AREA} />
-              <StepPaper ref={paper} tone={tone} className={PAPER_AREA} />
-              {children}
-            </div>
-          ) : (
-            children
-          )}
-        </main>
-      </div>
+      {/* the page transition: on entering / leaving the shell only — between its own steps the card morphs instead.
+          Before any DOM node, or React never runs its enter / exit (components/brand/page-transition.tsx) */}
+      <PageTransition>
+        <div className="stage flex min-h-dvh flex-col">
+          <header className={HEADER_BAR}>
+            <Wordmark />
+            {account ?? <ShellAccountLink signedIn={false} />}
+          </header>
+          <main
+            id="main"
+            className={cn(
+              "flex flex-1 flex-col",
+              tone
+                ? cn(
+                    "items-center sm:justify-center sm:px-6 sm:pb-16 lg:px-12",
+                    deck.length ? "pt-7 sm:pt-10" : "pt-2 sm:pt-4",
+                    // wide screens: centred, but never higher than the hoopoe standing on the paper allows — a taller card
+                    // (an error box) moves down instead of pushing her crest into the header. Two flex spacers: the top one
+                    // keeps a floor (paper top at least 10.5rem under the header, with the padding above), the bottom one
+                    // takes the rest.
+                    tone !== "ready" &&
+                      "lg:justify-start lg:before:flex-1 lg:before:content-[''] lg:after:flex-1 lg:after:content-['']",
+                    tone !== "ready" && (deck.length ? "lg:before:min-h-[8rem]" : "lg:before:min-h-[9.5rem]"),
+                  )
+                : "px-4 sm:px-8 lg:px-12",
+            )}
+          >
+            {tone ? (
+              <div
+                ref={grid}
+                data-tone={tone}
+                className={cn(
+                  "relative grid w-full grid-cols-1 grid-rows-[auto_1fr] sm:max-w-[31rem]",
+                  !ready && "max-sm:min-h-[calc(100dvh-4.75rem-1.75rem)]",
+                  // the frame's content box (components/brand/frame.ts), so the question lines up with the wordmark
+                  FRAME_CONTENT_MAX,
+                  "lg:grid-rows-1 lg:gap-x-[clamp(3rem,7vw,7rem)]",
+                  ready
+                    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)]"
+                    : "lg:grid-cols-[minmax(0,1fr)_30rem]",
+                  light && "surface-light",
+                )}
+              >
+                <StepDeck ref={deckRef} deck={deck} className={PAPER_AREA} />
+                <StepPaper ref={paper} tone={tone} className={PAPER_AREA} />
+                {children}
+              </div>
+            ) : (
+              children
+            )}
+          </main>
+        </div>
+      </PageTransition>
     </ShellSessionProvider>
   );
 }

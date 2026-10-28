@@ -158,3 +158,11 @@
 - **מי יכול לקרוא**: המארגן (הקובץ שלו). משתתף מאותו ארגון מקבל בדרך כלל שיתוף לקובץ, ואז `drive.readonly` מוצא אותו; אחרת — "אין לי גישה לתמליל" (רק כשביקשו).
 - **הזמן**: Meet מסיימת את המסמך בדרך כלל תוך דקות אחרי הפגישה (לפעמים עד ~45 דקות). הסיכום נבדק 10 דקות אחרי הסוף ושוב אחרי 15, 30 ו-60 דקות.
 - **מקורות** (לפי התיעוד הרשמי, 23.10.2026): support.google.com/meet/answer/12849897 (Use transcripts with Google Meet), developers.google.com/meet/api/guides/authenticate-authorize (Meet REST API scopes), developers.google.com/calendar/api/v3/reference/events (`attachments`, `conferenceData.conferenceId`). לבדוק שוב לפני הפעלה מול משתמשים אמיתיים.
+
+## 12. "המשך עם Google" - כניסה והרשמה (28.10.2026)
+
+> הקוד: `lib/auth/sso.ts` (הכללים), `lib/auth/sso-flow.ts`, `lib/google/sso.ts`, `lib/google/connect-store.ts`, `app/api/auth/google/{start,callback}` (`?intent=signin`).
+
+הכפתור ב-`/start` וב-`/login` נכנס (או נרשם) עם חשבון Google ובאותו מסך מחבר את Gmail, היומן ו-Drive - אותם scopes של חיבור רגיל (ו-`gmail.readonly` כל עוד יש מקום במכסה, סעיף 6), `prompt=consent select_account`.
+- **אמון בכתובת:** רק `email_verified === true` (מה-id_token, או מ-userinfo). בלי זה אין כניסה ואין הרשמה, וחוזרים לדף עם הסבר.
+- **ב-Console אין מה לשנות:** אותו OAuth client ואותם Authorized redirect URIs שכבר מוגדרים ל-`https://alze-nine.vercel.app/api/auth/google/callback` (ו-localhost לפיתוח). אין scope חדש ואין משתנה סביבה חדש.

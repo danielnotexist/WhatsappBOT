@@ -34,7 +34,7 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("העוזרת האישית שלך, בוואטסאפ.");
     await expect(page.getByRole("img", { name: "עלזה מתקשרת אליך בוואטסאפ" })).toBeVisible();
     await expect(page.getByText("לוקח בערך דקה.")).toBeVisible();
-    await page.getByRole("link", { name: "בואו נתחיל" }).click();
+    await page.getByRole("link", { name: "המשך עם מייל" }).click();
 
     // 2. email card (cream paper): the button wakes up only for a valid address; updates toggle is on by default
     await expect(page).toHaveURL(/\/start\/email$/);
