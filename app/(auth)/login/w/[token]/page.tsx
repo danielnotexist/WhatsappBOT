@@ -41,7 +41,7 @@ async function Confirm({ params, searchParams }: { params: PageProps<"/login/w/[
         <StepAside>
           <StepHeading tag="קישור ישן" title="הקישור לא בתוקף" onDark />
           <p role="alert" className="mt-4 text-lede text-cream-muted">
-            {REASONS[reason] ?? REASONS.invalid}
+            {REASONS[reason] ?? REASONS.invalid} אפשר לכתוב שוב ״כניסה״ בוואטסאפ ולקבל קישור חדש.
           </p>
         </StepAside>
         <StepBody className="lg:justify-center">
@@ -62,6 +62,7 @@ async function Confirm({ params, searchParams }: { params: PageProps<"/login/w/[
     <>
       <StepAside>
         <StepHeading tag="שוב כאן." title="כניסה לאזור האישי" onDark />
+        <p className="mt-4 text-lede text-cream-muted">הקישור הגיע מהשיחה בוואטסאפ. לחיצה אחת, והדפדפן הזה מחובר לחשבון שלך.</p>
       </StepAside>
       <StepBody className="lg:justify-center">
         <form action={loginWithTokenAction} className="flex flex-col gap-4">
@@ -69,6 +70,7 @@ async function Confirm({ params, searchParams }: { params: PageProps<"/login/w/[
           <Cta type="submit" block>
             כניסה
           </Cta>
+          <p className="text-center text-[0.875rem] text-cream-muted">הקישור עובד פעם אחת. אחרי הכניסה הוא כבר לא תקף.</p>
         </form>
       </StepBody>
     </>

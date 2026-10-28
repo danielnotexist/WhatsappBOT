@@ -1,15 +1,16 @@
 import { Cta } from "@/components/brand/cta";
 import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
+import { PRICING } from "./content";
 import { DeferredMascot } from "./mascot";
-import { CONTAINER } from "./ui";
+import { CONTAINER, LEDE } from "./ui";
 
-/** The end card: the hero's second sentence again, under a dawn light, and the one call to action - no more words. */
+/** The end card: the hero's second sentence again, under a dawn light, and the one call to action. */
 export function FinalCta() {
   return (
     <section
       aria-labelledby="final-title"
-      className="alze-defer relative overflow-hidden py-28 text-center sm:py-40"
+      className="alze-defer relative overflow-hidden py-32 text-center sm:py-48"
     >
       <div
         aria-hidden="true"
@@ -29,6 +30,9 @@ export function FinalCta() {
         >
           {BRAND.name} על זה.
         </h2>
+        <p className={cn(LEDE, "mt-7 max-w-[30rem]")}>
+          דקה להרשמה, חיבור ל-Outlook או ל-Gmail, ו-{PRICING.trial} הודעות ראשונות בחינם.
+        </p>
         <Cta href="/start" className="mt-10 max-sm:w-full sm:min-w-64">
           בואו נתחיל - לוקח דקה
         </Cta>

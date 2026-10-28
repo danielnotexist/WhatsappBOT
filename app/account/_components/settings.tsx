@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { DELETE_CONFIRM_WORD } from "@/lib/account/service";
+import { BRAND } from "@/lib/brand";
 import { deleteAccountAction, setAlertsAction } from "../actions";
 import { AlertsSetting } from "./alerts-setting";
 import { DeleteAccountForm } from "./delete-account-form";
@@ -21,7 +22,7 @@ export function SettingsArea({
 }) {
   return (
     <div className="grid gap-14">
-      <Section id="settings" title="הגדרות">
+      <Section id="settings" title="הגדרות" description={`פרטי החשבון כפי ש${BRAND.name} שומרת אותם, ומחיקת החשבון.`}>
         {banner}
         <dl className="divide-y divide-line border-y border-line">
           {details.map((d) => (
@@ -39,7 +40,8 @@ export function SettingsArea({
         <h3 id="delete-title" className="font-heading text-[1.25rem] leading-tight font-bold">
           מחיקת החשבון
         </h3>
-        <p className="mt-2 max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">
+        <p className="mt-1 text-[0.9375rem] text-cream-muted">לצמיתות, כולל ההודעות והחיבורים.</p>
+        <p className="mt-4 max-w-[36rem] text-[0.9375rem] leading-relaxed text-cream-muted">
           נמחקים לצמיתות ההודעות, ההעדפות, התזכורות, יומן הפעולות והחיבורים, והמנוי מתבטל. אין שחזור.
         </p>
         <DeleteAccountForm action={deleteAccountAction} word={DELETE_CONFIRM_WORD} />

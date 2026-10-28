@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomInt } from "node:crypto";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { BRAND } from "../lib/brand";
 import { enterCode, readCode, sendWhatsapp, submitEmail, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
 
 /**
@@ -206,9 +207,9 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("navigation", { name: "גם למשרדים אחרים" }).getByRole("link")).toHaveCount(3);
     expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth)).toBeLessThanOrEqual(1);
     expect(await axeSeriousOrCritical(page)).toEqual([]);
-    // the landing's section links here: the profession's name is the link
+    // the landing's section links here
     await page.goto("/");
-    await expect(page.locator("#professions").getByRole("link", { name: "רואי חשבון", exact: true })).toHaveAttribute("href", "/for/accountants");
+    await expect(page.locator("#professions").getByRole("link", { name: `עוד על ${BRAND.name} לרואי חשבון` })).toHaveAttribute("href", "/for/accountants");
     await ctx.close();
   });
 }

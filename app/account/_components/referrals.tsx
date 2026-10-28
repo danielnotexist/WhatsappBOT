@@ -1,6 +1,6 @@
 import { WaLinkButton } from "@/components/brand/wa-link-button";
 import { BRAND } from "@/lib/brand";
-import { REFERRAL_CAP_PER_YEAR } from "@/lib/referrals/constants";
+import { REFERRAL_CAP_PER_YEAR, REFERRAL_FREE_DAYS } from "@/lib/referrals/constants";
 import type { ReferralStats } from "@/lib/referrals/service";
 import { cn } from "@/lib/utils";
 import { formatCount } from "../view";
@@ -18,7 +18,7 @@ export function referralShareHref(link: string): string {
 
 /**
  * "חבר מביא חבר" in the personal area (round 3, in "מנוי"): the personal link with [העתקת הקישור] and [שליחה בוואטסאפ],
- * how it works in one line (the details: the pricing FAQ and the terms), and the counters — who joined through the link, who paid, and the free months earned
+ * how it works in two lines, and the counters — who joined through the link, who paid, and the free months earned
  * (with the ones waiting for a paid subscription). The rules are lib/referrals (the numbers: ./constants.ts).
  */
 export function ReferralSection({ link, stats, className }: { link: string; stats: ReferralStats; className?: string }) {
@@ -29,9 +29,12 @@ export function ReferralSection({ link, stats, className }: { link: string; stat
   ];
   return (
     <Section id="referrals" title="חבר מביא חבר" className={className}>
-      <p className="max-w-[40rem] text-[0.9375rem] leading-relaxed text-cream-muted">
-        חבר שנרשם דרך הקישור ומשלם בפעם הראשונה: חודש חינם לכל אחד מכם, עד {REFERRAL_CAP_PER_YEAR} בשנה.
-      </p>
+      <div className="max-w-[40rem] text-[0.9375rem] leading-relaxed text-cream-muted">
+        <p>שולחים לחבר את הקישור האישי. כשהוא נרשם דרכו ומשלם בפעם הראשונה, כל אחד מכם מקבל חודש חינם.</p>
+        <p className="mt-1">
+          חודש חינם הוא דחייה של החיוב הבא ב-{REFERRAL_FREE_DAYS} יום, גם בחיוב שנתי. עד {REFERRAL_CAP_PER_YEAR} חודשים חינם בשנה.
+        </p>
+      </div>
 
       <div className="mt-6 rounded-2xl border border-line bg-night-2/70 p-4 sm:p-5">
         <p id="referral-link-label" className="text-[0.875rem] text-cream-muted">

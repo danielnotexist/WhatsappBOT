@@ -7,10 +7,10 @@ import { Cta } from "@/components/brand/cta";
 import { Handwritten } from "@/components/brand/handwritten";
 import { FinalCta } from "@/components/brand/landing/final-cta";
 import { LandingFooter } from "@/components/brand/landing/footer";
-import { AccountCta, LandingHeader, NavSignIn } from "@/components/brand/landing/header";
+import { AccountCta, LandingHeader } from "@/components/brand/landing/header";
 import { PROFESSION_PAGES, professionPage } from "@/components/brand/landing/profession-pages";
 import { Trust } from "@/components/brand/landing/trust";
-import { CONTAINER, H2 } from "@/components/brand/landing/ui";
+import { CONTAINER, H2, LEDE } from "@/components/brand/landing/ui";
 import { PageTransition } from "@/components/brand/page-transition";
 import { SupportChat } from "@/components/brand/support-chat";
 import { CrestMark } from "@/components/brand/wordmark";
@@ -31,10 +31,9 @@ export async function generateMetadata(props: PageProps<"/for/[profession]">): P
 
 /**
  * /for/<profession> — "לפי מקצוע" as pages of their own (round plan "אנליטיקה ו-SEO": found on Google): the headline
- * for that office and the call to action, three of its everyday questions with her answers (the landing's transcript
- * style - the landing shows only the questions and links here), what she does there, trust, the other offices and the
- * end card. No lede paragraphs (Daniel, 28.10.2026). Static (prerendered for each profession); the only request-time
- * parts are the header's "לאזור האישי" / "כניסה" (BySession). Copy: components/brand/landing/profession-pages.ts.
+ * for that office, three of its everyday questions with her answers (the landing's transcript style), what she does
+ * there, trust, and the one call to action. Static (prerendered for each profession); the only request-time part is
+ * "לאזור האישי" in the header (BySession). Copy: components/brand/landing/profession-pages.ts.
  */
 export default async function ProfessionPage(props: PageProps<"/for/[profession]">) {
   const p = professionPage((await props.params).profession);
@@ -44,15 +43,16 @@ export default async function ProfessionPage(props: PageProps<"/for/[profession]
   return (
     <PageTransition>
       <div className="alze-night flex min-h-dvh flex-col overflow-x-clip">
-        <LandingHeader page="/for" account={<BySession signedIn={<AccountCta />} />} signIn={<BySession signedIn={null} signedOut={<NavSignIn />} />} />
+        <LandingHeader page="/for" account={<BySession signedIn={<AccountCta />} />} />
         <main id="main" className="flex-1">
-          <section aria-labelledby="profession-title" className="pt-10 pb-12 sm:pt-16 sm:pb-16">
+          <section aria-labelledby="profession-title" className="pt-10 pb-20 sm:pt-16 sm:pb-28">
             <div className={CONTAINER}>
               <Handwritten tone="sage">לפי מקצוע: {p.profession}</Handwritten>
               <h1 id="profession-title" className="mt-4 max-w-[18ch] text-[clamp(2.5rem,1.5rem+4.2vw,5rem)] leading-[1.04] font-bold tracking-[-0.014em] text-balance">
                 {p.headline}
               </h1>
-              <div className="mt-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
+              <p className={cn(LEDE, "mt-6 max-w-[34rem]")}>{p.lede}</p>
+              <div className="mt-9 flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
                 <Cta href="/start" className="max-sm:w-full sm:min-w-64">
                   בואו נתחיל - לוקח דקה
                 </Cta>
@@ -63,14 +63,15 @@ export default async function ProfessionPage(props: PageProps<"/for/[profession]
             </div>
           </section>
 
-          <section aria-labelledby="exchanges-title" className="py-16 sm:py-24">
+          <section aria-labelledby="exchanges-title" className="py-20 sm:py-28">
             <div className={CONTAINER}>
               <h2 id="exchanges-title" className={cn(H2, "max-w-[16ch]")}>
                 שלוש שאלות מהיום-יום.
               </h2>
-              <ul className="mt-10 border-t border-line sm:mt-14">
+              <p className={cn(LEDE, "mt-6 max-w-[30rem]")}>כותבים לה בוואטסאפ כמו לעוזרת במשרד. כשמשהו אמור לצאת, היא שואלת קודם.</p>
+              <ul className="mt-14 border-t border-line sm:mt-16">
                 {p.exchanges.map((e) => (
-                  <li key={e.ask} className="border-b border-line py-8 sm:py-10">
+                  <li key={e.ask} className="border-b border-line py-10 sm:py-12">
                     <p className="max-w-[28ch] font-heading text-[clamp(1.5rem,1.1rem+1.6vw,2.5rem)] leading-[1.2] font-bold text-balance text-cream">״{e.ask}״</p>
                     <p className="mt-6 flex max-w-[44rem] gap-3.5 text-[1.125rem] leading-[1.65] text-cream-muted">
                       <CrestMark className="mt-1 size-5 flex-none text-honey" />

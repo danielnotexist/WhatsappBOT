@@ -17,8 +17,8 @@ export const metadata: Metadata = pageMetadata({
 });
 
 /**
- * Step 1 (round plan §3): עלזה is calling — phone first, then the handwritten line, the headline (no subtitle: Daniel,
- * 28.10.2026) and the ways in (Daniel, 28.10.2026): "המשך עם Microsoft" / "המשך עם Google" first — one consent signs up and
+ * Step 1 (round plan §3): עלזה is calling — phone first, then the handwritten line, the headline, "about a minute",
+ * and the ways in (Daniel, 28.10.2026): "המשך עם Microsoft" / "המשך עם Google" first — one consent signs up and
  * connects the mailbox, and the signup goes straight to the WhatsApp step — then "המשך עם מייל" (the email card and
  * the code, as before), the terms line and the sign-in link. On phones the buttons stay pinned to the bottom, with the
  * email way and the sign-in link side by side under them; the line about the apps and the terms stay in the flow.
@@ -37,8 +37,9 @@ export default function StartIntroPage() {
         <h1 className="mt-3 text-hero font-bold">
           העוזרת האישית שלך, <span className="headline-light">בוואטסאפ</span>.
         </h1>
+        <p className="mt-5 text-lede text-cream-muted">לוקח בערך דקה.</p>
         {/* phones: what the provider buttons also do, and the terms, in the flow above the pinned bar */}
-        <SsoNote className="mt-5 max-w-[26rem] lg:hidden" />
+        <SsoNote className="mt-4 max-w-[26rem] lg:hidden" />
         <SsoTerms className="mt-2 lg:hidden" />
         <Suspense fallback={null}>
           <SsoErrorNotice className="mt-6 w-full lg:max-w-[25rem]" />

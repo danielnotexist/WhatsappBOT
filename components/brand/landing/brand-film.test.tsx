@@ -73,12 +73,12 @@ afterEach(() => {
 });
 
 describe("'יום עבודה אחד, בוואטסאפ.' with the brand film (the test of 24.10.2026)", () => {
-  it("the section keeps its heading (no explanation line under it: Daniel, 28.10.2026); the film stands where the pinned scenes stood, behind one switch", () => {
+  it("the section keeps its heading and line; the film stands where the pinned scenes stood, behind one switch", () => {
     expect(DAY_SECTION).toBe("film");
     const { container } = render(<DaySection />);
     const section = screen.getByRole("region", { name: "יום עבודה אחד, בוואטסאפ." });
     expect(section).toHaveAttribute("id", "day");
-    expect(section).not.toHaveTextContent("בלי אפליקציה חדשה ובלי ללמוד מערכת.");
+    expect(section).toHaveTextContent("בלי אפליקציה חדשה ובלי ללמוד מערכת.");
     // the film, not the scenes
     expect(container.querySelector("[data-state]")).not.toBeNull();
     expect(section.querySelector("ol")).toBeNull();

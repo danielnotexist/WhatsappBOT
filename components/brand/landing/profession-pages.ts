@@ -18,6 +18,7 @@ export interface ProfessionPage {
   description: string;
   /** the page's h1 (ends with a period) */
   headline: string;
+  lede: string;
   exchanges: readonly Exchange[];
   /** what she does in that office, four short lines */
   tasks: readonly string[];
@@ -36,6 +37,7 @@ export const PROFESSION_PAGES: readonly ProfessionPage[] = [
     title: "עוזרת אישית בוואטסאפ לעורכי דין",
     description: "סעיף בהסכם, מועד להגשה ומייל ללקוח - בהודעה אחת בוואטסאפ. עוזרת למשרד עורכי דין שעובדת עם Outlook, Gmail והקבצים של המשרד, ושום דבר לא יוצא בלי אישור.",
     headline: "עוזרת אישית בוואטסאפ, למשרד עורכי דין.",
+    lede: "היא מוצאת את הסעיף בהסכם, מזכירה מועד להגשה ומכינה את המייל ללקוח. כותבים לה בוואטסאפ, ושום דבר לא יוצא בלי אישור.",
     exchanges: [
       first("עורכי דין"),
       {
@@ -62,6 +64,7 @@ export const PROFESSION_PAGES: readonly ProfessionPage[] = [
     title: "עוזרת אישית בוואטסאפ לרואי חשבון",
     description: "מי עוד לא שלח חשבוניות, מה מחכה לתשובה במייל ומתי הפגישה הבאה. עוזרת למשרד רואי חשבון בוואטסאפ, עם Outlook או Gmail, ושום דבר לא יוצא בלי אישור.",
     headline: "עוזרת אישית בוואטסאפ, למשרד רואי חשבון.",
+    lede: "מי עוד לא שלח חשבוניות, מה מחכה לתשובה ומתי הפגישה הבאה. שואלים אותה בוואטסאפ, והיא מכינה את התזכורות והמיילים לאישור.",
     exchanges: [
       first("רואי חשבון"),
       {
@@ -88,6 +91,7 @@ export const PROFESSION_PAGES: readonly ProfessionPage[] = [
     title: "עוזרת אישית בוואטסאפ ליועצים",
     description: "תיאום פגישות, זימונים ומעקב אחרי הצעות מחיר בלי לפתוח את היומן. עוזרת ליועצים בוואטסאפ, עם Outlook או Google Calendar, ושום דבר לא יוצא בלי אישור.",
     headline: "עוזרת אישית בוואטסאפ, ליועצים.",
+    lede: "היא מוצאת שעה פנויה, מכינה את הזימון ועוקבת אחרי הצעות המחיר. כותבים או מקליטים לה בוואטסאפ, בין פגישה לפגישה.",
     exchanges: [
       first("יועצים"),
       {
@@ -114,6 +118,7 @@ export const PROFESSION_PAGES: readonly ProfessionPage[] = [
     title: "עוזרת אישית בוואטסאפ לקליניקות",
     description: "הזזת תורים, מיילים למטופלים ותזכורות, בין טיפול לטיפול. עוזרת לקליניקה בוואטסאפ, עם Outlook או Google Calendar, ושום דבר לא יוצא בלי אישור.",
     headline: "עוזרת אישית בוואטסאפ, לקליניקה.",
+    lede: "הזזת תור, מייל למטופל ותזכורת להתקשר, בין טיפול לטיפול. היא מכינה, ומאשרים בלחיצה.",
     exchanges: [
       first("קליניקות"),
       {

@@ -139,7 +139,9 @@ export function DemoChatItem() {
           לבדוק את {BRAND.name} בצ&apos;אט
         </Cta>
       }
-    />
+    >
+      <p className="mt-1 text-[0.9375rem] text-cream-muted">כותבים, מקליטים ולוחצים על כפתורים, כמו בוואטסאפ.</p>
+    </Row>
   );
 }
 
@@ -195,6 +197,8 @@ export function NoPhoneItem() {
           קישור מספר
         </Cta>
       }
-    />
+    >
+      <p className="mt-1 text-[0.9375rem] text-cream-muted">קוד חד-פעמי, והשיחה נפתחת בטלפון.</p>
+    </Row>
   );
 }

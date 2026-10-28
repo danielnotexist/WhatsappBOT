@@ -98,13 +98,38 @@ function ProviderTile({
   );
 }
 
-/** A ticked box: the one thing to do on the provider's screen (tick every permission). */
+const icon = "mt-[0.2rem] size-5 flex-none fill-none stroke-current lg:text-sage";
+
+function Check() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={`${icon} stroke-[2.4]`}>
+      <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function Lock() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={`${icon} stroke-2`}>
+      <rect x="5" y="10" width="14" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" strokeLinecap="round" />
+    </svg>
+  );
+}
 function Boxes() {
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="mt-[0.2rem] size-5 flex-none fill-none stroke-current stroke-2 lg:text-sage">
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={`${icon} stroke-2`}>
       <rect x="4" y="4" width="16" height="16" rx="3" />
       <path d="m8.5 12 2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+function Assurance({ icon: Icon, children }: { icon: () => ReactNode; children: ReactNode }) {
+  return (
+    <li className="flex gap-3">
+      <Icon />
+      <span>{children}</span>
+    </li>
   );
 }
 
@@ -160,8 +185,7 @@ export function OneAccountNote({ connected }: { connected: ProviderId }) {
 const MS_NOTE = "הנפוץ במשרדים";
 
 /**
- * Step 4 (round plan §3): give עלזה her first superpower. Microsoft first (primary), Gmail second, skip. Beside the
- * question only the one line that helps on the provider's screen (Daniel, 28.10.2026: no trust lines on the steps).
+ * Step 4 (round plan §3): give עלזה her first superpower. Microsoft first (primary), Gmail second, skip.
  * After a failed Microsoft round-trip the callback brings the user back here with the reason; when the
  * organisation needs an admin, a "send to the IT admin" mail link appears. `notice` takes the request-time part
  * (the page streams the session check and the error there), so the card itself is static and never redrawn.
@@ -180,11 +204,12 @@ export function ConnectStep({ error, adminLink, notice }: { error?: string; admi
             </>
           }
         />
-        {/* the one thing worth knowing before the provider's screen */}
-        <p className="mt-5 flex gap-3 text-[1rem] leading-snug lg:mt-7">
-          <Boxes />
-          <span>במסך הבא כדאי לסמן את כל ההרשאות</span>
-        </p>
+        <p className="mt-3 text-[1.0625rem] lg:mt-5 lg:text-lede lg:text-cream-muted">כל עוזרת טובה מתחילה מהמייל.</p>
+        <ul className="mt-6 flex flex-col gap-3 text-[1rem] leading-snug lg:mt-8">
+          <Assurance icon={Check}>שום דבר לא יוצא בלי האישור שלך</Assurance>
+          <Assurance icon={Lock}>מוצפן, נשמר באירופה, לא משמש לאימון</Assurance>
+          <Assurance icon={Boxes}>במסך הבא כדאי לסמן את כל ההרשאות</Assurance>
+        </ul>
       </StepAside>
 
       <StepBody>
@@ -221,6 +246,9 @@ export function ConnectStep({ error, adminLink, notice }: { error?: string; admi
             logo={<GoogleLogo className="size-6" />}
           />
         </div>
+        {/* the worry at the moment of choosing, in the code step's helper style; only where the assurances sit on the
+            dark stage (below lg they share this paper, and one trust block is enough) */}
+        <p className="mt-4 hidden text-[0.9375rem] leading-snug text-ink-muted lg:block">הסיסמה לא עוברת דרכנו, ואפשר לנתק בכל רגע.</p>
 
         {/* footer: phones and tablets stack progress and skip next to the hoopoe; wide screens put progress at the
             start and skip at the end (the hoopoe standing on the paper's top edge) */}

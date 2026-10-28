@@ -14,6 +14,7 @@ import { isAdminEmail } from "@/lib/admin/auth";
 import { getSession } from "@/lib/auth/current-user";
 import { createPayLinkToken } from "@/lib/billing/pay-link";
 import { entitlements, mayConnect, providerGate } from "@/lib/billing/plans";
+import { BRAND } from "@/lib/brand";
 import { googleReadGates } from "@/lib/connections/gates";
 import { connectionServices, previewServices } from "@/lib/connections/services";
 import { getDb } from "@/lib/db";
@@ -174,7 +175,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
         <div className="pt-8 lg:pt-0">
           <AreaPanel area="overview">
             <div className="grid gap-x-12 gap-y-16 lg:grid-cols-[minmax(0,1fr)_19rem] lg:pt-[6.75rem] xl:grid-cols-[minmax(0,1fr)_21rem]">
-              <Section id="overview" title="סקירה" className="lg:-mt-[6.75rem]">
+              <Section id="overview" title="סקירה" description="מה מחובר לחשבון, ומה אפשר לעשות מכאן." className="lg:-mt-[6.75rem]">
                 {bannerFor("overview")}
                 <OverviewRows
                   microsoft={{ state: microsoft.state, label: pausedLabel("microsoft") }}
@@ -182,6 +183,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
                   phone={linked[0] ?? null}
                   timeZone={tz}
                   activeAgents={working}
+                  agentsLine={agentsModel.quotaLine}
                   demo={demo}
                 />
               </Section>
@@ -190,7 +192,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
           </AreaPanel>
 
           <AreaPanel area="connections">
-            <Section id="connections" title="חיבורים">
+            <Section id="connections" title="חיבורים" description={`מכאן ${BRAND.name} עובדת עם המייל, היומן, המשימות והקבצים. ניתוק מוחק את הגישה אצלנו.`}>
               {bannerFor("connections")}
               {paused.length && inForce[0] ? <PausedNotice inForce={inForce[0]} paused={paused[0]!} plan={plan} payHref={payHref} /> : null}
               <ul className="divide-y divide-line border-y border-line">
@@ -202,7 +204,7 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
           </AreaPanel>
 
           <AreaPanel area="whatsapp">
-            <Section id="whatsapp" title="וואטסאפ">
+            <Section id="whatsapp" title="וואטסאפ" description={`המספר שממנו מדברים עם ${BRAND.name}.`}>
               {bannerFor("whatsapp")}
               <ul className="divide-y divide-line border-y border-line">
                 {linked.length ? linked.map((p) => <PhoneItem key={p.id} phone={p} timeZone={tz} />) : <NoPhoneItem />}

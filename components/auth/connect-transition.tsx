@@ -78,6 +78,9 @@ export function ConnectTransition({ provider }: { provider: ConnectProvider }) {
       <p role="status" className="mt-4 text-lede text-ink-muted">
         {p.available ? `מעבירים אותך ל-${p.company}…` : `${p.product} מגיע בקרוב, ממשיכים בינתיים`}
       </p>
+      {p.available ? (
+        <p className="mt-2 max-w-sm text-[0.9375rem] text-ink-muted">ההתחברות עצמה נעשית אצל {p.company}. הסיסמה שלך לא עוברת דרכנו.</p>
+      ) : null}
 
       {p.available ? (
         <a href={p.next} className="mt-10 rounded-sm text-[0.9375rem] font-semibold underline underline-offset-3">

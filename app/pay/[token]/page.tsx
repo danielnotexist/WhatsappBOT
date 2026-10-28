@@ -183,18 +183,17 @@ function ChoosePlan({
   const annual = cycle === "annual";
   const past = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
   const cancelledUntil = sub?.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime() ? dayOf(sub.next_charge_at, user.timezone) : null;
-  // a returning payer gets one line on what paying restores; a first choice needs none (the terms are under the papers)
-  const face: { tag: string; title: string; lede?: string } =
+  const face =
     sub?.status === "past_due"
       ? { tag: "החיוב האחרון לא עבר.", title: "הסדרת התשלום", lede: "משלמים חודש חדש בכרטיס, והחשבון חוזר לפעול מיד. כל ההגדרות, החיבורים והתזכורות נשמרו." }
       : sub?.status === "cancelled"
         ? { tag: "טוב לראות אותך שוב.", title: "חידוש המנוי", lede: "בוחרים מסלול ומשלמים חודש חדש. כל ההגדרות והחיבורים נשמרו." }
-        : { tag: name ? `${name}, ממשיכים מאותו מקום.` : "ממשיכים מאותו מקום.", title: "בחירת מסלול" };
+        : { tag: name ? `${name}, ממשיכים מאותו מקום.` : "ממשיכים מאותו מקום.", title: "בחירת מסלול", lede: `בוחרים מסלול, משלמים בדף המאובטח של HYP, ו${BRAND.name} ממשיכה בוואטסאפ מאיפה שעצרתם.` };
 
   return (
     <>
       <PayHeading tag={face.tag} title={face.title}>
-        {face.lede ? <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">{face.lede}</p> : null}
+        <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">{face.lede}</p>
         {cancelledUntil ? (
           <p className="mt-3 max-w-[38rem] text-[0.9375rem] text-cream-muted">
             המנוי פעיל עד {cancelledUntil}. כדי להמשיך אותו בלי חיוב עכשיו: בוואטסאפ, לכתוב ״המשך מנוי״.
