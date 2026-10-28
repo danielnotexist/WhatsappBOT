@@ -18,12 +18,7 @@ export default function LoginWhatsappPage() {
     <>
       <StepAside>
         <StepHeading tag="דרך וואטסאפ" title={`שולחים ל${BRAND.name} ״כניסה״.`} />
-        <p className="mt-3 text-[1.0625rem] lg:mt-5 lg:text-lede lg:text-cream-muted">היא שולחת בחזרה קישור כניסה אישי, שעובד פעם אחת ל-10 דקות.</p>
-        <ol className="mt-6 flex list-decimal flex-col gap-2 ps-5 text-[1rem] leading-snug marker:font-heading marker:font-bold lg:mt-8">
-          <li className="ps-1">פותחים את השיחה עם {BRAND.name} בוואטסאפ</li>
-          <li className="ps-1">שולחים את המילה ״כניסה״</li>
-          <li className="ps-1">לוחצים על הקישור שמגיע, ונכנסים לאזור האישי</li>
-        </ol>
+        <p className="mt-3 text-[1.0625rem] lg:mt-5 lg:text-lede lg:text-cream-muted">היא שולחת בחזרה קישור כניסה אישי.</p>
       </StepAside>
       <StepBody>
         <Suspense fallback={null}>
@@ -50,7 +45,7 @@ async function WaLinks() {
       </WaLinkButton>
       <div className="hidden items-center gap-4 lg:flex">
         <QrCode value={href} label="קוד QR לפתיחת וואטסאפ בטלפון" className="size-28 flex-none" />
-        <p className="text-[0.9375rem] leading-relaxed">במחשב? סורקים עם הטלפון, והשיחה נפתחת עם המילה ״כניסה״.</p>
+        <p className="text-[0.9375rem] leading-relaxed">במחשב? סורקים עם הטלפון.</p>
       </div>
     </div>
   );

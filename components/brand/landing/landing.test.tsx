@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BRAND } from "@/lib/brand";
-import { PLANS, TRIAL_MESSAGES, VAT_RATE, planFeatures } from "@/lib/billing/plans";
-import { INTEGRATIONS, featuredGroups, integrationsForPlan } from "@/lib/integrations/catalogue";
+import { PLANS, TRIAL_MESSAGES, planFeatures } from "@/lib/billing/plans";
+import { INTEGRATIONS, integrationsForPlan } from "@/lib/integrations/catalogue";
 import { Connectors } from "./connectors";
 import { FAQ, HERO_SCRIPT, PRICING, PROFESSIONS, SCENES, TRUST } from "./content";
 import { DaySection } from "./day-scenes";
@@ -105,6 +105,9 @@ describe("hero", () => {
     await act(async () => {});
     const h1 = screen.getByRole("heading", { level: 1 });
     expect(h1).toHaveTextContent(`מה שהבטחת לעשות.${BRAND.name} על זה.`);
+    // one short line under the headline (Daniel, 28.10.2026), not a paragraph
+    expect(screen.getByText("עוזרת אישית שמחוברת למייל, ליומן ולקבצים של העסק.")).toBeInTheDocument();
+    expect(screen.queryByText(/כותבים לה או מקליטים/)).toBeNull();
     expect(screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" })).toHaveAttribute(
       "href",
       "/start",
@@ -120,19 +123,12 @@ describe("hero", () => {
 });
 
 describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
-  it("hero: a quiet 'עובדת עם' strip under the call to action - featured tiles as one toolbar, and a link to the list", async () => {
+  it("hero: no 'עובדת עם' strip any more - the systems are the connectors section's job", async () => {
     render(<Hero />);
     await act(async () => {});
-    const strip = screen.getByRole("toolbar", { name: "עובדת עם" });
-    const featured = featuredGroups().flatMap((g) => g.items.map((i) => i.name));
-    expect(within(strip).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(featured);
-    expect(within(strip).getAllByRole("button").filter((b) => b.tabIndex === 0)).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "כל החיבורים" })).toHaveAttribute("href", "#connectors");
-    // it follows the call to action and the trial line, never the headline
-    const h1 = screen.getByRole("heading", { level: 1 });
-    const cta = screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" });
-    expect(h1.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(cta.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+    expect(screen.queryByText("עובדת עם")).toBeNull();
+    expect(screen.queryByRole("link", { name: "כל החיבורים" })).toBeNull();
   });
 
   it("pricing: one compact row per plan - basic under 'חשבון אחד: Google או Microsoft', pro under its count - 8 paper tiles and '+K' that opens the full set ('בקרוב' on the business systems)", () => {
@@ -156,9 +152,10 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "Google Slides", "monday.com, בקרוב"]) expect(within(basicRow).queryByRole("button", { name }), name).toBeNull();
     const proRow = within(screen.getByRole("article", { name: PLANS.pro.nameHe })).getByRole("toolbar");
     for (const name of ["Google Tasks", "Microsoft To Do", "SharePoint", "monday.com, בקרוב"]) expect(within(proRow).getByRole("button", { name }), name).toBeInTheDocument();
-    expect(screen.getByText(/בבסיסי ובהודעות החינמיות מחברים חשבון אחד, Google או Microsoft\. בפרו שניהם עובדים יחד/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "לכל החיבורים" })).toHaveAttribute("href", "#connectors");
-    expect(screen.getByRole("link", { name: "להשוואה המלאה" })).toHaveAttribute("href", "/pricing");
+    // under the cards: one short line, the full comparison (opened on /pricing) and the call to action
+    expect(screen.queryByText(/בבסיסי ובהודעות החינמיות מחברים חשבון אחד/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "לכל החיבורים" })).toBeNull();
+    expect(screen.getByRole("link", { name: "להשוואה המלאה" })).toHaveAttribute("href", "/pricing#compare");
   });
 
   it("pricing: the real difference between the plans, from lib/billing/plans.ts (planFeatures)", () => {
@@ -181,23 +178,24 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     expect(basic).toHaveTextContent("סוכן אחד משלך");
   });
 
-  it("the full list: three groups with their counts, a card per system with its benefit, 'בקרוב' where it is not connected yet, and more to come", () => {
+  it("the full list: three groups with their counts, a card per system with its mark and name only, 'בקרוב' where it is not connected yet", () => {
     render(<Connectors />);
     const section = screen.getByRole("region", { name: "מתחברת לכלים שכבר יש לכם." });
     expect(section).toHaveAttribute("id", "connectors");
+    // the heading alone: no intro paragraph
+    expect(section).not.toHaveTextContent("מתחברים פעם אחת");
     const headings = screen.getAllByRole("heading", { level: 3 });
     expect(headings.map((h) => h.textContent)).toEqual(["Google", "Microsoft 365", "מערכות העסק"]);
     // the count beside each heading
     expect(headings.map((h) => h.nextElementSibling?.textContent)).toEqual(["8 חיבורים", "8 חיבורים", "4 בקרוב"]);
     for (const i of INTEGRATIONS) {
       const item = screen.getByText(i.name).closest("li")!;
-      expect(item, i.id).toHaveTextContent(i.benefit);
-      // the card: the mark, centred above the name
+      // the mark and the name (and "בקרוב" on a card not connected yet) - no description line
       expect(item.querySelector(`[data-integration-tile='${i.id}'] svg`), i.id).not.toBeNull();
-      if (i.status === "soon") expect(item, i.id).toHaveTextContent("בקרוב");
-      else expect(item, i.id).not.toHaveTextContent("בקרוב");
+      expect(item, i.id).not.toHaveTextContent(i.benefit);
+      expect(item.textContent, i.id).toBe(i.status === "soon" && i.vendor !== "business" ? `בקרוב${i.name}` : i.name);
     }
-    expect(screen.getByText("ועוד בהמשך")).toBeInTheDocument();
+    expect(screen.queryByText("ועוד בהמשך")).toBeNull();
     expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-labelledby"))).toEqual([
       "connectors-google",
       "connectors-microsoft",
@@ -205,38 +203,45 @@ describe("the systems she works with (lib/integrations/catalogue.ts)", () => {
     ]);
   });
 
-  it("the header links to the list, and 'מחירים' to its own page", () => {
+  it("the header: three links - 'איך זה עובד', 'מחירים' (its own page) and 'כניסה'", () => {
     render(<LandingHeader />);
-    expect(screen.getByRole("link", { name: "חיבורים" })).toHaveAttribute("href", "#connectors");
-    expect(screen.getByRole("link", { name: "מחירים" })).toHaveAttribute("href", "/pricing");
+    const nav = screen.getByRole("navigation", { name: "ניווט באתר" });
+    expect(within(nav).getAllByRole("link").map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["איך זה עובד", "#day"],
+      ["מחירים", "/pricing"],
+      ["כניסה", "/login"],
+    ]);
   });
 
   it("on /pricing the header leads back to the landing's sections and marks 'מחירים' current", () => {
     render(<LandingHeader page="/pricing" />);
-    expect(screen.getByRole("link", { name: "חיבורים" })).toHaveAttribute("href", "/#connectors");
+    expect(screen.getByRole("link", { name: "איך זה עובד" })).toHaveAttribute("href", "/#day");
     expect(screen.getByRole("link", { name: "מחירים" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("the full list: the official marks straight on the cards (no white chips, no picture tiles), and 'ועוד בהמשך' is a card that opens 'בקשת מערכת'", async () => {
+  it("the full list: the official marks straight on the cards (no white chips, no picture tiles); the business systems are one compact row ending with 'בקשת מערכת'", async () => {
     const { container } = render(<Connectors />);
     expect(container.querySelector(".bg-white")).toBeNull();
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelectorAll("[data-mark='bare']")).toHaveLength(INTEGRATIONS.length);
-    // a responsive grid: 2 columns on a phone, up to 8 (one row per account) on a desktop
-    for (const list of screen.getAllByRole("list")) expect(list.className).toMatch(/grid-cols-2\b[\s\S]*xl:grid-cols-8/);
-    const ask = screen.getByRole("button", { name: "בקשת מערכת" });
-    expect(ask).toHaveAccessibleDescription("חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה כאן.");
-    expect(ask.closest("li")).toHaveTextContent("ועוד בהמשך");
+    const [google, microsoft, business] = screen.getAllByRole("list");
+    // the accounts: a responsive grid, 3 columns on a phone, up to 8 (one row per account) on a desktop
+    for (const list of [google!, microsoft!]) expect(list.className).toMatch(/grid-cols-3\b[\s\S]*xl:grid-cols-8/);
+    // the systems on the way: one wrapping row of small pills
+    expect(business!.className).toMatch(/\bflex\b[\s\S]*flex-wrap/);
+    const ask = within(business!).getByRole("button", { name: "בקשת מערכת" });
+    expect(ask.closest("li")!.textContent).toBe("בקשת מערכת");
     fireEvent.click(ask);
     expect(await screen.findByRole("dialog", { name: "בקשת מערכת" })).toBeInTheDocument();
   });
 });
 
 describe("signed-in awareness (Daniel, 22.10.2026)", () => {
-  it("signed in: 'לאזור האישי' in the header as the hero's honey pill, at the inline end; the hero drops 'כניסה'", async () => {
+  it("signed in: 'לאזור האישי' in the header as the hero's honey pill, at the inline end; the header and the hero drop 'כניסה'", async () => {
     render(
       <>
-        <LandingHeader account={<AccountCta />} />
+        {/* the session holes of app/page.tsx, signed in: the account pill, no "כניסה" */}
+        <LandingHeader account={<AccountCta />} signIn={null} />
         <Hero signIn={null} />
       </>,
     );
@@ -251,15 +256,18 @@ describe("signed-in awareness (Daniel, 22.10.2026)", () => {
     expect(screen.queryByRole("link", { name: "כניסה" })).toBeNull();
   });
 
-  it("signed out (the prerendered shell): no button in the header, 'כניסה' beside the hero's call to action", () => {
+  it("signed out (the prerendered shell): no button in the header, 'כניסה' as its last link and beside the hero's call to action", () => {
     render(
       <>
         <LandingHeader />
         <Hero />
       </>,
     );
-    expect(within(screen.getByRole("banner")).queryByRole("link", { name: "לאזור האישי" })).toBeNull();
-    expect(screen.getByRole("link", { name: "כניסה" })).toHaveAttribute("href", "/login");
+    const header = screen.getByRole("banner");
+    expect(within(header).queryByRole("link", { name: "לאזור האישי" })).toBeNull();
+    expect(within(header).getByRole("link", { name: "כניסה" })).toHaveAttribute("href", "/login");
+    const hero = screen.getByRole("heading", { level: 1 }).closest("section")!;
+    expect(within(hero).getByRole("link", { name: "כניסה" })).toHaveAttribute("href", "/login");
   });
 });
 
@@ -289,24 +297,32 @@ describe("the day scene", () => {
 });
 
 describe("sections", () => {
-  it("professions: four real exchanges, each a question and her answer", () => {
+  it("professions: four real questions, each under its profession, which links to the profession's page - no answers", () => {
     render(<Professions />);
+    expect(screen.queryByText(/ארבע שאלות מהיום-יום/)).toBeNull();
     for (const p of PROFESSIONS) {
-      expect(screen.getByRole("heading", { level: 3, name: p.profession })).toBeInTheDocument();
+      const heading = screen.getByRole("heading", { level: 3, name: p.profession });
+      expect(within(heading).getByRole("link", { name: p.profession }).getAttribute("href")).toMatch(/^\/for\/[a-z]+$/);
       expect(screen.getByText(`״${p.ask}״`)).toBeInTheDocument();
+      expect(screen.queryByText(p.answer)).toBeNull();
     }
+    expect(screen.queryByRole("link", { name: /^עוד על/ })).toBeNull();
+    // every profession page is linked from here (the /for pages stay reachable)
+    expect(new Set(screen.getAllByRole("link").map((a) => a.getAttribute("href"))).size).toBe(PROFESSIONS.length);
   });
 
-  it("trust: the headline, four facts and the chat list described as one image", () => {
+  it("trust: the headline, four facts as short headings (no descriptions) and the chat list described as one image", () => {
     render(<Trust />);
-    expect(
-      screen.getByRole("heading", { level: 2, name: "היא רואה רק מה ששולחים לה." }),
-    ).toBeInTheDocument();
-    expect(screen.getAllByRole("term").map((t) => t.textContent)).toEqual(TRUST.map((t) => t.term));
+    const h2 = screen.getByRole("heading", { level: 2, name: "היא רואה רק מה ששולחים לה." });
+    const facts = h2.nextElementSibling as HTMLElement;
+    expect(within(facts).getAllByRole("listitem").map((t) => t.textContent)).toEqual([...TRUST]);
+    const section = screen.getByRole("region", { name: "היא רואה רק מה ששולחים לה." });
+    // the details are on /privacy; the servers are in the EU, never "in Israel"
+    expect(section).not.toHaveTextContent(/פרנקפורט|איש קשר נפרד|בישראל/);
     expect(screen.getByRole("img", { name: /רק השיחה עם/ })).toBeInTheDocument();
   });
 
-  it("pricing comes from lib/billing/plans.ts, with the VAT note and the trial", () => {
+  it("pricing comes from lib/billing/plans.ts, with one line for VAT and cancelling, and the annual face's yearly charge 'בחיוב אחד'", () => {
     render(<Pricing />);
     const basic = screen.getByRole("article", { name: PLANS.basic.nameHe });
     const pro = screen.getByRole("article", { name: PLANS.pro.nameHe });
@@ -314,12 +330,11 @@ describe("sections", () => {
     expect(pro).toHaveTextContent(`${PLANS.pro.priceIls}₪לחודש`);
     expect(basic).toHaveTextContent("עד 750 הודעות בחודש");
     expect(pro).toHaveTextContent("עד 3,000 הודעות בחודש");
-    expect(
-      screen.getByText(new RegExp(`כוללים מע״מ \\(${Math.round(VAT_RATE * 100)}%\\)`)),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(new RegExp(`^${TRIAL_MESSAGES} ההודעות הראשונות בחינם`)),
-    ).toBeInTheDocument();
+    expect(screen.getByText("המחירים כוללים מע״מ. ביטול בכל רגע.")).toBeInTheDocument();
+    expect(screen.queryByText(/קבלה נשלחת אוטומטית/)).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /שנתי/ }));
+    expect(basic).toHaveTextContent(`${PLANS.basic.annualPriceIls} ₪ לשנה, בחיוב אחד`);
+    expect(pro).toHaveTextContent("₪ לשנה, בחיוב אחד");
   });
 
   it("FAQ uses native <details>, closed by default", () => {
@@ -340,6 +355,8 @@ describe("sections", () => {
     expect(
       screen.getByRole("heading", { level: 2, name: `${BRAND.name} על זה.` }),
     ).toBeInTheDocument();
+    // the heading, the hoopoe and the button - no subtitle
+    expect(screen.queryByText(/דקה להרשמה/)).toBeNull();
     expect(screen.getByRole("link", { name: "בואו נתחיל - לוקח דקה" })).toHaveAttribute(
       "href",
       "/start",

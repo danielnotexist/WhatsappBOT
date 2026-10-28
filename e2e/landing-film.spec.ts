@@ -15,7 +15,9 @@ test.describe("the brand film on the landing", () => {
     await page.goto("/");
     const section = page.getByRole("region", { name: "יום עבודה אחד, בוואטסאפ." });
     await section.evaluate((el) => el.scrollIntoView({ block: "start" }));
-    await expect(section.getByText("בלי אפליקציה חדשה ובלי ללמוד מערכת.", { exact: false })).toBeVisible();
+    // the heading alone over the film (Daniel, 28.10.2026: no explanation line)
+    await expect(section.getByRole("heading", { level: 2, name: "יום עבודה אחד, בוואטסאפ." })).toBeVisible();
+    await expect(section.getByText("בלי אפליקציה חדשה ובלי ללמוד מערכת.", { exact: false })).toHaveCount(0);
     const video = section.locator("video");
     await expect(video).toHaveCount(1);
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { message: "the film plays" }).toBeGreaterThan(0.3);

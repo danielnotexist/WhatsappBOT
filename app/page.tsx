@@ -5,7 +5,7 @@ import { DaySection } from "@/components/brand/landing/day-scenes";
 import { Faq } from "@/components/brand/landing/faq";
 import { FinalCta } from "@/components/brand/landing/final-cta";
 import { LandingFooter } from "@/components/brand/landing/footer";
-import { AccountCta, LandingHeader } from "@/components/brand/landing/header";
+import { AccountCta, LandingHeader, NavSignIn } from "@/components/brand/landing/header";
 import { Hero, SignInCta } from "@/components/brand/landing/hero";
 import { Pricing } from "@/components/brand/landing/pricing";
 import { Professions } from "@/components/brand/landing/professions";
@@ -21,10 +21,11 @@ import "@/components/brand/landing/landing.css";
 export const metadata: Metadata = pageMetadata({ path: "/", title: HOME_TITLE, absoluteTitle: true, description: BRAND.description, image: SITE_IMAGE });
 
 /**
- * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo (and the "עובדת עם" strip) → "נעים להכיר"
- * (the hoopoe loop in a framed card) → one working day in a pinned phone → by profession → trust → the systems she works with → pricing → FAQ → end card → footer.
+ * The landing page (round plan §2, "לילה ירוק"): hero with the live chat demo → one working day (the brand film in a
+ * framed card) → by profession → trust → the systems she works with → pricing → FAQ → end card → footer. Only the text
+ * that has to be there (Daniel, 28.10.2026): headings, the questions, short labels; the details live on their own pages.
  * Static (prerendered); the client islands are the chat demo, the day scene's switch (pinned version lazy-loaded on
- * large screens), the connection tiles' tooltips, the hoopoe loop and Lenis. The only request-time parts are two small holes that read the session cookie: "לאזור האישי" in the header and the hero's "כניסה" (BySession).
+ * large screens), the connection tiles' tooltips, the hoopoe loop and Lenis. The only request-time parts are small holes that read the session cookie: "לאזור האישי" / "כניסה" in the header and the hero's "כניסה" (BySession).
  * The support chat ("שאלות ותמיכה") floats at the bottom of the inline-start side.
  */
 export default function HomePage() {
@@ -34,7 +35,7 @@ export default function HomePage() {
         {/* structured data for search engines: who we are and what the plans cost (lib/seo/json-ld.ts) */}
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLdString([organizationJsonLd(), softwareApplicationJsonLd()]) }} />
         <SmoothScroll />
-        <LandingHeader account={<BySession signedIn={<AccountCta />} />} />
+        <LandingHeader account={<BySession signedIn={<AccountCta />} />} signIn={<BySession signedIn={null} signedOut={<NavSignIn />} />} />
         <main id="main" className="flex-1">
           <Hero signIn={<BySession signedIn={null} signedOut={<SignInCta />} />} />
           <DaySection />

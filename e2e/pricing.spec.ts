@@ -4,8 +4,9 @@ import { newContext } from "./helpers";
 
 /**
  * Round 2 of Daniel's preview feedback (23.10.2026): the compact price list on the landing (both plans within one
- * 1440×900 screen), the full comparison on /pricing, and "בקשת מערכת" from the systems list - no horizontal overflow
- * at 390, axe-core with 0 serious/critical findings, and a request that really reaches the route.
+ * 1440×900 screen), the full comparison on /pricing (behind "להשוואה המלאה" since 28.10.2026), and "בקשת מערכת" from
+ * the systems list - no horizontal overflow at 390, axe-core with 0 serious/critical findings, and a request that
+ * really reaches the route.
  */
 const AXE_PATH = join(process.cwd(), "node_modules", "axe-core", "axe.min.js");
 
@@ -22,7 +23,7 @@ async function axeSeriousOrCritical(page: Page): Promise<string[]> {
 const overflow = (page: Page) => page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth);
 
 test.describe("prices and the systems request", () => {
-  test("landing at 1440×900: the heading and both plans fit one screen; '+K' opens the rest; 'להשוואה המלאה' leads to /pricing", async ({ browser }) => {
+  test("landing at 1440×900: the heading and both plans fit one screen; '+K' opens the rest; 'להשוואה המלאה' opens the comparison on /pricing", async ({ browser }) => {
     const ctx = await newContext(browser, { width: 1440, height: 900, reducedMotion: "reduce" });
     const page = await ctx.newPage();
     await page.goto("/#pricing");
@@ -39,18 +40,30 @@ test.describe("prices and the systems request", () => {
     await expect(bar.getByRole("button")).toHaveCount(8);
     await pro.getByRole("button", { name: "עוד 12 חיבורים" }).click();
     await expect(bar.getByRole("button")).toHaveCount(20);
+    // one short line under the cards: VAT and cancelling
+    await expect(section.getByText("המחירים כוללים מע״מ. ביטול בכל רגע.")).toBeVisible();
     await page.getByRole("link", { name: "להשוואה המלאה" }).click();
-    await expect(page).toHaveURL(/\/pricing$/);
+    await expect(page).toHaveURL(/\/pricing#compare$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("מחירים ומסלולים.");
+    // the link opens the disclosure and brings the table into view
+    await expect(page.locator("details#compare")).toHaveJSProperty("open", true);
+    await expect(page.getByRole("table", { name: "בסיסי מול פרו, יכולת אחרי יכולת" })).toBeInViewport();
     await ctx.close();
   });
 
   for (const width of [390, 1440]) {
-    test(`/pricing at ${width}: no horizontal overflow, axe clean`, async ({ browser }) => {
+    test(`/pricing at ${width}: the comparison closed until asked for, no horizontal overflow, axe clean`, async ({ browser }) => {
       const ctx = await newContext(browser, { width, height: 900, reducedMotion: "reduce" });
       const page = await ctx.newPage();
       await page.goto("/pricing");
-      await expect(page.getByRole("table", { name: "בסיסי מול פרו, יכולת אחרי יכולת" })).toBeVisible();
+      await expect(page.getByText("המחירים כוללים מע״מ. ביטול בכל רגע.")).toBeVisible();
+      await expect(page.getByRole("region", { name: "החיבורים בכל מסלול." })).toHaveCount(0);
+      const table = page.getByRole("table", { name: "בסיסי מול פרו, יכולת אחרי יכולת" });
+      await expect(table).toBeHidden();
+      const disclosure = page.locator("details#compare");
+      await disclosure.locator("summary").click();
+      await expect(disclosure).toHaveJSProperty("open", true);
+      await expect(table).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
       expect(await axeSeriousOrCritical(page)).toEqual([]);

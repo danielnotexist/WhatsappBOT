@@ -10,7 +10,8 @@ import { Row, Tile } from "./parts";
 import { DemoChatItem, Status, phoneLabel } from "./rows";
 
 /**
- * "סקירה": one quiet row per area — what is set up there, and the way in (the area itself, or the missing step).
+ * "סקירה": one quiet row per area — what is set up there, in a word or two, and the way in (the area itself, or the
+ * missing step). The explanations stay in the areas.
  * The plan is the paper slip beside it (./plan-slip.tsx, "summary").
  */
 export function OverviewRows({
@@ -19,7 +20,6 @@ export function OverviewRows({
   phone,
   timeZone,
   activeAgents,
-  agentsLine,
   demo,
 }: {
   microsoft: { state: ConnectionState; label?: string };
@@ -28,8 +28,6 @@ export function OverviewRows({
   timeZone: string;
   /** the names of the agents at work */
   activeAgents: readonly string[];
-  /** the quota line of the agents area */
-  agentsLine: string;
   demo: boolean;
 }) {
   const number = phone ? phoneLabel(phone) : null;
@@ -80,7 +78,7 @@ export function OverviewRows({
             </>
           )
         ) : (
-          <p className="mt-1 text-[0.9375rem] text-cream-muted">עוד לא קושר מספר. קוד חד-פעמי, והשיחה נפתחת בטלפון.</p>
+          <Status state="none">לא מקושר</Status>
         )}
       </Row>
       <Row
@@ -93,7 +91,6 @@ export function OverviewRows({
         action={<Manage area="agents" label="ניהול הסוכנים" />}
       >
         <p className="mt-1 text-[0.9375rem] text-cream">{activeAgents.length ? `פעילים: ${activeAgents.join(", ")}` : "אין סוכנים פעילים כרגע."}</p>
-        <p className="mt-0.5 text-[0.875rem] leading-relaxed text-cream-muted">{agentsLine}</p>
       </Row>
     </ul>
   );

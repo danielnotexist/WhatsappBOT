@@ -80,8 +80,6 @@ export function isSystemRequest(subject: string | null | undefined): boolean {
 
 export const SYSTEM_REQUEST_COPY = {
   trigger: "בקשת מערכת",
-  rowTitle: "ועוד בהמשך",
-  rowLead: "חסרה מערכת שהעסק עובד איתה? אפשר לבקש אותה כאן.",
   title: "בקשת מערכת",
   lead: `איזו מערכת חסרה, ומה ${BRAND.name} תעשה איתה. כל בקשה נקראת ועוזרת להחליט מה יתחבר בהמשך.`,
   system: "שם המערכת",

@@ -16,8 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * "בקשת מערכת": a small form that tells Daniel which system a customer wants her to work with. Opened from the
- * "ועוד בהמשך" row of the systems list (the landing's #connectors) and from /pricing. A dialog in "לילה ירוק": centred
+ * "בקשת מערכת": a small form that tells Daniel which system a customer wants her to work with. Opened from the end of
+ * the business systems row (the landing's #connectors) and from the /pricing comparison. A dialog in "לילה ירוק": centred
  * on wide screens, a bottom sheet on a phone; focus starts in the first field and stays inside, Esc or "סגירה" closes
  * it and focus returns to the trigger. The email is prefilled when signed in (GET /api/support/ticket).
  * Sent to POST /api/support/ticket with `kind: "system"` - stored as a support ticket "בקשת מערכת: <name>" and
@@ -41,8 +41,7 @@ async function send(body: unknown): Promise<SupportTicketResponse | SupportError
 }
 
 /**
- * The trigger and its dialog. `children` is the trigger's face (the list row draws its own); without it a plain
- * "בקשת מערכת" text button.
+ * The trigger and its dialog. `children` is the trigger's face; without it a plain "בקשת מערכת" text button.
  */
 export function SystemRequest({ children, className, labelledBy, describedBy }: { children?: ReactNode; className?: string; labelledBy?: string; describedBy?: string }) {
   const [open, setOpen] = useState(false);

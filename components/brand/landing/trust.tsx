@@ -2,7 +2,7 @@ import { BRAND } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import { TRUST } from "./content";
 import { DeferredMascot, ProfileAvatar } from "./mascot";
-import { CONTAINER, H2, LEDE } from "./ui";
+import { CONTAINER, H2 } from "./ui";
 
 /** Widths of the redacted chat rows (name, last message) — other people's chats, which she never sees. */
 const HIDDEN_ROWS = [
@@ -66,13 +66,13 @@ function ChatList() {
   );
 }
 
-/** Trust: what she can and cannot see, and four plain facts. */
+/** Trust: what she can and cannot see (drawn), and four plain facts as short headings. */
 export function Trust() {
   return (
     <section
       id="trust"
       aria-labelledby="trust-title"
-      className="alze-defer relative scroll-mt-6 bg-night-2 py-28 sm:py-40"
+      className="alze-defer relative scroll-mt-6 bg-night-2 py-24 sm:py-32"
     >
       <div
         className={cn(
@@ -84,20 +84,14 @@ export function Trust() {
           <h2 id="trust-title" className={cn(H2, "max-w-[15ch]")}>
             היא רואה רק מה ששולחים לה.
           </h2>
-          <p className={cn(LEDE, "mt-6 max-w-[34rem]")}>
-            {BRAND.name} היא איש קשר נפרד בוואטסאפ. שאר השיחות, הקבוצות והתמונות נשארים אצלכם,
-            והגישה למייל וליומן משמשת רק כדי לענות על מה שמבקשים ממנה.
-          </p>
-          <dl className="mt-12 grid gap-x-12 sm:grid-cols-2">
-            {TRUST.map((t) => (
-              <div key={t.term} className="border-t border-line pt-6 pb-8">
-                <dt className="font-heading text-[1.5rem] leading-tight font-bold">{t.term}</dt>
-                <dd className="mt-2.5 text-[1.0625rem] leading-[1.65] text-cream-muted">
-                  {t.detail}
-                </dd>
-              </div>
+          {/* four plain facts, headings only: the details are on the privacy page */}
+          <ul className="mt-10 grid gap-x-12 sm:mt-12 sm:grid-cols-2">
+            {TRUST.map((term) => (
+              <li key={term} className="border-t border-line py-5 font-heading text-[1.5rem] leading-tight font-bold">
+                {term}
+              </li>
             ))}
-          </dl>
+          </ul>
         </div>
         <ChatList />
       </div>

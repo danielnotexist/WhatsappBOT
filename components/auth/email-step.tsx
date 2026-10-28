@@ -114,10 +114,8 @@ export function EmailStep({
   return (
     <>
       <StepAside>
+        {/* the question alone: the button says what happens ("שליחת קוד") */}
         <StepHeading tag={mode === "login" ? "כניסה" : "קודם כל"} title="מה המייל שלך?" />
-        <p className="mt-3 max-w-[24rem] text-[1.0625rem] text-muted-foreground lg:mt-5 lg:text-lede">
-          {mode === "login" ? "לשם יישלח קוד כניסה בן 6 ספרות." : "לשם יישלח קוד בן 6 ספרות. בלי סיסמאות."}
-        </p>
       </StepAside>
 
       <StepBody>

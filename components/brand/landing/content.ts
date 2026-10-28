@@ -122,25 +122,11 @@ export const PROFESSIONS: readonly Exchange[] = [
   },
 ];
 
-export const TRUST: readonly { term: string; detail: string }[] = [
-  {
-    term: "מוצפן",
-    detail:
-      "המידע מוצפן בדרך ובאחסון. הגישה לחשבון המייל נשמרת בהצפנה נפרדת, ואפשר לנתק אותה בכל רגע.",
-  },
-  {
-    term: "נשמר באירופה",
-    detail: "השרתים בפרנקפורט, באיחוד האירופי. מחיקת החשבון מוחקת את כל המידע ומנתקת את החיבורים.",
-  },
-  {
-    term: "לא משמש לאימון",
-    detail: "השיחות, המיילים והקבצים לא משמשים לאימון מודלים של בינה מלאכותית.",
-  },
-  {
-    term: "שום דבר לא יוצא בלי אישור",
-    detail: "כל מייל, זימון או קובץ מגיע קודם כטיוטה, ויוצא רק אחרי לחיצה על ״שלח״.",
-  },
-];
+/**
+ * The trust section's four facts, as short headings only (Daniel, 28.10.2026). What each one means - the encryption,
+ * the EU servers (Frankfurt; never "in Israel"), no training, approval before anything goes out - is on /privacy.
+ */
+export const TRUST: readonly string[] = ["מוצפן", "נשמר באירופה", "לא משמש לאימון", "שום דבר לא יוצא בלי אישור"];
 
 const vatPercent = Math.round(VAT_RATE * 100);
 
@@ -156,14 +142,10 @@ const perMonth = (n: number) => n.toFixed(2);
 
 export const PRICING = {
   trial: TRIAL_MESSAGES,
-  vatNote: `המחירים כוללים מע״מ (${vatPercent}%). חיוב חודשי, או שנתי עם חודשיים מתנה. קבלה נשלחת אוטומטית במייל, ביטול בכל רגע מהאזור האישי.`,
+  /** the one line under the cards (the landing and /pricing): VAT and cancelling, nothing else */
+  footnote: "המחירים כוללים מע״מ. ביטול בכל רגע.",
   /** under the cards when the annual cycle is shown (the switch: ./plan-cycle.tsx) */
   annualNote: `בתשלום שנתי משלמים 10 חודשים ומקבלים 12, בחיוב אחד. מכסת ההודעות נשארת חודשית.`,
-  /**
-   * lib/integrations/catalogue.ts integrationsForPlan + lib/billing/plans.ts entitlements: basic and the free messages
-   * work with one account, pro with both and the pro services
-   */
-  connectionsNote: "בבסיסי ובהודעות החינמיות מחברים חשבון אחד, Google או Microsoft. בפרו שניהם עובדים יחד, עם המשימות, SharePoint וכל ה-Drive.",
   plans: [
     {
       id: "basic" as const,

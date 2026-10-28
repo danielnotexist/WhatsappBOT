@@ -6,7 +6,7 @@ import { integrationsForPlan } from "@/lib/integrations/catalogue";
 import { cn } from "@/lib/utils";
 import { PRICING, formatNumber } from "./content";
 import { AnnualOnly, CycleProvider, CycleToggle, PlanPrice } from "./plan-cycle";
-import { CONTAINER, H2, LEDE } from "./ui";
+import { CONTAINER, H2 } from "./ui";
 
 /** how many connection tiles a plan shows before "+K" (the rest open in place) */
 const TILES_SHOWN = 8;
@@ -18,38 +18,26 @@ const TILES_SHOWN = 8;
  * its product marks or a check - pro opens with
  * "כל מה שבבסיסי, ובנוסף:", "בקרוב" on what is coming - and at its foot one compact row of the systems it connects
  * to (lib/integrations/catalogue.ts integrationsForPlan, the official marks straight on the card): the first few tiles and "+K" for the rest.
- * The full comparison lives on /pricing ("להשוואה המלאה"). One call to action: the plan is chosen in WhatsApp after
- * the free messages, not here.
+ * Under the cards one short line (VAT, cancelling). The full comparison lives on /pricing ("להשוואה המלאה" opens it
+ * there, /pricing#compare). One call to action: the plan is chosen in WhatsApp after the free messages, not here.
  */
 export function Pricing() {
   return (
     <section id="pricing" aria-labelledby="pricing-title" className="alze-defer scroll-mt-6 py-24 sm:pt-10 sm:pb-32">
       <div className={CONTAINER}>
-        {/* one line beside the lede on wide screens: the sheet starts within the first screen */}
-        <div className="grid gap-5 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-end xl:gap-14">
-          <h2 id="pricing-title" className={cn(H2, "max-w-[13ch] xl:max-w-none xl:whitespace-nowrap")}>
-            שני מסלולים. מתחילים בחינם.
-          </h2>
-          <p className={cn(LEDE, "max-w-[31rem] xl:pb-2")}>
-            {PRICING.trial} ההודעות הראשונות בחינם, עם חיבור למייל וליומן. אחר כך בוחרים מסלול, בלי התחייבות.
-          </p>
-        </div>
+        {/* one line on wide screens: the sheet starts within the first screen */}
+        <h2 id="pricing-title" className={cn(H2, "max-w-[13ch] xl:max-w-none xl:whitespace-nowrap")}>
+          שני מסלולים. מתחילים בחינם.
+        </h2>
 
-        <PlanSheet className="mt-6 sm:mt-7" />
+        <PlanSheet className="mt-6 sm:mt-8" />
 
+        {/* one short line under the cards (VAT, cancelling), the full comparison and the call to action */}
         <div className="mt-8 flex flex-col gap-6 md:flex-row md:items-center md:justify-between md:gap-12">
-          <div className="max-w-[40rem] text-[0.9375rem] leading-[1.65] text-cream-muted">
-            <p>
-              {PRICING.connectionsNote}{" "}
-              <a href="#connectors" className="rounded-sm whitespace-nowrap text-cream underline decoration-cream-muted/50 underline-offset-4 hover:decoration-cream">
-                לכל החיבורים
-              </a>
-            </p>
-            <p className="mt-2">{PRICING.vatNote}</p>
-          </div>
+          <p className="text-[0.9375rem] leading-[1.65] text-cream-muted">{PRICING.footnote}</p>
           <div className="flex flex-none flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:gap-6">
             <Link
-              href="/pricing"
+              href="/pricing#compare"
               className="rounded-sm text-center text-[1rem] font-semibold whitespace-nowrap text-cream underline decoration-honey/60 underline-offset-[6px] hover:decoration-honey max-sm:order-last"
             >
               להשוואה המלאה

@@ -68,11 +68,7 @@ async function Chat() {
         <h1 id="chat-title" className="mt-2 text-title leading-[1.1] font-bold">
           הצ&apos;אט עם {BRAND.name}
         </h1>
-        <p className="mt-5 text-lede text-cream-muted">
-          אותה שיחה כמו בוואטסאפ: כותבים, מקליטים ולוחצים על הכפתורים ש{BRAND.name} שולחת. ההיכרות, הטיוטות והתזכורות עובדות כרגיל, ושום דבר לא יוצא
-          החוצה.
-        </p>
-        <p className="mt-5 border-s-2 border-honey/60 ps-4 text-[0.9375rem] leading-relaxed text-cream-muted">
+        <p className="mt-6 border-s-2 border-honey/60 ps-4 text-[0.9375rem] leading-relaxed text-cream-muted">
           {liveAi
             ? `התשובות כאן מהמודל האמיתי, וההקלטות מתומללות באמת.${dailyMessages ? ` עד ${dailyMessages} הודעות ביום.` : ""}`
             : "בגרסת ההדגמה התשובות לדוגמה, וכל הקלטה מתומללת לאותו משפט קבוע."}

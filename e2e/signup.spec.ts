@@ -33,7 +33,9 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     await page.goto("/start");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("העוזרת האישית שלך, בוואטסאפ.");
     await expect(page.getByRole("img", { name: "עלזה מתקשרת אליך בוואטסאפ" })).toBeVisible();
-    await expect(page.getByText("לוקח בערך דקה.")).toBeVisible();
+    // no subtitle under the headline (Daniel, 28.10.2026); the line on what Microsoft / Google also connect stays
+    await expect(page.getByText("לוקח בערך דקה.")).toHaveCount(0);
+    await expect(page.getByText(/מחברת לעלזה גם את המייל, היומן והקבצים/).filter({ visible: true })).toHaveCount(1);
     await page.getByRole("link", { name: "המשך עם מייל" }).click();
 
     // 2. email card (cream paper): the button wakes up only for a valid address; updates toggle is on by default
@@ -79,7 +81,7 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     // 6. ready: confetti, wa.me with the one-time token, QR on desktop
     await expect(page).toHaveURL(/\/start\/ready$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("העוזרת שלך מוכנה.");
-    await expect(page.getByText("היא לא רואה את שאר השיחות שלך.")).toBeVisible();
+    await expect(page.getByText(/עובד פעם אחת, ל-15 דקות/)).toBeVisible();
     await expect(page.getByTestId("confetti")).toBeAttached();
     await expect(page.getByRole("img", { name: /קוד QR/ })).toBeVisible();
     const href = (await page.getByRole("link", { name: "חיבור לוואטסאפ" }).getAttribute("href"))!;

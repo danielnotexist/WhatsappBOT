@@ -7,12 +7,12 @@ import { BRAND } from "@/lib/brand";
 import { HERO_SCRIPT, PRICING } from "./content";
 import { DeferredMascot, profileBackground } from "./mascot";
 import { StyleAfterHydration } from "./mascot-deferred";
-import { WorksWith } from "./works-with";
 
 /**
  * The hero: the headline is the title card, the phone is the only light in the room. On large screens the first
  * sentence runs the full width on one line and the phone rises beside the short second line (the name + "על זה.").
- * Under the call to action, a quiet "עובדת עם" strip names the systems she works with (works-with.tsx).
+ * Under it only what has to be there (Daniel, 28.10.2026): one short line, the call to action and the free messages -
+ * the systems she works with are the connectors section's job.
  * Server-rendered; the chat demo inside the phone is the one client island. The single entrance moment (the phone
  * rises, its screen turns on and lights the table) is CSS only and collapses under reduced motion.
  * `signIn` replaces the "כניסה" button (app/page.tsx: a request-time hole that hides it for a signed-in visitor, who
@@ -44,10 +44,7 @@ export function Hero({ signIn = <SignInCta /> }: { signIn?: ReactNode }) {
         </div>
 
         <div className="lg:col-start-1 lg:row-start-2">
-          <p className="mt-8 max-w-[33rem] text-lede text-cream-muted lg:mt-10">
-            עוזרת אישית שמחוברת למייל, ליומן ולקבצים של העסק. כותבים לה או מקליטים, והיא מסכמת,
-            מזכירה ומנסחת. שום דבר לא יוצא בלי אישור.
-          </p>
+          <p className="mt-8 max-w-[33rem] text-lede text-cream-muted lg:mt-10">עוזרת אישית שמחוברת למייל, ליומן ולקבצים של העסק.</p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <Cta href="/start" className="max-sm:flex-1 sm:min-w-64">
               בואו נתחיל - לוקח דקה
@@ -57,7 +54,6 @@ export function Hero({ signIn = <SignInCta /> }: { signIn?: ReactNode }) {
           <p className="mt-5 text-[0.9375rem] text-cream-muted">
             {PRICING.trial} הודעות ראשונות בחינם, בלי כרטיס אשראי.
           </p>
-          <WorksWith className="mt-12 lg:mt-14" />
         </div>
 
         {/* on large screens the phone climbs one headline line, beside the short second line; the hoopoe perches on

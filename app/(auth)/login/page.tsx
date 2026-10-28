@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Suspense, type ReactNode } from "react";
+import { Suspense } from "react";
 import { EmailOption, SsoButtons, SsoErrorNotice, SsoNote } from "@/components/auth/sso-options";
 import { ChatSnippet, type SnippetLine } from "@/components/brand/chat-snippet";
 import { Cta } from "@/components/brand/cta";
@@ -45,29 +45,12 @@ const PANEL_TEXTURE = {
   ].join(", "),
 };
 
-function Assurance({ icon, children }: { icon: "lock" | "check"; children: ReactNode }) {
-  return (
-    <li className="flex items-center gap-2">
-      <svg viewBox="0 0 24 24" aria-hidden="true" className="size-4 flex-none fill-none stroke-sage stroke-2">
-        {icon === "lock" ? (
-          <>
-            <rect x="5" y="10" width="14" height="11" rx="2" />
-            <path d="M8 10V7a4 4 0 0 1 8 0v3" strokeLinecap="round" />
-          </>
-        ) : (
-          <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-        )}
-      </svg>
-      {children}
-    </li>
-  );
-}
-
 /**
  * Step 7 (round plan §3): the split sign-in screen. Form side, on the stage: "המשך עם Microsoft / Google" first (Daniel,
- * 28.10.2026: one consent signs in and connects the mailbox; lib/auth/sso.ts), then email (same code flow → /account)
- * or the WhatsApp way for people who joined from the chat, two plain promises and the legal links. Other side: a sage paper
- * with the hoopoe and a real morning summary from עלזה — what signing back in is for. No fake social proof.
+ * 28.10.2026: one consent signs in and connects the mailbox; lib/auth/sso.ts) with the one line on what that also
+ * connects, then email (same code flow → /account) or the WhatsApp way for people who joined from the chat, the way
+ * to sign up and the legal links - nothing else (Daniel, 28.10.2026). Other side: a sage paper with the hoopoe and a
+ * real morning summary from עלזה — what signing back in is for. No fake social proof.
  */
 export default function LoginPage() {
   return (
@@ -82,7 +65,6 @@ export default function LoginPage() {
               <Mascot pose="waving" eager sizes="80px" className="mb-3 w-20 lg:hidden" />
               <Handwritten tone="sage">שוב כאן.</Handwritten>
               <h1 className="mt-2 text-title leading-[1.12] font-bold">טוב לראות אותך שוב</h1>
-              <p className="mt-3 text-[1.0625rem] text-cream-muted">נכנסים לאזור האישי: החיבורים, המנוי ומספר הוואטסאפ.</p>
 
               <Suspense fallback={null}>
                 <SsoErrorNotice className="mt-6" />
@@ -97,17 +79,11 @@ export default function LoginPage() {
                 </Cta>
               </div>
 
-              <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-5 text-[0.875rem] text-cream-muted">
-                <Assurance icon="lock">מוצפן ונשמר באירופה</Assurance>
-                <Assurance icon="check">שום דבר לא יוצא בלי אישור</Assurance>
-              </ul>
-
-              <p className="mt-8 text-[0.9375rem] text-cream-muted">
+              <p className="mt-8 border-t border-line pt-6 text-[0.9375rem] text-cream-muted">
                 אין עדיין חשבון?{" "}
                 <Link href="/start" className="rounded-sm font-semibold text-cream underline underline-offset-3">
                   הרשמה
                 </Link>
-                , לוקח בערך דקה.
               </p>
             </div>
           </main>
@@ -138,8 +114,6 @@ export default function LoginPage() {
                 className="absolute end-[-0.5rem] bottom-[-1.5rem] z-20 w-[min(13rem,26vh)]"
               />
             </div>
-
-            <p className="relative z-10 mt-6 max-w-[19rem] text-[1rem] text-ink-muted">סיכום בוקר בוואטסאפ, טיוטות למייל ותזכורות, בעברית. שום דבר לא יוצא בלי האישור שלך.</p>
           </div>
         </aside>
       </div>

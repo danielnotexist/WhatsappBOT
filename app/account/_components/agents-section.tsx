@@ -313,7 +313,6 @@ function TemplatePicker() {
   return (
     <div className="mt-10">
       <h3 className="font-heading text-[1.25rem] leading-tight font-bold">סוכן חדש</h3>
-      <p className="mt-1 text-[0.9375rem] text-cream-muted">מאיפה מתחילים? אפשר לשנות הכול אחר כך.</p>
       <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {options.map((o) => (
           <li key={o.id}>

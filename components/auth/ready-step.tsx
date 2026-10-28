@@ -35,7 +35,6 @@ export function ReadyStep({ link, signOutAction }: { link: ReactNode; signOutAct
     <>
       <StepAside className="max-sm:px-4 lg:self-center">
         <StepHeading tag="נכנסת." title="העוזרת שלך " light="מוכנה" after="." onDark size="hero" />
-        <p className="mt-4 text-lede text-cream-muted">היא לא רואה את שאר השיחות שלך.</p>
         {link}
 
         <div className="mt-9 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 sm:max-w-sm lg:max-w-none lg:justify-start">
@@ -61,7 +60,7 @@ export function ReadyStep({ link, signOutAction }: { link: ReactNode; signOutAct
   );
 }
 
-const QR_HINT = "במחשב? סורקים עם המצלמה של הטלפון, ושולחים את ההודעה שנפתחת.";
+const QR_HINT = "במחשב? סורקים עם הטלפון.";
 
 /**
  * The personal part of the ready step: confetti, "Outlook / Gmail מחובר", the wa.me button (WaLinkButton: the single
@@ -85,7 +84,7 @@ export function ReadyLink({ waHref, token, connected }: { waHref: string; token:
           חיבור לוואטסאפ
         </WaLinkButton>
         <p className="text-[0.875rem] leading-relaxed text-cream-muted">
-          נפתחת שיחה עם {BRAND.name} עם הודעה מוכנה. הקוד{" "}
+          הקוד{" "}
           <bdi dir="ltr" className="font-semibold text-cream tabular">
             {token}
           </bdi>{" "}
@@ -118,7 +117,7 @@ export function ReadyLinkPending() {
           חיבור לוואטסאפ
         </button>
         <p className="text-[0.875rem] leading-relaxed text-cream-muted">
-          נפתחת שיחה עם {BRAND.name} עם הודעה מוכנה. הקוד{" "}
+          הקוד{" "}
           <bdi dir="ltr" className="font-semibold text-cream/35 tabular">
             ····-····
           </bdi>{" "}

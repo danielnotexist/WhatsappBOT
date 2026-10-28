@@ -7,7 +7,7 @@ import { DeferredMascot } from "./mascot";
 import { DaySwitch } from "./day-switch";
 import { LAST_CHAT_SCENE } from "./phone-parts";
 import { SCENE_LIGHT, SceneCaption, SceneScreen } from "./scene-parts";
-import { CONTAINER, H2, LEDE } from "./ui";
+import { CONTAINER, H2 } from "./ui";
 
 /**
  * "How it works" as one working day (13:05 → 18:20 → 18:24 → 07:30 the next morning). The room's light follows the
@@ -73,16 +73,13 @@ export function DaySection({ variant = DAY_SECTION }: { variant?: "film" | "scen
       className={cn("relative scroll-mt-6 pt-12 sm:pt-20", variant === "film" ? "pb-20 sm:pb-28" : "pb-28 lg:pb-16")}
     >
       <div className={CONTAINER}>
+        {/* the heading alone: the film (or the scenes) under it says the rest */}
         <h2 id="day-title" className={cn(H2, "max-w-[14ch]")}>
           יום עבודה אחד, בוואטסאפ.
         </h2>
-        <p className={cn("mt-6 max-w-[33rem]", LEDE)}>
-          בלי אפליקציה חדשה ובלי ללמוד מערכת. מה שמבקשים ממנה בשיחה, היא מטפלת בו במייל, ביומן
-          ובקבצים.
-        </p>
       </div>
       {variant === "film" ? (
-        <div className={cn(CONTAINER, "mt-12 sm:mt-16")}>
+        <div className={cn(CONTAINER, "mt-10 sm:mt-14")}>
           <BrandFilm />
         </div>
       ) : (

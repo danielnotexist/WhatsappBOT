@@ -260,8 +260,9 @@ describe("ConnectStep and Toggle", () => {
     expect(ms).toHaveAccessibleName("חיבור Microsoft 365 / Outlook");
     expect(screen.getByRole("link", { name: "חיבור Gmail / Google" })).toHaveAccessibleDescription("Gmail, יומן ו-Drive");
     for (const tile of screen.getAllByRole("link").slice(0, 2)) expect(tile.textContent).not.toMatch(/Teams|Meet/);
-    // the worry at the moment of choosing
-    expect(screen.getByText("הסיסמה לא עוברת דרכנו, ואפשר לנתק בכל רגע.")).toBeInTheDocument();
+    // beside the question only the one helpful line (Daniel, 28.10.2026): no trust lines on the step
+    expect(screen.getByText("במסך הבא כדאי לסמן את כל ההרשאות")).toBeInTheDocument();
+    expect(screen.queryByText(/הסיסמה לא עוברת דרכנו|מוצפן, נשמר באירופה|כל עוזרת טובה מתחילה מהמייל/)).toBeNull();
     rerender(<ConnectStep error="הארגון דורש אישור חד-פעמי של מנהל ה-IT." adminLink="https://x.example/a" />);
     expect(screen.getByRole("alert")).toHaveTextContent("מנהל ה-IT");
     expect(screen.getByRole("link", { name: "שליחה למנהל ה-IT" }).getAttribute("href")).toMatch(/^mailto:/);
