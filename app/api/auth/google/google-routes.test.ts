@@ -450,9 +450,9 @@ describe("Google connect routes (memory mode)", () => {
     const r = await startFromChat(user.id);
     expect(r.status).toBe(503);
     const body = await r.text();
-    expect(body).toContain("משתני סביבה חסרים");
-    expect(body).toContain("GOOGLE_CLIENT_ID");
-    expect(body).toContain("GOOGLE_CLIENT_SECRET");
+    // a generic Hebrew line: the variables' names are for the server log, never for whoever opened the link
+    expect(body).toContain("השירות אינו זמין כרגע");
+    expect(body).not.toContain("GOOGLE_CLIENT_ID");
   });
   describe("the plan's gate (lib/billing/plans.ts entitlements, lib/connections/plan-gate.ts)", () => {
     it("trial / basic: Google next to an active Microsoft 365 → the pay page with why=second_account, nothing stored; reconnecting Google itself stays open", async () => {

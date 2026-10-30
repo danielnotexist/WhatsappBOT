@@ -1,5 +1,7 @@
 import { connection } from "next/server";
+import { derivedKey } from "@/lib/auth/keys";
 import { hypMocked } from "@/lib/env";
+import { mockHypSign } from "@/lib/hyp/client";
 
 /** A one-page placeholder PDF for the mock invoice link (ASCII only — no fonts needed). */
 function mockInvoicePdf(transId: string): Uint8Array {
@@ -21,9 +23,10 @@ function mockInvoicePdf(transId: string): Uint8Array {
 }
 
 /**
- * DATA_MODE=memory / DEMO_MODE=1 only: stands in for HYP's hosted payment page. "Pays" immediately and redirects to
- * /api/pay/return with the query HYP would send (Id, CCode, Amount, ACode, Order, Sign) — CCode=600 for a J2 card
- * check (card update). `?invoice=<transId>` stands in for the PrintHesh invoice link (a placeholder PDF).
+ * DEMO_MODE=1, or DATA_MODE=memory (never allowed in production), only (`hypMocked()`; a 404 otherwise): stands in for HYP's hosted payment page.
+ * "Pays" immediately and redirects to /api/pay/return with the query HYP would send (Id, CCode, Amount, ACode, Order,
+ * Sign) — CCode=600 for a J2 card check (card update). Sign is an HMAC only this route makes (lib/hyp/client.ts
+ * mockHypSign): the mock gateway refuses a return without it. `?invoice=<transId>` stands in for the PrintHesh invoice link (a placeholder PDF).
  */
 export async function GET(request: Request) {
   // request-time: otherwise Cache Components prerenders this GET at build (a frozen 404 or a frozen redirect)
@@ -46,6 +49,6 @@ export async function GET(request: Request) {
   ret.searchParams.set("Amount", url.searchParams.get("Amount") ?? "99");
   ret.searchParams.set("ACode", "0001234");
   ret.searchParams.set("Order", url.searchParams.get("Order") ?? "");
-  ret.searchParams.set("Sign", "mock");
+  ret.searchParams.set("Sign", mockHypSign(Object.fromEntries(ret.searchParams), derivedKey("internal")));
   return Response.redirect(ret.toString(), 303);
 }

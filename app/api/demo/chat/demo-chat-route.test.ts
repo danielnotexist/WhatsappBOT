@@ -101,6 +101,35 @@ describe("/api/demo/chat — who may use it", () => {
     expect((await POST(json({ text: "היי" }))).status).toBe(401);
   });
 
+  it("WEB_CHAT=1 outside the demo: signed-in only, on the account's own linked number — never a virtual +999 one", async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("DATA_MODE", "memory");
+    vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 12).toString("base64"));
+    vi.stubEnv("APP_URL", APP);
+    vi.stubEnv("WEB_CHAT", "1");
+    expect((await GET()).status).toBe(401);
+    expect((await POST(json({ text: "היי" }))).status).toBe(401);
+    const user = await db.createUser("noa@example.com");
+    jar.set(SESSION_COOKIE, createSessionToken(user.id));
+    // no real number on the account (a leftover virtual one does not count): nothing is linked from here
+    await db.createWaIdentity(user.id, demoChatPhone(user.id), null);
+    expect(await history()).toMatchObject({ ok: true, linked: false });
+    const refused = await send(json({ start: true }));
+    expect(refused.status).toBe(409);
+    expect(refused.body).toMatchObject({ ok: false, code: "not_linked" });
+    expect((await send(json({ text: "היי" }))).status).toBe(409);
+    expect((await db.listWaIdentities(user.id)).map((w) => w.phone_e164)).toEqual([demoChatPhone(user.id)]);
+    // the account's own WhatsApp number: the chat talks as it
+    await db.createWaIdentity(user.id, "+972501234567", null);
+    expect(await history()).toMatchObject({ ok: true, linked: true });
+    const r = ok(await send(json({ text: "היי" })));
+    expect(r.user).toMatchObject({ side: "user", text: "היי" });
+    expect((await db.listWaIdentities(user.id)).length).toBe(2);
+    // and the flag off: a 404 again
+    vi.stubEnv("WEB_CHAT", "");
+    expect((await GET()).status).toBe(404);
+  });
+
   it("refuses a cross-site POST (Origin of another site)", async () => {
     await signIn("dana@example.com");
     const r = await send(json({ text: "היי" }, { origin: "https://evil.example" }));

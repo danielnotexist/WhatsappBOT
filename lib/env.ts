@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { demoHasSupabase, isDemo, liveGoogleFlag, liveHypFlag, liveMsFlag, liveSupportMailFlag, liveWaFlag } from "@/lib/demo";
+import { demoHasSupabase, hypTestTerminal, isDemo, liveGoogleFlag, liveHypFlag, liveMsFlag, liveSupportMailFlag, liveWaFlag } from "@/lib/demo";
 
 /**
  * משתני סביבה — ולידציה עם zod, מפוצל לשרת/לקוח.
@@ -234,6 +234,17 @@ export function hypMocked(source: Record<string, string | undefined> = process.e
   return integrationsMocked(source) && !liveHypInDemo(source);
 }
 
+/**
+ * Payments can be taken here: the mock gateway (memory store, the demo), the demo itself, or a real HYP terminal with
+ * all of HYP_MASOF / HYP_KEY / HYP_PASSP outside the demo (a 00100 test terminal is not real money: closed). When
+ * false, /pay says "התשלום ייפתח בקרוב" instead of an error and its actions open nothing.
+ */
+export function paymentsOpen(source: Record<string, string | undefined> = process.env): boolean {
+  if (isDemo(source) || hypMocked(source)) return true;
+  const configured = (["HYP_MASOF", "HYP_KEY", "HYP_PASSP"] as const).every((k) => Boolean(source[k]?.trim()));
+  return configured && !hypTestTerminal(source);
+}
+
 /** The owner (Daniel) — who opens /admin when ADMIN_EMAILS is not set. */
 export const DEFAULT_ADMIN_EMAILS: readonly string[] = ["danielnotexist@gmail.com"];
 
@@ -288,6 +299,15 @@ export const clientSchema = z.object({
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
+
+/** What a public endpoint says when its configuration is missing: never the variables' names (the log has them). */
+export const SERVICE_UNAVAILABLE = "השירות אינו זמין כרגע. אפשר לנסות שוב בעוד כמה דקות.";
+
+/** An EnvError at a public endpoint: the details go to the server log; the caller gets SERVICE_UNAVAILABLE. */
+export function unavailable(where: string, e: Error): string {
+  console.error(`[${where}] configuration:`, e.message);
+  return SERVICE_UNAVAILABLE;
+}
 export type ClientEnv = z.infer<typeof clientSchema>;
 
 export class EnvError extends Error {

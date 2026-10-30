@@ -6,7 +6,7 @@ import { BRAND } from "@/lib/brand";
 import { PLANS } from "@/lib/billing/plans";
 import { jsonLdString, organizationJsonLd, softwareApplicationJsonLd } from "./json-ld";
 import { PROFESSION_SLUGS, unknownProfessionPath } from "./professions";
-import { absoluteUrl, indexable, isPrivatePath, pageMetadata, siteOrigin } from "./site";
+import { absoluteUrl, indexable, isPrivatePath, onVercelAppHost, pageMetadata, siteOrigin } from "./site";
 import { robotsRules, sitemapEntries } from "./sitemap";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -31,6 +31,12 @@ describe("the site's address and indexing", () => {
     expect(indexable({ VERCEL_ENV: "development" })).toBe(false);
     expect(indexable({})).toBe(false);
     expect(indexable({ ...PROD, DEMO_MODE: "1" })).toBe(false);
+    // Vercel's own address stays closed with the demo off too
+    expect(indexable({ ...PROD, APP_URL: "https://alze-nine.vercel.app" })).toBe(false);
+    expect(robotsRules({ ...PROD, APP_URL: "https://alze-nine.vercel.app" })).toEqual({ rules: { userAgent: "*", disallow: "/" } });
+    expect(onVercelAppHost({ APP_URL: "https://alze-nine.vercel.app/" })).toBe(true);
+    expect(onVercelAppHost({ APP_URL: "https://notvercel.app" })).toBe(false);
+    expect(onVercelAppHost(PROD)).toBe(false);
   });
 
   it("the private prefixes, and nothing that only starts with the same letters", () => {

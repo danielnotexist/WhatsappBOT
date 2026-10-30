@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { isBuiltinRole } from "@/lib/agents/constraints";
 import { loadAgents } from "@/lib/agents/service";
 import { isDemo } from "@/lib/demo";
+import { readFlash } from "@/lib/flash";
 import { AgentsSection } from "./_components/agents-section";
 import { AreaLink, AreaNav, AreaPanel } from "./_components/area-nav";
 import { Banner } from "./_components/banner";
@@ -93,8 +94,10 @@ async function Account({ searchParams }: { searchParams: PageProps<"/account">["
   const now = new Date();
   const tz = user.timezone || "Asia/Jerusalem";
   const area = areaFrom(sp);
-  const notice = typeof sp.notice === "string" ? sp.notice.slice(0, 400) : "";
-  const error = typeof sp.error === "string" ? sp.error.slice(0, 400) : "";
+  // only a line this site signed (lib/flash.ts): a crafted ?error= / ?notice= is not shown
+  const flash = readFlash(sp);
+  const notice = flash?.kind === "notice" ? flash.text.slice(0, 400) : "";
+  const error = flash?.kind === "error" ? flash.text.slice(0, 400) : "";
   // the result of an action, at the top of the area the address names; a new key per render opens a closed one again
   const bannerFor = (a: AccountArea): ReactNode =>
     a === area && (notice || error) ? <Banner key={now.getTime()} kind={error ? "error" : "notice"} text={error || notice} area={a} /> : null;

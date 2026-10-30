@@ -4,7 +4,7 @@ import { getBillingContext } from "@/lib/billing";
 import { verifyCardLinkToken } from "@/lib/billing/links";
 import { payResultUrl, type PayResult } from "@/lib/billing/result";
 import { startCardUpdate } from "@/lib/billing/service";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 
 /**
  * [עדכון כרטיס] from WhatsApp (or "לעדכון הכרטיס" on /pay/<token>) → a fresh HYP page for this click: J2 card
@@ -29,7 +29,7 @@ export async function GET(request: Request, ctx: RouteContext<"/pay/card/[token]
     await billing.db.addAudit({ user_id: user.id, action: "billing.card_page", result: "opened" });
     return Response.redirect(page, 303);
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503 });
+    if (e instanceof EnvError) return new Response(unavailable("pay:card", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     console.error("[pay:card] failed:", (e as Error).message);
     return back("card_unavailable", "לא הצלחנו לפתוח את דף עדכון הכרטיס כרגע. אפשר לנסות שוב בעוד רגע.");
   }

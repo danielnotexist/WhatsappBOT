@@ -3,7 +3,7 @@ import type { Route } from "next";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
 import { refuseSso, ssoCallbackState } from "@/lib/auth/sso-flow";
 import { getDb } from "@/lib/db";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 import { copy } from "@/lib/copy/bot";
 import { getMsConfig } from "@/lib/ms";
 import { randomBytes } from "node:crypto";
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
     const ok = url.searchParams.get("admin_consent") === "True";
     await db.addAudit({ user_id: user.id, action: "ms.admin_consent", target: url.searchParams.get("tenant") ?? "", result: ok ? "granted" : (url.searchParams.get("error") ?? "denied") });
     if (ok) await tell("מנהל המערכת אישר את החיבור לארגון. אפשר לכתוב \"חבר שוב\" ואשלח קישור לחיבור החשבון.");
-    return accountRedirect(request, ok ? "notice" : "error", ok ? "אישור המנהל התקבל. עכשיו אפשר לחבר את החשבון." : `אישור המנהל לא ניתן: ${url.searchParams.get("error_description") ?? url.searchParams.get("error") ?? ""}`);
+    return accountRedirect(request, ok ? "notice" : "error", ok ? "אישור המנהל התקבל. עכשיו אפשר לחבר את החשבון." : "אישור המנהל לא ניתן. אפשר לבקש ממנהל ה-IT לנסות שוב.");
   }
 
   // --- user authorization result ---
@@ -106,14 +106,15 @@ export async function GET(request: Request) {
       await tell(copy["err.admin_consent_needed"](user.business_name ?? "הארגון", adminLink));
       return finish(request, returnTo, "error", phone ? "הארגון דורש אישור מנהל. שלחנו בוואטסאפ טקסט להעביר למנהל ה-IT." : "הארגון דורש אישור חד-פעמי של מנהל ה-IT.", { admin: true });
     }
-    return finish(request, returnTo, "error", `החיבור ל-Microsoft 365 לא הושלם${desc ? `: ${desc.split("\n")[0]}` : ""}.`);
+    // Microsoft's own wording (error_description) stays in the log: the page shows a fixed line
+    return finish(request, returnTo, "error", "החיבור ל-Microsoft 365 לא הושלם. אפשר לנסות שוב.");
   }
 
   let cfg;
   try {
     cfg = getMsConfig();
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
+    if (e instanceof EnvError) return new Response(unavailable("ms:callback", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     throw e;
   }
   try {

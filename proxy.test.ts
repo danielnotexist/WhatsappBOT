@@ -76,6 +76,29 @@ describe("proxy.ts security headers", () => {
     }
   });
 
+  it("APP_URL on *.vercel.app adds X-Robots-Tag: noindex with the demo off too", () => {
+    vi.stubEnv("APP_URL", "https://alze-nine.vercel.app");
+    try {
+      expect(proxy().headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("/demo/chat with WEB_CHAT=1 outside the demo: open to a signed-in visitor only", () => {
+    const req = (cookie?: string) => new NextRequest(new URL("/demo/chat", "http://localhost:3000"), { headers: cookie ? { cookie } : {} });
+    vi.stubEnv("WEB_CHAT", "1");
+    vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 2).toString("base64"));
+    try {
+      expect(demoChatHidden(req())).toBe(true);
+      expect(demoChatHidden(req(`${SESSION_COOKIE}=${createSessionToken("11111111-1111-4111-8111-111111111111")}`))).toBe(false);
+      vi.stubEnv("WEB_CHAT", "");
+      expect(demoChatHidden(req(`${SESSION_COOKIE}=${createSessionToken("11111111-1111-4111-8111-111111111111")}`))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("a page load of a code card without an email goes back to the matching email card (with the headers)", () => {
     for (const [path, home] of [
       ["/start/code", "/start/email"],

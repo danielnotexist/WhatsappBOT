@@ -39,6 +39,7 @@ afterEach(() => {
 describe("session v2 — the email claim (demo on the memory store)", () => {
   const key = randomBytes(32);
   it("round-trips the email; v1 tokens keep working without it", () => {
+    stubDemo();
     const userId = randomUUID();
     const v2 = createSessionToken(userId, { key, email: "dana@levi-law.co.il" });
     expect(v2.startsWith("v2.")).toBe(true);
@@ -48,7 +49,18 @@ describe("session v2 — the email claim (demo on the memory store)", () => {
     expect(verifySessionToken(v1, { key })).not.toHaveProperty("email");
   });
 
+  it("is dead once the demo is off (v1 tokens keep working)", () => {
+    const userId = randomUUID();
+    const v2 = createSessionToken(userId, { key, email: "dana@levi-law.co.il" });
+    stubDemo();
+    expect(verifySessionToken(v2, { key })).not.toBeNull();
+    vi.stubEnv("DEMO_MODE", "0");
+    expect(verifySessionToken(v2, { key })).toBeNull();
+    expect(verifySessionToken(createSessionToken(userId, { key }), { key })?.userId).toBe(userId);
+  });
+
   it("rejects a swapped email, a wrong key and junk claims", () => {
+    stubDemo();
     const userId = randomUUID();
     const token = createSessionToken(userId, { key, email: "dana@levi-law.co.il" });
     const parts = token.split(".");

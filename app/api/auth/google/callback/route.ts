@@ -3,7 +3,7 @@ import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oa
 import { refuseSso, ssoCallbackState } from "@/lib/auth/sso-flow";
 import { gcopy } from "@/lib/copy/bot-google";
 import { getDb } from "@/lib/db";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 import { getGoogleConfig, getGoogleFetch } from "@/lib/google";
 import { GoogleClient } from "@/lib/google/client";
 import { storeGoogleConnection, uncountedGoogleConsent as uncounted, type GooglePendingAsk } from "@/lib/google/connect-store";
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
   try {
     cfg = getGoogleConfig();
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
+    if (e instanceof EnvError) return new Response(unavailable("google:callback", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     throw e;
   }
 

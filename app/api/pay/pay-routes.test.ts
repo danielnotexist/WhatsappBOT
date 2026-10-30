@@ -58,6 +58,29 @@ describe("/api/pay/* and /api/jobs/run", () => {
     expect(new URL(declined.headers.get("location")!).searchParams.get("error")).toContain("לא עבר");
   });
 
+  it("the app's mock gateway: only the mock page's own signature activates; a hand-made return (Sign=mock) does nothing", async () => {
+    setHypForTests(undefined); // the real wiring (lib/hyp/index.ts): MockHypGateway with the signing key
+    const user = await db.createUser("dana@example.com");
+    for (const sign of ["mock", "x", ""]) {
+      await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=123&CCode=0&Amount=1&ACode=0001234&Order=${user.id}%3Apro&Sign=${sign}`));
+    }
+    expect((await db.getSubscription(user.id))?.status ?? "none").not.toBe("active");
+    // a signed return whose Order was swapped is refused too
+    const mock = new URL((await mockGet(new Request(`https://app.example.co.il/api/pay/mock?Amount=99&Order=${user.id}%3Abasic`))).headers.get("location")!);
+    const other = await db.createUser("eve@example.com");
+    const swapped = new URL(mock);
+    swapped.searchParams.set("Order", `${other.id}:basic`);
+    await returnGet(new Request(swapped.toString()));
+    expect((await db.getSubscription(other.id))?.status ?? "none").not.toBe("active");
+    await returnGet(new Request(mock.toString()));
+    expect(await db.getSubscription(user.id)).toMatchObject({ plan: "basic", status: "active" });
+  });
+
+  it("the mock payment page is a 404 on a real deployment (no demo, not the memory store)", async () => {
+    vi.stubEnv("DATA_MODE", "supabase");
+    expect((await mockGet(new Request("https://app.example.co.il/api/pay/mock?Amount=99&Order=x"))).status).toBe(404);
+  });
+
   it("a browser that is not signed in lands on /pay/done with a result code, never with text from the URL", async () => {
     session.signedIn = false;
     const user = await db.createUser("dana@example.com");

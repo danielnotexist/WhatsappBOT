@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { isDemo } from "@/lib/demo";
 import { derivedKey, hmac } from "./keys";
 
 /**
@@ -7,7 +8,8 @@ import { derivedKey, hmac } from "./keys";
  *
  * Demo on the memory store only (DEMO_MODE=1 without Supabase, lib/demo.ts): `v2.<userId>.<exp>.<base64url(email)>.<hmac>`
  * — the email rides along so a serverless instance whose in-memory db never saw the user can recreate it
- * (lib/auth/current-user.ts). The claim is only ever acted on in the demo.
+ * (lib/auth/current-user.ts). A v2 token verifies only while the demo is on: once DEMO_MODE is off, every demo-only
+ * cookie is dead (`demoClaims`).
  */
 export const SESSION_COOKIE = "wb_session";
 export const SESSION_TTL_SECONDS = 30 * 24 * 3600;
@@ -35,11 +37,21 @@ export function createSessionToken(userId: string, opts: { key?: Buffer; now?: D
   return `${payload}.${sign(payload, key)}`;
 }
 
-export function verifySessionToken(token: string | undefined | null, opts: { key?: Buffer; now?: Date } = {}): Session | null {
+/** The demo is on (a misconfigured demo counts as off here: a session check never throws). */
+function demoOn(): boolean {
+  try {
+    return isDemo();
+  } catch {
+    return false;
+  }
+}
+
+/** `demoClaims`: accept v2 (demo-only) tokens — default: only while `isDemo()`. */
+export function verifySessionToken(token: string | undefined | null, opts: { key?: Buffer; now?: Date; demoClaims?: boolean } = {}): Session | null {
   if (!token) return null;
   const parts = token.split(".");
   const v1 = parts.length === 4 && parts[0] === "v1";
-  const v2 = parts.length === 5 && parts[0] === "v2";
+  const v2 = parts.length === 5 && parts[0] === "v2" && (opts.demoClaims ?? demoOn());
   if (!v1 && !v2) return null;
   const [, userId, expStr] = parts as [string, string, string];
   const emailPart = v2 ? parts[3]! : null;

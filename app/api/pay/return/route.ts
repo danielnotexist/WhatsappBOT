@@ -3,7 +3,7 @@ import { ensureDemoSessionUser, hasSession } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { payResultOf, payResultUrl } from "@/lib/billing/result";
 import { completePayment } from "@/lib/billing/service";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 
 /**
  * HYP success / error URL (set in the HYP portal to https://<domain>/api/pay/return).
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const notice = result.ok && result.mode === "card" ? "הכרטיס עודכן. אפשר לחזור לוואטסאפ." : "התשלום התקבל והחשבון פעיל. אפשר לחזור לוואטסאפ.";
     return Response.redirect(payResultUrl(origin, { signedIn, result: payResultOf(result), message: result.ok ? notice : result.message }).toString(), 303);
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503 });
+    if (e instanceof EnvError) return new Response(unavailable("pay:return", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     console.error("[pay:return] failed:", (e as Error).message);
     await reportError("billing.return", e);
     return Response.redirect(payResultUrl(origin, { signedIn, result: "failed", message: "משהו השתבש באימות התשלום. אם היה חיוב, נבדוק ונחזור עם תשובה במייל." }).toString(), 303);

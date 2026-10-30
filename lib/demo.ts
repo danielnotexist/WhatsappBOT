@@ -99,9 +99,17 @@ export class DemoConfigError extends Error {
   /** names only, never values */
   readonly forbidden: string[];
   readonly missing: string[];
+  /** DEMO_MODE on Vercel's production deployment without DEMO_ON_PRODUCTION=1 */
+  readonly production: boolean;
 
-  constructor(problems: { forbidden: string[]; missing: string[] }) {
+  constructor(problems: { forbidden: string[]; missing: string[]; production?: boolean }) {
     const parts: string[] = [];
+    if (problems.production) {
+      parts.push(
+        "מצב ההדגמה (DEMO_MODE=1) לא עולה בפריסת ה-production: הקוד הקבוע שלו נכנס לכל חשבון קיים. " +
+          "לכבות את DEMO_MODE, או (רק לפרויקט הדגמה נפרד, בלי נתונים אמיתיים) להוסיף DEMO_ON_PRODUCTION=1.",
+      );
+    }
     if (problems.forbidden.length) {
       parts.push(
         `מצב ההדגמה (DEMO_MODE=1) לא עולה ליד מפתחות ששולחים דברים באמת: ${problems.forbidden.join(", ")}. ` +
@@ -118,6 +126,7 @@ export class DemoConfigError extends Error {
     this.name = "DemoConfigError";
     this.forbidden = problems.forbidden;
     this.missing = problems.missing;
+    this.production = problems.production ?? false;
   }
 }
 
@@ -146,10 +155,25 @@ export function demoProblems(source: EnvSource = process.env): { forbidden: stri
   return { forbidden, missing };
 }
 
-/** Throws a Hebrew DemoConfigError when DEMO_MODE=1 sits next to outbound keys or lacks TOKEN_ENC_KEY. No-op otherwise. */
+/**
+ * Fail closed on the real site: the demo's fixed code signs in ANY existing account (and the demo may sit on the real
+ * Supabase data), so DEMO_MODE=1 on Vercel's production deployment is refused unless DEMO_ON_PRODUCTION=1 says, on
+ * purpose, that this production is a separate demo project. Turning the flag back on by mistake never reopens sign-in.
+ */
+export function demoRefusedOnProduction(source: EnvSource = process.env): boolean {
+  return demoFlag(source) && source.VERCEL_ENV?.trim() === "production" && !flagOn(source.DEMO_ON_PRODUCTION);
+}
+
+/** Throws a Hebrew DemoConfigError when DEMO_MODE=1 sits next to outbound keys, lacks TOKEN_ENC_KEY or runs on production. No-op otherwise. */
 export function assertDemoSafe(source: EnvSource = process.env): void {
   const problems = demoProblems(source);
-  if (problems.forbidden.length || problems.missing.length) throw new DemoConfigError(problems);
+  const production = demoRefusedOnProduction(source);
+  if (problems.forbidden.length || problems.missing.length || production) throw new DemoConfigError({ ...problems, production });
+}
+
+/** The website chat outside the demo: WEB_CHAT=1 (signed-in users, their own account only — app/api/demo/chat). */
+export function webChatFlag(source: EnvSource = process.env): boolean {
+  return flagOn(source.WEB_CHAT);
 }
 
 /** True in the demo. Re-checks the safety rules each time (cheap), so a misconfigured demo fails on first use. */

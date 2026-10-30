@@ -7,8 +7,8 @@ import { getDb } from "@/lib/db";
 import type { UserRow } from "@/lib/db/types";
 import { chatHistory, chatLinked, runChat, type ChatInput } from "@/lib/demo-chat/service";
 import { DEMO_CHAT_AUDIO_TYPES, DEMO_CHAT_LIMITS, DEMO_CHAT_RATE, type ChatErrorResponse, type ChatHistoryResponse, type ChatPostResponse } from "@/lib/demo-chat/types";
-import { isDemo } from "@/lib/demo";
-import { EnvError, liveAiInDemo } from "@/lib/env";
+import { isDemo, webChatFlag } from "@/lib/demo";
+import { EnvError, aiMocked, liveAiInDemo } from "@/lib/env";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
 import { sameOrigin } from "@/lib/same-origin";
 import { oggOpusDurationMs } from "@/lib/stt/ogg";
@@ -26,6 +26,7 @@ const MESSAGES: Record<ChatErrorResponse["code"], string> = {
   too_long: `ההודעה ארוכה מדי. אפשר עד ${DEMO_CHAT_LIMITS.textChars.toLocaleString("he-IL")} תווים.`,
   forbidden: "אין הרשאה.",
   blocked: "אין הרשאה.",
+  not_linked: "כדי לדבר כאן, צריך קודם לחבר את הוואטסאפ לחשבון מהאזור האישי.",
   server_error: "משהו נתקע בדרך. אפשר לנסות שוב.",
 };
 
@@ -38,6 +39,7 @@ const STATUS: Record<ChatErrorResponse["code"], number> = {
   too_long: 400,
   forbidden: 403,
   blocked: 403,
+  not_linked: 409,
   server_error: 500,
 };
 
@@ -47,9 +49,12 @@ function fail(code: ChatErrorResponse["code"], message: string = MESSAGES[code],
   return Response.json({ ok: false, code, message } satisfies ChatErrorResponse, { status, headers: NO_STORE });
 }
 
-/** DEMO_MODE only, signed-in only: the user, or the response to return (404 outside the demo, 401 without a session). */
+/**
+ * DEMO_MODE, or WEB_CHAT=1 outside it; signed-in only: the user, or the response to return (404 when neither is on,
+ * 401 without a session). Outside the demo the chat runs on the account's own linked WhatsApp number only.
+ */
 async function demoUser(): Promise<UserRow | Response> {
-  if (!isDemo()) return fail("not_found");
+  if (!isDemo() && !webChatFlag()) return fail("not_found");
   const session = await getSession();
   if (!session) return fail("unauthorized");
   const user = await getDb().getUser(session.userId);
@@ -65,8 +70,9 @@ export async function GET() {
   const user = await demoUser();
   if (user instanceof Response) return user;
   const db = getDb();
-  const [linked, items] = await Promise.all([chatLinked(db, user.id), chatHistory(db, user.id)]);
-  return Response.json({ ok: true, linked, liveAi: liveAiInDemo(), awaiting: awaitingAnswer(user), items } satisfies ChatHistoryResponse, { headers: NO_STORE });
+  const demo = isDemo();
+  const [linked, items] = await Promise.all([chatLinked(db, user.id, { virtual: demo }), chatHistory(db, user.id)]);
+  return Response.json({ ok: true, linked, liveAi: demo ? liveAiInDemo() : !aiMocked(), awaiting: awaitingAnswer(user), items } satisfies ChatHistoryResponse, { headers: NO_STORE });
 }
 
 /**
@@ -92,12 +98,12 @@ export async function POST(request: Request) {
 
   try {
     const base = getDb();
-    const out = await runChat({ base, user, input: parsed, makeCtx: ({ db, wa }) => botContext({ db, wa }) });
+    const out = await runChat({ base, user, input: parsed, makeCtx: ({ db, wa }) => botContext({ db, wa }), virtual: isDemo() });
     if (!out.ok) return fail(out.code, out.message);
     return Response.json({ ok: true, user: out.user, replies: out.replies, awaiting: out.awaiting } satisfies ChatPostResponse, { headers: NO_STORE });
   } catch (e) {
-    if (e instanceof EnvError) return fail("server_error", e.message, 503); // names the missing variables, never values
-    console.error("[demo-chat] failed:", (e as Error).message);
+    console.error("[demo-chat] failed:", (e as Error).message); // an EnvError names the missing variables: the log only
+    if (e instanceof EnvError) return fail("server_error", MESSAGES.server_error, 503);
     return fail("server_error");
   }
 }

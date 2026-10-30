@@ -1,4 +1,5 @@
 import { BRAND } from "@/lib/brand";
+import { setFlash } from "@/lib/flash";
 import type { PaymentReturn } from "./service";
 
 /**
@@ -37,7 +38,7 @@ export function payResultUrl(origin: string, opts: { signedIn: boolean; result: 
     // the personal area's "מנוי" (app/account/areas.ts), where the message is shown
     const dest = new URL("/account", origin);
     dest.searchParams.set("tab", "plan");
-    dest.searchParams.set(PAY_RESULTS[opts.result].ok ? "notice" : "error", opts.message);
+    setFlash(dest.searchParams, PAY_RESULTS[opts.result].ok ? "notice" : "error", opts.message);
     return dest;
   }
   const dest = new URL("/pay/done", origin);

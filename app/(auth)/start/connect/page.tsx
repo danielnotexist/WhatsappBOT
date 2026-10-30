@@ -6,6 +6,7 @@ import { ConnectError, ConnectStep, OneAccountNote } from "@/components/auth/con
 import { getSession } from "@/lib/auth/current-user";
 import { effectivePlan, entitlements, primaryProvider } from "@/lib/billing/plans";
 import { getDb } from "@/lib/db";
+import { readFlash } from "@/lib/flash";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { NOINDEX } from "@/lib/seo/site";
 
@@ -37,7 +38,9 @@ async function WithSession({ searchParams }: { searchParams: PageProps<"/start/c
   const session = await getSession();
   if (!session) redirect("/start/email");
   const sp = await searchParams;
-  const error = typeof sp.error === "string" ? sp.error.slice(0, 300) : "";
+  // only a line this site signed (lib/flash.ts): a crafted ?error= is not shown
+  const flash = readFlash(sp, { kinds: ["error"] });
+  const error = flash ? flash.text.slice(0, 300) : "";
   if (!error) {
     const db = getDb();
     const [sub, connections] = await Promise.all([db.getSubscription(session.userId), db.listConnections(session.userId)]);

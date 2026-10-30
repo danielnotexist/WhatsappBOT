@@ -86,14 +86,19 @@ describe("POST /api/auth/otp/{send,verify}", () => {
     expect(Number(again.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("answers 503 with the missing env var names when Supabase is configured but absent", async () => {
+  it("answers 503 with a generic Hebrew message when Supabase is configured but absent (names in the server log only)", async () => {
     vi.stubEnv("DATA_MODE", "");
     setDbForTests(undefined);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = await sendPost(post("/api/auth/otp/send", { email: "a@b.co" }));
     expect(r.status).toBe(503);
-    const body = (await r.json()) as { code: string; missing: string[]; message: string };
+    const raw = await r.text();
+    const body = JSON.parse(raw) as { code: string; missing?: string[]; message: string };
     expect(body.code).toBe("server_config");
-    expect(body.missing).toEqual(expect.arrayContaining(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]));
-    expect(body.message).toContain("משתני סביבה");
+    expect(body.missing).toBeUndefined();
+    expect(raw).not.toContain("SUPABASE");
+    expect(body.message).toBe("השירות אינו זמין כרגע. אפשר לנסות שוב בעוד כמה דקות.");
+    expect(String(log.mock.calls.at(-1))).toContain("SUPABASE_URL");
+    log.mockRestore();
   });
 });

@@ -26,8 +26,23 @@ function masterKey(): Buffer {
   throw new Error("משתני סביבה חסרים או לא תקינים: TOKEN_ENC_KEY. יצירה: openssl rand -base64 32");
 }
 
+/**
+ * SESSION_EPOCH (optional, a whole number): folded into the "session" sub-key only. Raising it (unset → "2") changes the
+ * key that signs session cookies and every session-bound link (WhatsApp login, connect, pay, card, invoice and offer
+ * links), so all of them stop verifying at once — the "sign everyone out" switch. Unset, "0" or "1" keep today's key.
+ * TOKEN_ENC_KEY itself, and so the stored OAuth / HYP tokens it encrypts, are untouched.
+ */
+export function sessionEpoch(source: Record<string, string | undefined> = process.env): number {
+  const raw = source.SESSION_EPOCH?.trim();
+  if (!raw) return 1;
+  if (!/^\d{1,6}$/.test(raw)) throw new Error("SESSION_EPOCH חייב להיות מספר שלם (למשל 2). העלאה שלו מנתקת את כל ה-sessions.");
+  return Math.max(1, Number(raw));
+}
+
 export function derivedKey(purpose: KeyPurpose, master: Buffer = masterKey()): Buffer {
-  return Buffer.from(hkdfSync("sha256", master, "", `whatsappbot:${purpose}`, 32));
+  const epoch = purpose === "session" ? sessionEpoch() : 1;
+  const info = epoch > 1 ? `whatsappbot:${purpose}:epoch${epoch}` : `whatsappbot:${purpose}`;
+  return Buffer.from(hkdfSync("sha256", master, "", info, 32));
 }
 
 export function hmac(key: Buffer, data: string): Buffer {

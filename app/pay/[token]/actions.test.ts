@@ -38,6 +38,7 @@ let wa: RecordingWaSender;
 
 beforeEach(() => {
   process.env.TOKEN_ENC_KEY ||= randomBytes(32).toString("base64");
+  vi.stubEnv("DATA_MODE", "memory"); // the mock gateway's mode: payments are open (lib/env.ts paymentsOpen)
   db = new MemoryDb();
   hyp = new MockHypGateway("https://app.example.co.il");
   wa = new RecordingWaSender();
@@ -46,6 +47,7 @@ beforeEach(() => {
   setWaSenderForTests(wa);
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   setDbForTests(undefined);
   setHypForTests(undefined);
   setWaSenderForTests(undefined);
@@ -155,5 +157,30 @@ describe("upgradeAction", () => {
     };
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect((await submit(form)).r).toBe("error");
+  });
+});
+
+describe("payments not open (no real HYP terminal, demo off)", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("paymentsOpen: the mock and the demo yes; outside them only a real terminal with all three keys", async () => {
+    const { paymentsOpen } = await import("@/lib/env");
+    const KEY = Buffer.alloc(32, 3).toString("base64");
+    expect(paymentsOpen({ DATA_MODE: "memory" })).toBe(true);
+    expect(paymentsOpen({ DEMO_MODE: "1", TOKEN_ENC_KEY: KEY })).toBe(true);
+    expect(paymentsOpen({ DATA_MODE: "supabase" })).toBe(false);
+    expect(paymentsOpen({ DATA_MODE: "supabase", HYP_MASOF: "4500000000", HYP_KEY: "k" })).toBe(false);
+    expect(paymentsOpen({ DATA_MODE: "supabase", HYP_MASOF: "0010000000", HYP_KEY: "k", HYP_PASSP: "p" })).toBe(false); // a test terminal
+    expect(paymentsOpen({ DATA_MODE: "supabase", HYP_MASOF: "4500000000", HYP_KEY: "k", HYP_PASSP: "p" })).toBe(true);
+  });
+
+  it("[לשדרג עכשיו] goes back to the page (which says payments open soon) and charges nothing", async () => {
+    const u = await basicUser();
+    const form = { token: u.token, offer: await u.offer() };
+    vi.stubEnv("DATA_MODE", "supabase");
+    for (const k of ["HYP_MASOF", "HYP_KEY", "HYP_PASSP", "DEMO_MODE"]) vi.stubEnv(k, "");
+    const out = await submit(form);
+    expect(out).toMatchObject({ path: `/pay/${u.token}`, upgrade: null, r: null, error: null });
+    expect(charges()).toHaveLength(0);
   });
 });

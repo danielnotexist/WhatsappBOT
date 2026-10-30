@@ -10,7 +10,7 @@ import { A11Y_INIT_SCRIPT } from "@/lib/a11y/settings";
 import { BRAND } from "@/lib/brand";
 import { isDemo } from "@/lib/demo";
 import { fontVariables } from "@/lib/fonts";
-import { HOME_TITLE, SITE_IMAGE, siteOrigin } from "@/lib/seo/site";
+import { HOME_TITLE, SITE_IMAGE, onVercelAppHost, siteOrigin } from "@/lib/seo/site";
 import "./globals.css";
 
 const APP_NAME = BRAND.name;
@@ -39,7 +39,7 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image", title: HOME_TITLE, description: BRAND.description, images: [SITE_IMAGE] },
   formatDetection: { telephone: false },
   // מצב הדגמה: noindex כבר ב-<head> (נקבע ב-build; ב-Vercel אותם משתנים ל-build ול-runtime). בזמן ריצה — X-Robots-Tag ב-proxy.ts.
-  ...(isDemo() ? { robots: { index: false, follow: false } } : {}),
+  ...(isDemo() || onVercelAppHost() ? { robots: { index: false, follow: false } } : {}),
 };
 
 export const viewport: Viewport = {

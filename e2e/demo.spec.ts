@@ -25,7 +25,7 @@ async function expectDemoChrome(page: Page) {
 }
 
 test.describe("DEMO_MODE=1 — production build, zero keys", () => {
-  test("every page: the strip, X-Robots-Tag and robots meta; health says demo-memory", async ({ browser }) => {
+  test("every page: the strip, X-Robots-Tag and robots meta; health answers (details only with CRON_SECRET)", async ({ browser }) => {
     const ctx = await newContext(browser);
     const page = await ctx.newPage();
     for (const path of ["/", "/start", "/login", "/privacy"]) {
@@ -36,7 +36,7 @@ test.describe("DEMO_MODE=1 — production build, zero keys", () => {
       await snap(page, `page${path.replace(/\//g, "-")}`);
     }
     const health = await ctx.request.get("/api/health");
-    expect(await health.json()).toMatchObject({ mode: "demo-memory" });
+    expect(await health.json()).toEqual({ ok: true });
     expect(health.headers()["x-robots-tag"]).toBe("noindex, nofollow");
     // the dev outbox stays closed in production, demo included
     expect((await ctx.request.get("/api/dev/outbox")).status()).toBe(404);

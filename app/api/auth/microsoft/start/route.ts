@@ -6,7 +6,7 @@ import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { parseSsoFrom } from "@/lib/auth/sso";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
-import { EnvError, msMocked } from "@/lib/env";
+import { EnvError, msMocked, unavailable } from "@/lib/env";
 import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { getMsConfig } from "@/lib/ms";
 import { buildAdminConsentUrl, buildAuthorizeUrl, msAdminScopesFor, msScopesFor, pkcePair } from "@/lib/ms/oauth";
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
   try {
     cfg = getMsConfig();
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
+    if (e instanceof EnvError) return new Response(unavailable("ms:start", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     throw e;
   }
   const state = randomBytes(16).toString("base64url");

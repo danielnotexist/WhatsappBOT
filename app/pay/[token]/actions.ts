@@ -8,7 +8,8 @@ import { verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { isBillingCycle, isPaidPlan } from "@/lib/billing/plans";
 import { startPayment } from "@/lib/billing/service";
 import { upgradeFromWeb } from "@/lib/billing/web-upgrade";
-import { EnvError } from "@/lib/env";
+import { EnvError, SERVICE_UNAVAILABLE, paymentsOpen } from "@/lib/env";
+import { flashQuery } from "@/lib/flash";
 
 /**
  * [לשדרג עכשיו] on /pay/<token> (a POST — server actions never run from a GET). The pay-link token names the account
@@ -22,7 +23,7 @@ export async function upgradeAction(formData: FormData): Promise<void> {
   const offer = String(formData.get("offer") ?? "");
   const page = `/pay/${encodeURIComponent(token)}`;
   const link = verifyPayLinkToken(token);
-  if (!link) redirect(page as Route); // the page explains an invalid link
+  if (!link || !paymentsOpen()) redirect(page as Route); // the page explains an invalid link, or that payments open soon
   let to: string;
   try {
     await ensureDemoSessionUser();
@@ -36,7 +37,7 @@ export async function upgradeAction(formData: FormData): Promise<void> {
     }
   } catch (e) {
     console.error("[pay] upgrade failed:", (e as Error).message);
-    to = e instanceof EnvError ? `${page}?error=${encodeURIComponent(e.message)}` : `${page}?r=error`;
+    to = `${page}?r=error`;
   }
   redirect(to as Route);
 }
@@ -51,7 +52,8 @@ export async function startPaymentAction(formData: FormData): Promise<void> {
   const rawCycle = String(formData.get("cycle") ?? "monthly");
   const cycle = isBillingCycle(rawCycle) ? rawCycle : "monthly";
   const link = verifyPayLinkToken(token);
-  if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent("הקישור לא בתוקף - אפשר לבקש קישור חדש בשיחה.")}` as Route);
+  if (link && !paymentsOpen()) redirect(`/pay/${encodeURIComponent(token)}` as Route); // the page: "התשלום ייפתח בקרוב"
+  if (!link || !isPaidPlan(plan)) redirect(`/pay/${encodeURIComponent(token)}?${flashQuery("error", "הקישור לא בתוקף - אפשר לבקש קישור חדש בשיחה.")}` as Route);
   const ctx = getBillingContext();
   await ensureDemoSessionUser();
   const user = await ctx.db.getUser(link.userId);
@@ -60,9 +62,9 @@ export async function startPaymentAction(formData: FormData): Promise<void> {
   try {
     url = await startPayment(ctx, user, plan, cycle);
   } catch (e) {
-    const message = e instanceof EnvError ? e.message : "לא הצלחנו לפתוח את דף התשלום כרגע. אפשר לנסות שוב בעוד רגע.";
+    const message = e instanceof EnvError ? SERVICE_UNAVAILABLE : "לא הצלחנו לפתוח את דף התשלום כרגע. אפשר לנסות שוב בעוד רגע.";
     console.error("[pay] startPayment failed:", (e as Error).message);
-    redirect(`/pay/${encodeURIComponent(token)}?error=${encodeURIComponent(message)}` as Route);
+    redirect(`/pay/${encodeURIComponent(token)}?${flashQuery("error", message)}` as Route);
   }
   redirect(url as Route);
 }

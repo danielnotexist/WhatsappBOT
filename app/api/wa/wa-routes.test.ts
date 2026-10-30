@@ -69,11 +69,16 @@ describe("/api/wa/webhook", () => {
     expect((queue.jobs[0]!.body as { kind: string; message: { text: string } }).message.text).toBe("היי");
   });
 
-  it("POST answers 503 with the Hebrew env message when META_APP_SECRET is missing", async () => {
+  it("POST answers 503 with a generic Hebrew message when META_APP_SECRET is missing (the names go to the log only)", async () => {
     vi.stubEnv("META_APP_SECRET", "");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const res = await webhookPost(new Request("https://x/api/wa/webhook", { method: "POST", body: "{}" }));
     expect(res.status).toBe(503);
-    expect(await res.text()).toContain("META_APP_SECRET");
+    const body = await res.text();
+    expect(body).toBe("השירות אינו זמין כרגע. אפשר לנסות שוב בעוד כמה דקות.");
+    expect(body).not.toContain("META_APP_SECRET");
+    expect(String(log.mock.calls.at(-1))).toContain("META_APP_SECRET");
+    log.mockRestore();
   });
 });
 

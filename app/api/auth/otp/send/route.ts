@@ -1,5 +1,5 @@
 import { sendOtpForRequest } from "@/lib/auth/otp-service";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 
 /**
  * POST /api/auth/otp/send  { email }
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     });
   } catch (e) {
     if (e instanceof EnvError) {
-      return Response.json({ ok: false, code: "server_config", message: e.message, missing: e.missing }, { status: 503 });
+      return Response.json({ ok: false, code: "server_config", message: unavailable("otp:send", e) }, { status: 503, headers: { "cache-control": "no-store" } });
     }
     throw e;
   }

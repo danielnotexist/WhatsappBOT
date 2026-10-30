@@ -11,14 +11,14 @@ import { spendLimits } from "@/lib/ai/budget";
 import { getSession } from "@/lib/auth/current-user";
 import { BRAND } from "@/lib/brand";
 import { getDb } from "@/lib/db";
-import { isDemo } from "@/lib/demo";
-import { liveAiInDemo } from "@/lib/env";
+import { isDemo, webChatFlag } from "@/lib/demo";
+import { aiMocked, liveAiInDemo } from "@/lib/env";
 import { ChatScreen } from "./_components/chat-screen";
 
 export const metadata: Metadata = { title: `הצ'אט עם ${BRAND.name}`, robots: { index: false, follow: false } };
 
 /**
- * /demo/chat — DEMO_MODE only, signed-in only (proxy.ts answers 404 otherwise; checked here again). The person talks to
+ * /demo/chat — DEMO_MODE (or WEB_CHAT=1 outside it, on the account's own linked number), signed-in only (proxy.ts answers 404 otherwise; checked here again). The person talks to
  * עלזה through the same pipeline as WhatsApp. Wide screens: a short note beside the phone. Phones: the chat is the
  * whole screen (app/globals.css pins the page to the viewport height).
  */
@@ -48,12 +48,13 @@ export default function DemoChatPage() {
 
 async function Chat() {
   await connection(); // the session and the demo switch are read per request
-  if (!isDemo()) notFound();
+  const demo = isDemo();
+  if (!demo && !webChatFlag()) notFound();
   const session = await getSession();
   if (!session) notFound();
   const user = await getDb().getUser(session.userId);
   if (!user) notFound();
-  const liveAi = liveAiInDemo();
+  const liveAi = demo ? liveAiInDemo() : !aiMocked();
   let dailyMessages: number | null = null;
   try {
     dailyMessages = spendLimits()?.userDailyMessages ?? null;
@@ -69,8 +70,8 @@ async function Chat() {
           הצ&apos;אט עם {BRAND.name}
         </h1>
         <p className="mt-5 text-lede text-cream-muted">
-          אותה שיחה כמו בוואטסאפ: כותבים, מקליטים ולוחצים על הכפתורים ש{BRAND.name} שולחת. ההיכרות, הטיוטות והתזכורות עובדות כרגיל, ושום דבר לא יוצא
-          החוצה.
+          אותה שיחה כמו בוואטסאפ: כותבים, מקליטים ולוחצים על הכפתורים ש{BRAND.name} שולחת. ההיכרות, הטיוטות והתזכורות עובדות כרגיל
+          {demo ? ", ושום דבר לא יוצא החוצה." : "."}
         </p>
         <p className="mt-5 border-s-2 border-honey/60 ps-4 text-[0.9375rem] leading-relaxed text-cream-muted">
           {liveAi

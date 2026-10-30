@@ -1,14 +1,27 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { connection } from "next/server";
 import { isDemo } from "@/lib/demo";
 import { checkServerEnv, dataMode, liveAiInDemo } from "@/lib/env";
 
+/** Bearer CRON_SECRET (the scheduler's secret, app/api/jobs/tick) — compared in constant time, by digest. */
+function operator(request: Request): boolean {
+  const secret = process.env.CRON_SECRET?.trim() ?? "";
+  if (!secret) return false;
+  const digest = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(digest(request.headers.get("authorization") ?? ""), digest(`Bearer ${secret}`));
+}
+
 /**
  * GET /api/health — בדיקת חיות ל-Vercel/מוניטורינג.
- * לא חושף ערכים: רק האם כל משתני הסביבה הנדרשים קיימים ותקינים.
+ * לכולם: רק `{ ok: true }`. הפרטים (מצב הנתונים, ההדגמה, האזור, ה-commit, שלמות משתני הסביבה — בלי ערכים) רק עם
+ * `Authorization: Bearer <CRON_SECRET>`, כדי שזר לא ימפה מה מוגדר באתר.
  */
-export async function GET() {
+export async function GET(request: Request) {
   // מסמן ל-Next (Cache Components) שהתשובה תלויה בבקשה ולא ניתנת ל-prerender.
   await connection();
+  const headers = { "cache-control": "no-store" };
+  if (!operator(request)) return Response.json({ ok: true }, { headers });
+
   const env = checkServerEnv();
   // "demo-memory" / "demo-supabase" במצב הדגמה (lib/demo.ts) — בלי ערכים, רק המצב
   let mode: string;
@@ -31,8 +44,9 @@ export async function GET() {
       liveAi,
       checks: {
         env: env.ok ? "ok" : mode.startsWith("demo") ? "demo" : "incomplete",
+        missing: env.ok ? [] : env.missing,
       },
     },
-    { headers: { "cache-control": "no-store" } },
+    { headers },
   );
 }

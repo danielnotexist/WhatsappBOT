@@ -8,7 +8,7 @@ import { parseSsoFrom } from "@/lib/auth/sso";
 import { gcopy } from "@/lib/copy/bot-google";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
-import { EnvError, googleMocked } from "@/lib/env";
+import { EnvError, googleMocked, unavailable } from "@/lib/env";
 import { getGoogleConfig } from "@/lib/google";
 import { buildGoogleAuthorizeUrl, isGoogleFeature, pkcePair, scopesForRequest, type GoogleFeature, type RestrictedRead } from "@/lib/google/oauth";
 import { startGoogleSignIn } from "@/lib/google/sso";
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
     // base connect (onboarding / reconnect): gmail.readonly and drive.readonly ride along while this account may still get them
     scopes = scopesForRequest(feature, { withGmailRead: gmail.allowed, withDriveRead: drive.allowed && entitlements(gate.plan).driveFullRead });
   } catch (e) {
-    if (e instanceof EnvError) return text(e.message, 503);
+    if (e instanceof EnvError) return text(unavailable("google:start", e), 503);
     throw e;
   }
 

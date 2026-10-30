@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import type { WorkerJob } from "@/lib/bot/pipeline";
-import { EnvError, requireEnv } from "@/lib/env";
+import { EnvError, requireEnv, unavailable } from "@/lib/env";
 import { getQueue } from "@/lib/queue";
 import { META_SIGNATURE_HEADER, verifyMetaSignature, verifyMetaWebhookChallenge } from "@/lib/wa/signature";
 import { parseWebhook } from "@/lib/wa/webhook";
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   try {
     verifyToken = requireEnv(["WA_VERIFY_TOKEN"]).WA_VERIFY_TOKEN;
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503 });
+    if (e instanceof EnvError) return new Response(unavailable("wa:webhook", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     throw e;
   }
   const challenge = verifyMetaWebhookChallenge(new URL(request.url).searchParams, verifyToken);
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   try {
     appSecret = requireEnv(["META_APP_SECRET"]).META_APP_SECRET;
   } catch (e) {
-    if (e instanceof EnvError) return new Response(e.message, { status: 503 });
+    if (e instanceof EnvError) return new Response(unavailable("wa:webhook", e), { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
     throw e;
   }
   if (!verifyMetaSignature(raw, request.headers.get(META_SIGNATURE_HEADER), appSecret)) {

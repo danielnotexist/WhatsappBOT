@@ -22,6 +22,7 @@ import {
 import { getBillingContext } from "@/lib/billing";
 import { annualSwitchMessage, annualSwitchResult, switchToAnnualFromWeb } from "@/lib/billing/annual-switch";
 import { EnvError } from "@/lib/env";
+import { setFlash } from "@/lib/flash";
 import { formatDay } from "./view";
 import type { AccountArea } from "./areas";
 
@@ -29,7 +30,7 @@ import type { AccountArea } from "./areas";
 function back(result: AccountActionResult, area: Exclude<AccountArea, "overview">): never {
   const sp = new URLSearchParams();
   sp.set("tab", area);
-  sp.set(result.ok ? "notice" : "error", result.message);
+  setFlash(sp, result.ok ? "notice" : "error", result.message);
   redirect(`/account?${sp.toString()}` as Route);
 }
 

@@ -124,7 +124,11 @@ describe("demo + memory store", () => {
     const pay = await payMock(new Request(`${APP}/api/pay/mock?Amount=99&Order=x`));
     expect(pay.status).toBe(303);
     expect(location(pay).pathname).toBe("/api/pay/return");
-    expect(await (await health()).json()).toMatchObject({ mode: "demo-memory", checks: { env: "demo" } });
+    // anonymous: only { ok: true }; the details with the scheduler's secret
+    expect(await (await health(new Request(`${APP}/api/health`))).json()).toEqual({ ok: true });
+    vi.stubEnv("CRON_SECRET", "s".repeat(32));
+    expect(await (await health(new Request(`${APP}/api/health`, { headers: { authorization: "Bearer wrong" } }))).json()).toEqual({ ok: true });
+    expect(await (await health(new Request(`${APP}/api/health`, { headers: { authorization: `Bearer ${"s".repeat(32)}` } }))).json()).toMatchObject({ mode: "demo-memory", checks: { env: "demo" } });
     expect((await jobsTick(new Request(`${APP}/api/jobs/tick`, { method: "POST" }))).status).toBe(401);
   });
 });
@@ -173,7 +177,8 @@ describe("demo + Supabase (staging data, mocked client)", () => {
   });
 
   it("/api/health says demo-supabase; the HYP stand-in still answers", async () => {
-    expect(await (await health()).json()).toMatchObject({ mode: "demo-supabase" });
+    vi.stubEnv("CRON_SECRET", "s".repeat(32));
+    expect(await (await health(new Request(`${APP}/api/health`, { headers: { authorization: `Bearer ${"s".repeat(32)}` } }))).json()).toMatchObject({ mode: "demo-supabase" });
     expect((await payMock(new Request(`${APP}/api/pay/mock?Amount=99`))).status).toBe(303);
   });
 });

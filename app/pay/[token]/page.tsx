@@ -14,6 +14,8 @@ import { webUpgradeResult, webUpgradeView, type WebUpgradeOffer } from "@/lib/bi
 import { BRAND } from "@/lib/brand";
 import { isPlanGateReason, type PlanGateReason } from "@/lib/connections/plan-gate";
 import { getDb } from "@/lib/db";
+import { paymentsOpen } from "@/lib/env";
+import { readFlash } from "@/lib/flash";
 import type { SubscriptionRow, UserRow } from "@/lib/db/types";
 import { zonedParts } from "@/lib/time/zoned";
 import { publicWaNumber } from "@/lib/wa/public-number";
@@ -68,12 +70,15 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
   await connection();
   const { token } = await params;
   const sp = await searchParams;
-  const error = typeof sp.error === "string" ? sp.error.slice(0, 300) : "";
+  // only a line this site signed (lib/flash.ts): a crafted ?error= is not shown
+  const flash = readFlash(sp, { kinds: ["error"] });
+  const error = flash ? flash.text.slice(0, 300) : "";
   const link = verifyPayLinkToken(token);
   await ensureDemoSessionUser();
   const db = getDb();
   const user = link ? await db.getUser(link.userId) : null;
   if (!link || !user) return <InvalidLink />;
+  if (!paymentsOpen()) return <PaymentsSoon />;
   const now = new Date();
   const read = { db, now: () => now };
   const self = `/pay/${encodeURIComponent(token)}`;
@@ -254,6 +259,24 @@ function ChoosePlan({
           , כולל חיוב חוזר {annual ? "שנתי" : "חודשי"} עד לביטול.
         </p>
       </div>
+    </>
+  );
+}
+
+/* ---------- payments not open yet (no real HYP terminal on this deployment) ---------- */
+
+function PaymentsSoon() {
+  return (
+    <>
+      <PayHeading tag="עוד מעט." title="התשלום ייפתח בקרוב">
+        <p className="mt-4 max-w-[38rem] text-lede text-cream-muted">דף התשלום עדיין לא פתוח. החשבון ממשיך לפעול כרגיל, ולא נדרש כרגע שום דבר.</p>
+      </PayHeading>
+      <PayPaper pose="thinking">
+        <h2 className="font-heading text-[1.5rem] leading-tight font-bold">מה הלאה</h2>
+        <p className="mt-2 text-[1.0625rem] leading-relaxed">
+          כשהתשלום ייפתח, {BRAND.name} תשלח הודעה בוואטסאפ עם קישור חדש.
+        </p>
+      </PayPaper>
     </>
   );
 }

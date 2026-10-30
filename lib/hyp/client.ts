@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { requireEnv } from "@/lib/env";
 import { HYP_SUCCESS_CODES } from "./codes";
 import {
@@ -187,6 +188,24 @@ export class LazyHypGateway implements HypGateway {
   }
 }
 
+/** The fields of a mock return that the mock signature covers (what completePayment acts on). */
+const MOCK_SIGNED_FIELDS = ["Id", "CCode", "Amount", "ACode", "Order"] as const;
+
+/**
+ * The mock payment page's own signature (/api/pay/mock), standing in for HYP's: an HMAC over the return's fields with a
+ * server-side key, so a hand-made /api/pay/return query (`Sign=mock`, any Order) is refused like a forged HYP one.
+ */
+export function mockHypSign(fields: Record<string, string | undefined>, key: Buffer): string {
+  const data = MOCK_SIGNED_FIELDS.map((k) => `${k}=${fields[k] ?? ""}`).join("&");
+  return `mock.${createHmac("sha256", key).update(`hyp-mock:${data}`).digest("base64url")}`;
+}
+
+function mockSignOk(fields: Record<string, string | undefined>, key: Buffer): boolean {
+  const a = Buffer.from(mockHypSign(fields, key));
+  const b = Buffer.from(fields.Sign ?? "");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /**
  * Dev / test gateway: no network. The "payment page" is our own /api/pay/mock route, which redirects back
  * to /api/pay/return with a CCode=0 query (600 for a J2 card check), exactly like HYP would (minus the signature check).
@@ -201,7 +220,14 @@ export class MockHypGateway implements HypGateway {
   chargeScript: (string | Error | HypChargeResult)[] = [];
   private n = 500_000_000;
 
-  constructor(private readonly appUrl: string) {}
+  /**
+   * `signKey` (the app's wiring, lib/hyp/index.ts): a redirect verifies only with the signature /api/pay/mock made
+   * (`mockHypSign`). Without it (unit tests that build their own gateway) any success code verifies.
+   */
+  constructor(
+    private readonly appUrl: string,
+    private readonly opts: { signKey?: Buffer } = {},
+  ) {}
 
   async createPaymentPage(params: HypSignParams): Promise<string> {
     this.calls.push({ method: "createPaymentPage", args: params });
@@ -214,7 +240,8 @@ export class MockHypGateway implements HypGateway {
   async verifyRedirect(redirect: HypQueryInput): Promise<{ ok: boolean; response: Record<string, string> }> {
     this.calls.push({ method: "verifyRedirect", args: redirect });
     const r = typeof redirect === "string" ? Object.fromEntries(new URLSearchParams(redirect.includes("?") ? redirect.split("?")[1] : redirect)) : Object.fromEntries(redirect instanceof URLSearchParams ? redirect : (redirect as Iterable<[string, string]>));
-    return { ok: (HYP_SUCCESS_CODES as readonly string[]).includes(r.CCode ?? ""), response: r as Record<string, string> };
+    const signed = !this.opts.signKey || mockSignOk(r, this.opts.signKey);
+    return { ok: signed && (HYP_SUCCESS_CODES as readonly string[]).includes(r.CCode ?? ""), response: r as Record<string, string> };
   }
   async getToken(transId: string, opts: { allowFalse?: boolean } = {}): Promise<{ token: string; tokef: string }> {
     this.calls.push({ method: "getToken", args: { transId, ...opts } });

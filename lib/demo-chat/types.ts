@@ -61,7 +61,7 @@ export interface ChatPostResponse {
 
 export interface ChatErrorResponse {
   ok: false;
-  code: "not_found" | "unauthorized" | "rate_limited" | "bad_request" | "too_large" | "too_long" | "forbidden" | "blocked" | "server_error";
+  code: "not_found" | "unauthorized" | "rate_limited" | "bad_request" | "too_large" | "too_long" | "forbidden" | "blocked" | "not_linked" | "server_error";
   message: string;
 }
 

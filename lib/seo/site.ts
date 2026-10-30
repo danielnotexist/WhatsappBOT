@@ -28,12 +28,30 @@ export function absoluteUrl(path: string, env: Env = process.env): string {
 }
 
 /**
- * Only the production deployment is indexed: a Vercel preview (VERCEL_ENV=preview), a local run (no VERCEL_ENV) and
- * the demo (DEMO_MODE=1) all tell crawlers to stay out, so the test site never shows up in search.
+ * The site still answers on Vercel's own address (APP_URL on *.vercel.app): not the real domain yet, so never indexed —
+ * with the demo on or off.
+ */
+export function onVercelAppHost(env: Env = process.env): boolean {
+  for (const raw of [env.APP_URL, env.NEXT_PUBLIC_APP_URL]) {
+    if (!raw) continue;
+    try {
+      const host = new URL(raw).hostname.toLowerCase();
+      return host === "vercel.app" || host.endsWith(".vercel.app");
+    } catch {
+      // a bad value is reported by lib/env.ts; try the next one
+    }
+  }
+  return false;
+}
+
+/**
+ * Only the production deployment on the real domain is indexed: a Vercel preview (VERCEL_ENV=preview), a local run (no
+ * VERCEL_ENV), the demo (DEMO_MODE=1) and an APP_URL on *.vercel.app all tell crawlers to stay out, so the test site
+ * never shows up in search.
  */
 export function indexable(env: Env = process.env): boolean {
   const demo = (env.DEMO_MODE ?? "").trim().toLowerCase();
-  return env.VERCEL_ENV === "production" && demo !== "1" && demo !== "true";
+  return env.VERCEL_ENV === "production" && demo !== "1" && demo !== "true" && !onVercelAppHost(env);
 }
 
 /**

@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { ensureDemoSessionUser } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { verifyInvoiceToken } from "@/lib/billing/links";
-import { EnvError, hypMocked } from "@/lib/env";
+import { EnvError, hypMocked, unavailable } from "@/lib/env";
 
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
@@ -35,7 +35,7 @@ export async function GET(_request: Request, ctx: RouteContext<"/invoice/[token]
     // not a PDF (HYP answered with a page): let the browser follow HYP's signed link itself
     return Response.redirect(url, 302);
   } catch (e) {
-    if (e instanceof EnvError) return text(e.message, 503);
+    if (e instanceof EnvError) return text(unavailable("invoice", e), 503);
     console.error("[invoice] failed:", (e as Error).message);
     return text("לא הצלחנו להביא את הקבלה כרגע. אפשר לנסות שוב בעוד רגע.", 502);
   }

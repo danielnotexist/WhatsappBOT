@@ -3,7 +3,7 @@ import { demoSessionClaims } from "@/lib/auth/demo-user";
 import { verifyOtpForRequest } from "@/lib/auth/otp-service";
 import { SESSION_COOKIE, createSessionToken, sessionCookieOptions } from "@/lib/auth/session";
 import { getDb } from "@/lib/db";
-import { EnvError } from "@/lib/env";
+import { EnvError, unavailable } from "@/lib/env";
 
 /**
  * POST /api/auth/otp/verify  { email, code, updates? }
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     );
   } catch (e) {
     if (e instanceof EnvError) {
-      return Response.json({ ok: false, code: "server_config", message: e.message, missing: e.missing }, { status: 503 });
+      return Response.json({ ok: false, code: "server_config", message: unavailable("otp:verify", e) }, { status: 503, headers: { "cache-control": "no-store" } });
     }
     throw e;
   }

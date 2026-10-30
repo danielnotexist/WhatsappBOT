@@ -6,7 +6,7 @@ import { parseButtonId } from "@/lib/bot/pending";
 import { processInbound } from "@/lib/bot/process-inbound";
 import type { Db, UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
-import { demoChatPhone } from "./phone";
+import { demoChatPhone, isDemoChatPhone } from "./phone";
 import { ChatTranscript, demoMediaId, rowItem } from "./transcript";
 import type { ChatItem } from "./types";
 
@@ -23,11 +23,12 @@ export type ChatInput =
 
 export type ChatOutcome =
   | { ok: true; user: ChatItem | null; replies: ChatItem[]; awaiting: boolean; note?: string }
-  | { ok: false; code: "forbidden" | "blocked"; message: string };
+  | { ok: false; code: "forbidden" | "blocked" | "not_linked"; message: string };
 
 export const CHAT_ERRORS = {
   forbidden: "הכפתור הזה לא שייך לשיחה הזו.",
   blocked: "המספר של הצ'אט חסום בחשבון הזה.",
+  not_linked: "כדי לדבר כאן, צריך קודם לחבר את הוואטסאפ לחשבון מהאזור האישי.",
 } as const;
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -66,11 +67,17 @@ export async function replyAllowed(db: Db, userId: string, id: string): Promise<
   return false;
 }
 
-/** The account's chat number, linked now if needed (the WhatsApp welcome and onboarding run as after a link). */
-export async function ensureChatIdentity(ctx: BotContext, user: UserRow): Promise<{ phone: string; linkedNow: boolean } | { blocked: true }> {
+/**
+ * The account's chat number. In the demo (`virtual`): any active number, else a virtual +999 one linked now (the
+ * WhatsApp welcome and onboarding run as after a link). Outside the demo (WEB_CHAT=1): only the account's own real,
+ * already linked WhatsApp number — never a virtual one, never linked from here.
+ */
+export async function ensureChatIdentity(ctx: BotContext, user: UserRow, opts: { virtual?: boolean } = {}): Promise<{ phone: string; linkedNow: boolean } | { blocked: true } | { notLinked: true }> {
+  const virtual = opts.virtual ?? true;
   const identities = await ctx.db.listWaIdentities(user.id);
-  const active = identities.find((w) => w.status === "active");
+  const active = identities.find((w) => w.status === "active" && (virtual || !isDemoChatPhone(w.phone_e164)));
   if (active) return { phone: active.phone_e164, linkedNow: false };
+  if (!virtual) return { notLinked: true };
   if (identities.some((w) => w.status === "blocked")) return { blocked: true };
   const phone = demoChatPhone(user.id);
   await ctx.db.createWaIdentity(user.id, phone, user.name);
@@ -78,9 +85,10 @@ export async function ensureChatIdentity(ctx: BotContext, user: UserRow): Promis
   return { phone, linkedNow: true };
 }
 
-/** Is the chat started (an active number on the account)? */
-export async function chatLinked(db: Db, userId: string): Promise<boolean> {
-  return (await db.listWaIdentities(userId)).some((w) => w.status === "active");
+/** Is the chat started (an active number on the account; outside the demo a real one)? */
+export async function chatLinked(db: Db, userId: string, opts: { virtual?: boolean } = {}): Promise<boolean> {
+  const virtual = opts.virtual ?? true;
+  return (await db.listWaIdentities(userId)).some((w) => w.status === "active" && (virtual || !isDemoChatPhone(w.phone_e164)));
 }
 
 /** The history: the last messages of the account, as the chat shows them. */
@@ -92,14 +100,15 @@ export async function chatHistory(db: Db, userId: string, limit = 120): Promise<
  * One request of the chat. `makeCtx` builds the bot context around the transcript's data layer and sender (the
  * production wiring in the route, the in-memory stack in tests). `input: null` = start the chat (link + welcome).
  */
-export async function runChat(opts: { base: Db; user: UserRow; input: ChatInput | null; makeCtx: (t: { db: Db; wa: ChatTranscript["wa"] }) => BotContext }): Promise<ChatOutcome> {
+export async function runChat(opts: { base: Db; user: UserRow; input: ChatInput | null; makeCtx: (t: { db: Db; wa: ChatTranscript["wa"] }) => BotContext; virtual?: boolean }): Promise<ChatOutcome> {
   const { base, user, input } = opts;
   if (input?.kind === "reply" && !(await replyAllowed(base, user.id, input.id))) return { ok: false, code: "forbidden", message: CHAT_ERRORS.forbidden };
 
   const transcript = new ChatTranscript(base, user.id);
   const ctx = opts.makeCtx({ db: transcript.db, wa: transcript.wa });
-  const identity = await ensureChatIdentity(ctx, user);
+  const identity = await ensureChatIdentity(ctx, user, { virtual: opts.virtual });
   if ("blocked" in identity) return { ok: false, code: "blocked", message: CHAT_ERRORS.blocked };
+  if ("notLinked" in identity) return { ok: false, code: "not_linked", message: CHAT_ERRORS.not_linked };
 
   let note: string | undefined;
   let userItem: ChatItem | null = null;

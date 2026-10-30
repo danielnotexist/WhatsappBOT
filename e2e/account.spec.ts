@@ -1,4 +1,6 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
+import { derivedKey } from "../lib/auth/keys";
+import { flashQuery } from "../lib/flash";
 import { newContext, openArea, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
 
 /** Signs a new user up through the API; the context keeps the session cookie. */
@@ -183,11 +185,17 @@ test.describe("personal area — same server actions, new design", () => {
     await expect(page.getByRole("region", { name: "הסוכנים שלי" })).toBeVisible();
     await expect(page.getByRole("region", { name: "סקירה" })).toHaveCount(0);
 
+    // a line the site signed (lib/flash.ts; the dev server's key is playwright.config.ts's all-ones TOKEN_ENC_KEY)
+    const signed = (text: string) => flashQuery("notice", text, derivedKey("internal", Buffer.alloc(32, 1)));
+    // a crafted, unsigned line is never shown
+    await page.goto(`/account?notice=${encodeURIComponent("להעביר 99 ₪ בביט")}`);
+    await expect(page.getByRole("region", { name: "סקירה" })).toBeVisible();
+    await expect(page.getByText("להעביר 99 ₪ בביט")).toHaveCount(0);
     // an older link (a bare notice, as chat links and returns used to land): shown on the overview
-    await page.goto(`/account?notice=${encodeURIComponent("הודעה לבדיקה")}`);
+    await page.goto(`/account?${signed("הודעה לבדיקה")}`);
     await expect(page.getByRole("region", { name: "סקירה" }).getByRole("status")).toHaveText(/הודעה לבדיקה/);
     // the agents' older landing (?at=agents#agents): the agents, with the notice there
-    await page.goto(`/account?notice=${encodeURIComponent("הסוכן נשמר")}&at=agents#agents`);
+    await page.goto(`/account?${signed("הסוכן נשמר")}&at=agents#agents`);
     const agentsNotice = page.getByRole("region", { name: "הסוכנים שלי" }).getByRole("status");
     await expect(agentsNotice).toHaveText(/הסוכן נשמר/);
     // "סגירה" closes it in place and drops the notice from the address

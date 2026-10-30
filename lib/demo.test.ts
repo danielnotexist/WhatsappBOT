@@ -95,3 +95,20 @@ describe("the demo's words", () => {
     expect(DEMO_COPY.robots).toBe("noindex, nofollow");
   });
 });
+
+describe("DEMO_MODE on Vercel's production deployment (fail closed)", () => {
+  const KEY = Buffer.alloc(32, 9).toString("base64");
+  it("is refused unless DEMO_ON_PRODUCTION=1 opts in on purpose", () => {
+    const env = { DEMO_MODE: "1", TOKEN_ENC_KEY: KEY, VERCEL_ENV: "production" };
+    expect(() => isDemo(env)).toThrow(DemoConfigError);
+    try {
+      isDemo(env);
+    } catch (e) {
+      expect((e as DemoConfigError).production).toBe(true);
+      expect((e as Error).message).toContain("DEMO_ON_PRODUCTION");
+    }
+    expect(isDemo({ ...env, DEMO_ON_PRODUCTION: "1" })).toBe(true);
+    expect(isDemo({ ...env, VERCEL_ENV: "preview" })).toBe(true);
+    expect(isDemo({ ...env, DEMO_MODE: "0" })).toBe(false);
+  });
+});

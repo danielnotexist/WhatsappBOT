@@ -1,8 +1,10 @@
+import { setFlash } from "@/lib/flash";
+
 /**
  * Where an OAuth callback sends the browser (`returnTo` on /api/auth/{provider}/start, stored with the state):
  *   onboarding → success: /start/ready?connected=<provider>   failure: /start/connect?error=… (retry or skip)
  *   account    → /account?tab=connections&notice=… | …&error=…   (default: personal area, chat links)
- * Only these fixed paths are possible — never a caller-supplied URL (no open redirect).
+ * Only these fixed paths are possible — never a caller-supplied URL (no open redirect). The line is signed (lib/flash.ts).
  */
 export type OAuthReturnTo = "onboarding" | "account";
 
@@ -20,7 +22,7 @@ export function oauthReturnUrl(appUrl: string, returnTo: OAuthReturnTo, provider
     dest = new URL("/account", appUrl);
     dest.searchParams.set("tab", "connections");
   }
-  if (outcome.ok) dest.searchParams.set("notice", outcome.notice);
-  else dest.searchParams.set("error", outcome.error);
+  if (outcome.ok) setFlash(dest.searchParams, "notice", outcome.notice);
+  else setFlash(dest.searchParams, "error", outcome.error);
   return dest.toString();
 }

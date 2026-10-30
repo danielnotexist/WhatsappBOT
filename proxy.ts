@@ -2,9 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SOURCE_COOKIE, SOURCE_MAX_AGE, encodeSource, sourceFromVisit } from "@/lib/admin/source";
 import { ADMIN_COOKIE, ADMIN_GATE_COOKIE, isGatedAdminPath, verifyAdminToken, verifyGateToken } from "@/lib/admin/tokens";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
-import { DEMO_COPY, isDemo } from "@/lib/demo";
+import { DEMO_COPY, isDemo, webChatFlag } from "@/lib/demo";
 import { unknownProfessionPath } from "@/lib/seo/professions";
-import { isPrivatePath } from "@/lib/seo/site";
+import { isPrivatePath, onVercelAppHost } from "@/lib/seo/site";
 
 /**
  * proxy.ts — כותרות אבטחה לכל תשובה (ב-Next 16 הקובץ `middleware.ts` הוחלף ב-`proxy.ts`; אותה פונקציונליות).
@@ -73,12 +73,13 @@ export function codeCardWithoutEmail(request: NextRequest): string | null {
 }
 
 /**
- * The website chat exists only in DEMO_MODE and only for a signed-in visitor: otherwise a real 404 here, before the page
- * starts streaming (a notFound() inside the page's Suspense would keep a 200). The page checks again on its own.
+ * The website chat exists only in DEMO_MODE (or with WEB_CHAT=1 outside it) and only for a signed-in visitor: otherwise
+ * a real 404 here, before the page starts streaming (a notFound() inside the page's Suspense would keep a 200). The page
+ * checks again on its own.
  */
 export function demoChatHidden(request: NextRequest): boolean {
   if (request.nextUrl.pathname !== "/demo/chat") return false;
-  return !isDemo() || verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value) === null;
+  return !(isDemo() || webChatFlag()) || verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value) === null;
 }
 
 /**
@@ -132,8 +133,9 @@ export function proxy(request: NextRequest) {
   }
   if (MIC_PAGES.has(request.nextUrl.pathname)) response.headers.set("Permissions-Policy", PERMISSIONS_POLICY_WITH_MIC);
   // מצב הדגמה (lib/demo.ts): לא לאינדוקס בשום מנוע חיפוש — נבדק בכל בקשה, גם אם ה-build נעשה בלי DEMO_MODE
-  // and the private pages (the panel, the personal area, payment, invoice and sign-in links — lib/seo/site.ts), always
-  if (isDemo() || isPrivatePath(request.nextUrl.pathname)) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
+  // and the private pages (the panel, the personal area, payment, invoice and sign-in links — lib/seo/site.ts), always;
+  // and every page while the site answers on Vercel's own *.vercel.app address (lib/seo/site.ts onVercelAppHost)
+  if (isDemo() || onVercelAppHost() || isPrivatePath(request.nextUrl.pathname)) response.headers.set("X-Robots-Tag", DEMO_COPY.robots);
   return response;
 }
 

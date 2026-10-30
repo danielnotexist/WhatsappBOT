@@ -1182,3 +1182,18 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 ### 2026-10-28 — ניקוי הטקסט באתר בוטל
 
 - לבקשת דניאל הוחזר האתר למצב שלפני ניקוי הטקסט (revert של `f4c3efb`). כל הדפים חזרו לטקסט הקודם. שינוי המחירים בשנתי (המחיר לחודש בגדול, `0678aae`) נשאר.
+
+### 2026-10-30 — אבטחה, אזור A: כיבוי ההדגמה בבטחה ו-sessions
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **`SESSION_EPOCH`** (`lib/auth/keys.ts` `sessionEpoch`): נכנס רק למפתח החתימה של ה-session. `SESSION_EPOCH=2` מנתק את כולם - כל עוגיות הכניסה וכל הקישורים החתומים (כניסה מוואטסאפ, חיבור, תשלום, כרטיס, קבלה, הצעות). ריק / 1 = המפתח של היום. הטוקנים המוצפנים ב-`TOKEN_ENC_KEY` לא מושפעים. עוגיית v2 (ההדגמה) תקפה רק כשההדגמה דולקת (`lib/auth/session.ts`).
+- **ההדגמה לא עולה בפריסת ה-production** (`VERCEL_ENV=production`) בלי `DEMO_ON_PRODUCTION=1` מפורש (`lib/demo.ts` `demoRefusedOnProduction`): הדלקה בטעות של `DEMO_MODE` כבר לא פותחת את הקוד 123456 לכל חשבון.
+- **`WEB_CHAT=1`**: הצ'אט באתר גם מחוץ להדגמה, רק למשתמש מחובר ורק על מספר הוואטסאפ האמיתי שמקושר לחשבון שלו (בלי +999; בלי מספר - 409 עם הסבר). בלי הדגל - 404 כמו קודם (`proxy.ts`, `app/api/demo/chat`, `lib/demo-chat/service.ts`).
+- **noindex** גם בלי הדגמה כש-`APP_URL` על `*.vercel.app` (`lib/seo/site.ts` `onVercelAppHost`: robots.txt, `X-Robots-Tag`, meta).
+- **תשלום:** בלי מסוף HYP אמיתי ומחוץ להדגמה `/pay` מציג "התשלום ייפתח בקרוב" והפעולות לא פותחות כלום (`lib/env.ts` `paymentsOpen`). ה-mock של HYP דורש חתימת HMAC שרק `/api/pay/mock` יוצר (`mockHypSign`), כך ש-`/api/pay/return?...&Sign=mock` מזויף לא מפעיל מנוי; `/api/pay/mock` 404 מחוץ להדגמה / זיכרון.
+- **`/api/health`**: לכולם רק `{ ok: true }`; הפרטים רק עם `Authorization: Bearer <CRON_SECRET>`. נתיבים ציבוריים (קוד במייל, תשלום, כרטיס, קבלה, webhook, OAuth) לא מחזירים שמות משתנים - "השירות אינו זמין כרגע", והפרטים ללוג (`lib/env.ts` `unavailable`).
+- **הודעות מהכתובת:** `?notice=` / `?error=` ב-`/account`, `/pay/<token>`, `/start/connect` מוצגות רק עם חתימה של האתר (`lib/flash.ts`, `fs=`); קישור מפוברק לא מציג טקסט. תיאור השגיאה של Microsoft (`error_description`) לא מוצג יותר - משפט קבוע.
+
+**בדיקות:** `lib/auth/session.test.ts`, `lib/auth/demo-auth.test.ts`, `lib/demo.test.ts`, `lib/flash.test.ts`, `lib/seo/seo.test.ts`, `proxy.test.ts`, `app/api/demo/chat/demo-chat-route.test.ts`, `app/api/pay/pay-routes.test.ts`, `app/pay/[token]/actions.test.ts`, `app/api/demo-routes.test.ts`, בדיקות ה-503 ב-otp / wa / google. e2e: `e2e/account.spec.ts` (הודעה חתומה מוצגת, מפוברקת לא), `e2e/demo.spec.ts` (health).
+
+**דרוש מדניאל (ב-Vercel, בעת כיבוי ההדגמה):** `DEMO_MODE=0` (או למחוק), `SESSION_EPOCH=2`, `WEB_CHAT=1`. לבדוק ב-Supabase שאריות מתקופת ההדגמה: תשלומים עם `raw->>'Sign'='mock'` / `ACode 0001234`, מנויים שהופעלו מהם, הפניות שתוגמלו, ו-audit_log (login, wa.link, ms.connect, google.connect) בחלון ההדגמה.
