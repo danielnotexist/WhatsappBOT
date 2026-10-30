@@ -70,7 +70,9 @@ async function connectCallback(request: Request, url: URL, state: string, sso: R
   }
   // bound to the browser that started it, and to the signed-in account when there is one
   const sessionUserId = (await getSession())?.userId ?? null;
-  if (!connectCookieMatches(request, "microsoft", state, user.id) || (sessionUserId && sessionUserId !== user.id)) {
+  // the admin-consent return: an IT admin signed in to their own Alze account is expected (start allows it)
+  const adminReturn = url.searchParams.has("admin_consent");
+  if (!connectCookieMatches(request, "microsoft", state, user.id) || (!adminReturn && sessionUserId && sessionUserId !== user.id)) {
     await db.addAudit({ user_id: user.id, action: url.searchParams.get("admin_consent") ? "ms.admin_consent" : "ms.connect", result: "error:unbound" });
     return finish(request, returnTo, "error", CONNECT_GUARD.unbound);
   }

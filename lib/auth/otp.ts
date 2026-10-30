@@ -150,6 +150,7 @@ export async function sendOtp(deps: OtpDeps, rawEmail: unknown, ip: string): Pro
     maxPerRequester: OTP_POLICY.maxPerHourPerEmail,
     maxPerMailbox: OTP_POLICY.maxPerHourPerMailbox,
     maxGlobal: OTP_POLICY.maxPerHourGlobal,
+    maxPerRequesterAll: OTP_POLICY.maxSendsPerIpPerHour,
     now,
   });
   if (issued.status === "cooldown") return { ok: false, code: "cooldown", message: OTP_MESSAGES.cooldown, retryAfterSeconds: issued.retryAfterSeconds };

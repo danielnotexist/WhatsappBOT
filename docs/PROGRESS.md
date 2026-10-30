@@ -1318,3 +1318,10 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 - `MemoryDb.restoreUser` (הדגמה בלבד): שתי בקשות במקביל לאותו משתמש כבר לא מפילות את הדף.
 - בדיקת הדפדפן שממלאת את הפאנל בחודש לדוגמה עברה ל-`e2e/zz-admin-seeded.spec.ts` ורצה אחרונה, כדי שלא תסתיר את המקורות של בדיקות אחרות.
 **בדיקות:** `lib/auth/otp.test.ts`, `supabase/tests/auth_atomic.test.sql`, `lib/db/memory.test.ts`; e2e מלא (53) ו-`e2e:demo` (4) עוברים.
+
+### 2026-10-30 — אבטחה: ממצאי הסקירה האחרונה
+- `otp_issue` (0020) קיבל תקרה לשעה לכל מבקש על פני כל הכתובות (`p_max_per_requester_all`, 20). כתובת אחת ששולחת קודים לכתובות אקראיות נעצרת לפני התקרה הכללית, ולא חוסמת את הכניסה במייל לכולם.
+- `/api/pay/return` ו-`/pay/card/<t>` סגורים כש-`paymentsOpen()` שקר (אין מסוף אמיתי; פרטי מסוף הבדיקה 00100 ציבוריים): חזרה "חתומה" לא מפעילה מסלול.
+- החזרה מאישור המנהל ב-Microsoft לא נדחית כשמנהל ה-IT מחובר לחשבון עלזה משלו (עוגיית החיבור עדיין נדרשת).
+- `/api/csp-report` קורא את הגוף במנות עם תקרה (`readCapped`), גם בלי Content-Length.
+**בדיקות:** `lib/auth/otp.test.ts`, `supabase/tests/auth_atomic.test.sql`, `app/api/pay/pay-routes.test.ts`, `app/api/auth/microsoft/ms-routes.test.ts`, `app/api/csp-report/csp-report-route.test.ts`.

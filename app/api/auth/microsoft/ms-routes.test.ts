@@ -131,7 +131,11 @@ describe("Microsoft connect routes (memory mode)", () => {
     const adminUrl = new URL(adminStart.headers.get("location")!);
     expect(adminUrl.pathname).toBe("/organizations/v2.0/adminconsent");
     const st2 = adminUrl.searchParams.get("state")!;
+    // the IT admin may be signed in to an Alze account of their own: the admin-consent return still lands
+    const itAdmin = await db.createUser("it@example.com");
+    jar.session = createSessionToken(itAdmin.id);
     const granted = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?admin_consent=True&tenant=t1&state=${st2}`));
+    jar.session = undefined;
     expect(new URL(granted.headers.get("location")!).searchParams.get("notice")).toContain("אישור המנהל התקבל");
     // an admin link is admin-only: without admin=1 it is refused
     expect((await startGet(new Request(adminLink.replace("admin=1&", "")))).status).toBe(410);

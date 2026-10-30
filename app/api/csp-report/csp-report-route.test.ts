@@ -28,6 +28,22 @@ describe("POST /api/csp-report", () => {
     expect(line).not.toContain("k=1");
   });
 
+  it("a chunked body with no Content-Length is cut at the cap, not read whole", async () => {
+    setRateLimiterForTests(new MemoryRateLimiter());
+    const chunk = new TextEncoder().encode("x".repeat(8 * 1024));
+    let sent = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        sent += 1;
+        if (sent > 100) c.close();
+        else c.enqueue(chunk);
+      },
+    });
+    const req = new Request("http://localhost:3000/api/csp-report", { method: "POST", headers: { "content-type": "application/csp-report" }, body: stream, duplex: "half" } as RequestInit);
+    expect((await POST(req)).status).toBe(413);
+    expect(sent).toBeLessThan(10);
+  });
+
   it("reads the Reporting API format (report-to)", () => {
     const lines = summarizeReports([{ type: "csp-violation", body: { effectiveDirective: "img-src", blockedURL: "https://cdn.example/a.png", documentURL: "https://alze.example/" } }, { type: "deprecation", body: {} }]);
     expect(lines).toEqual(["img-src blocked=https://cdn.example/a.png page=https://alze.example/"]);

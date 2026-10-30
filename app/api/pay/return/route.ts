@@ -3,7 +3,7 @@ import { ensureDemoSessionUser, hasSession } from "@/lib/auth/current-user";
 import { getBillingContext } from "@/lib/billing";
 import { payResultOf, payResultUrl } from "@/lib/billing/result";
 import { completePayment } from "@/lib/billing/service";
-import { EnvError, unavailable } from "@/lib/env";
+import { EnvError, paymentsOpen, unavailable } from "@/lib/env";
 
 /**
  * HYP success / error URL (set in the HYP portal to https://<domain>/api/pay/return).
@@ -15,6 +15,8 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const origin = process.env.APP_URL || url.origin;
   const signedIn = await hasSession().catch(() => false);
+  // no real terminal yet (a 00100 test terminal's credentials are public): a "signed" return activates nothing
+  if (!paymentsOpen()) return Response.redirect(payResultUrl(origin, { signedIn, result: "failed", message: "התשלום ייפתח בקרוב." }).toString(), 303);
   try {
     await ensureDemoSessionUser();
     const result = await completePayment(getBillingContext(), url.search.slice(1));

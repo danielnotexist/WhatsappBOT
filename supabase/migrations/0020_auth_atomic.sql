@@ -50,7 +50,8 @@ create or replace function public.otp_issue(
   p_cooldown_seconds   integer,
   p_max_per_requester  integer,
   p_max_per_mailbox    integer,
-  p_max_global         integer default null
+  p_max_global         integer default null,
+  p_max_per_requester_all integer default null
 )
 returns jsonb
 language plpgsql
@@ -81,6 +82,15 @@ begin
     return jsonb_build_object('status', 'too_many', 'retry_after', 3600);
   end if;
 
+  -- one requester across every address (random addresses from one IP must not fill the global ceiling for everyone)
+  if p_max_per_requester_all is not null then
+    select count(*) into v_n from public.auth_otps o
+     where o.requester = p_requester and o.created_at > now() - interval '1 hour';
+    if v_n >= p_max_per_requester_all then
+      return jsonb_build_object('status', 'too_many', 'retry_after', 3600);
+    end if;
+  end if;
+
   select count(*) into v_n from public.auth_otps o
    where o.mailbox = p_mailbox and o.created_at > now() - interval '1 hour';
   if v_n >= p_max_per_mailbox then
@@ -105,7 +115,7 @@ begin
   return jsonb_build_object('status', 'ok', 'retry_after', 0, 'id', v_id);
 end;
 $$;
-comment on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer) is
+comment on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer, integer) is
   'מנפיק קוד באטומיות: המתנה לכל (תיבה, מבקש) לפי השורה האחרונה בכל מצב, מכסה לשעה לכל מבקש ולכל תיבה, תקרה כללית לשעה, ביטול הקוד הקודם של אותו מבקש והכנסה. ok / cooldown / too_many / busy.';
 
 -- -----------------------------------------------------------------------------
@@ -379,13 +389,13 @@ comment on function public.login_token_consume(uuid, text) is
 -- -----------------------------------------------------------------------------
 -- הרשאות: service_role בלבד
 -- -----------------------------------------------------------------------------
-revoke execute on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer) from public, anon, authenticated;
+revoke execute on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer, integer) from public, anon, authenticated;
 revoke execute on function public.otp_check(text, text, text, integer)                 from public, anon, authenticated;
 revoke execute on function public.wa_identity_link(uuid, text, text)                   from public, anon, authenticated;
 revoke execute on function public.link_token_consume(text, text, text, text)           from public, anon, authenticated;
 revoke execute on function public.wa_link_attempt(text, boolean, text, integer, integer, integer) from public, anon, authenticated;
 revoke execute on function public.login_token_consume(uuid, text)                      from public, anon, authenticated;
-grant  execute on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer) to service_role;
+grant  execute on function public.otp_issue(text, text, text, text, text, timestamptz, integer, integer, integer, integer, integer) to service_role;
 grant  execute on function public.otp_check(text, text, text, integer)                 to service_role;
 grant  execute on function public.wa_identity_link(uuid, text, text)                   to service_role;
 grant  execute on function public.link_token_consume(text, text, text, text)           to service_role;

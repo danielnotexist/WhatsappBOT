@@ -78,6 +78,8 @@ export interface OtpIssueInput {
   maxPerMailbox: number;
   /** all codes of the last hour, every address (the mail quota); null = no ceiling */
   maxGlobal: number | null;
+  /** one requester's codes of the last hour across every address; null/undefined = no cap */
+  maxPerRequesterAll?: number | null;
   /** MemoryDb only (the test clock); SQL uses the database time */
   now?: Date;
 }

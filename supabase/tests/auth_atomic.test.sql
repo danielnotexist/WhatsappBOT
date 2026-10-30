@@ -63,6 +63,15 @@ update public.auth_otps set used_at = now() where email = 'otp-c@example.com';
 select pg_temp.check('otp_issue: a code spent by a clean sign-in lifts the cooldown',
   pg_temp.issue('otp-c@example.com', 'ip7', 'chS2', 'hS2') ->> 'status' = 'ok');
 
+-- one requester across every address (p_max_per_requester_all)
+insert into public.auth_otps (email, mailbox, requester, code_hash, expires_at, created_at)
+select 'many' || g || '@example.com', 'many' || g || '@example.com', 'ip-many', 'x', now(), now() - interval '5 minutes'
+  from generate_series(1, 3) g;
+select pg_temp.check('otp_issue: a requester over its cap across addresses → too_many',
+  public.otp_issue('many-new@example.com', 'many-new@example.com', 'ip-many', 'c', 'h', now() + interval '10 minutes', 60, 5, 10, null, 3) ->> 'status' = 'too_many');
+select pg_temp.check('otp_issue: another requester is not held by that cap',
+  public.otp_issue('many-new@example.com', 'many-new@example.com', 'ip-other', 'c', 'h', now() + interval '10 minutes', 60, 5, 10, null, 3) ->> 'status' = 'ok');
+
 -- per-requester cap (5 / hour)
 insert into public.auth_otps (email, mailbox, requester, code_hash, expires_at, created_at)
 select 'otp-b@example.com', 'otp-b@example.com', 'ip9', 'x', now(), now() - interval '10 minutes' from generate_series(1, 5);

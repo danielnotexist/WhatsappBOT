@@ -258,6 +258,7 @@ export class MemoryDb implements Db {
     const last = mine.filter((o) => !o.used_at || o.attempts > 0).reduce((m, o) => Math.max(m, Date.parse(o.created_at)), -Infinity);
     if (last > t - input.cooldownMs) return { status: "cooldown", retryAfterSeconds: Math.max(1, Math.ceil((last + input.cooldownMs - t) / 1000)) };
     if (mine.filter((o) => Date.parse(o.created_at) > hourAgo).length >= input.maxPerRequester) return { status: "too_many", retryAfterSeconds: 3600 };
+    if (input.maxPerRequesterAll != null && this.otps.filter((o) => o.requester === input.requester && Date.parse(o.created_at) > hourAgo).length >= input.maxPerRequesterAll) return { status: "too_many", retryAfterSeconds: 3600 };
     if (this.otps.filter((o) => o.mailbox === input.mailbox && Date.parse(o.created_at) > hourAgo).length >= input.maxPerMailbox) return { status: "too_many", retryAfterSeconds: 3600 };
     if (input.maxGlobal !== null && this.otps.filter((o) => Date.parse(o.created_at) > hourAgo).length >= input.maxGlobal) return { status: "busy", retryAfterSeconds: 600 };
     for (const o of this.otps) if (o.email === input.email && o.requester === input.requester && !o.used_at) o.used_at = iso(new Date(t));

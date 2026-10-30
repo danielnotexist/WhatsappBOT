@@ -99,6 +99,20 @@ describe("/api/pay/* and /api/jobs/run", () => {
     expect((await mockGet(new Request("https://app.example.co.il/api/pay/mock?Amount=99&Order=x"))).status).toBe(404);
   });
 
+  it("no real terminal (only HYP's public 00100 test terminal): a signed-looking return activates nothing", async () => {
+    vi.stubEnv("DATA_MODE", "supabase");
+    vi.stubEnv("DEMO_MODE", "0");
+    vi.stubEnv("HYP_MASOF", "0010012345");
+    vi.stubEnv("HYP_KEY", "k");
+    vi.stubEnv("HYP_PASSP", "p");
+    const verify = vi.spyOn(hyp, "verifyRedirect");
+    const user = await db.createUser("dana@example.com");
+    const res = await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=1&CCode=0&Amount=249&Order=${user.id}:pro&Sign=x`));
+    expect(res.status).toBe(303);
+    expect(verify).not.toHaveBeenCalled();
+    expect((await db.getSubscription(user.id))?.plan ?? "trial").toBe("trial");
+  });
+
   it("a browser that is not signed in lands on /pay/done with a result code, never with text from the URL", async () => {
     session.signedIn = false;
     const user = await db.createUser("dana@example.com");

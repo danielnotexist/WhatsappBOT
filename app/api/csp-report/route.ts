@@ -1,3 +1,4 @@
+import { DownloadTooLargeError, readCapped } from "@/lib/http/capped-body";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
 
 /**
@@ -59,11 +60,10 @@ export async function POST(request: Request): Promise<Response> {
   if (length > MAX_BODY_BYTES) return empty(413);
   let body: unknown;
   try {
-    const text = await request.text();
-    if (text.length > MAX_BODY_BYTES) return empty(413);
-    body = JSON.parse(text);
-  } catch {
-    return empty(400);
+    // read in chunks and stopped past the cap: a chunked upload has no Content-Length to refuse up front
+    body = JSON.parse(new TextDecoder().decode(await readCapped(request as unknown as Response, MAX_BODY_BYTES)));
+  } catch (e) {
+    return empty(e instanceof DownloadTooLargeError ? 413 : 400);
   }
   for (const line of summarizeReports(body)) console.warn(`[csp] ${line}`);
   return empty(204);

@@ -240,6 +240,14 @@ describe("abuse (security round B)", () => {
     expect((await send("dana@example.com", "1.1.1.1")).ok).toBe(true);
   });
 
+  it("one requester sending to many addresses hits its own hourly cap, not the site-wide ceiling", async () => {
+    const { deps } = setup();
+    deps.limiter = { hit: () => true } as unknown as typeof deps.limiter; // past the per-instance limiter (another instance)
+    for (let i = 0; i < OTP_POLICY.maxSendsPerIpPerHour; i++) expect((await sendOtp(deps, `rand${i}@example.com`, "6.6.6.6")).ok).toBe(true);
+    expect(await sendOtp(deps, "rand-last@example.com", "6.6.6.6")).toMatchObject({ ok: false, code: "too_many" });
+    expect((await sendOtp(deps, "dana@example.com", "1.1.1.1")).ok).toBe(true);
+  });
+
   it("plus-addresses and Gmail dots share one hourly backstop", async () => {
     const { send } = setup();
     for (let i = 0; i < OTP_POLICY.maxPerHourPerMailbox; i++) expect((await send(`d.ana+${i}@gmail.com`, `10.0.0.${i}`)).ok).toBe(true);

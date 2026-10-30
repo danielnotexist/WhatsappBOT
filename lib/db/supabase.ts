@@ -371,6 +371,7 @@ export class SupabaseDb implements Db {
       p_max_per_requester: input.maxPerRequester,
       p_max_per_mailbox: input.maxPerMailbox,
       p_max_global: input.maxGlobal,
+      p_max_per_requester_all: input.maxPerRequesterAll ?? null,
     });
     if (error) this.fail("issueOtp", error);
     const r = data as { status: OtpIssueResult["status"]; retry_after?: number; id?: string };

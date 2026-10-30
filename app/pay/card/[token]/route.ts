@@ -4,7 +4,7 @@ import { getBillingContext } from "@/lib/billing";
 import { verifyCardLinkToken } from "@/lib/billing/links";
 import { payResultUrl, type PayResult } from "@/lib/billing/result";
 import { startCardUpdate } from "@/lib/billing/service";
-import { EnvError, unavailable } from "@/lib/env";
+import { EnvError, paymentsOpen, unavailable } from "@/lib/env";
 
 /**
  * [עדכון כרטיס] from WhatsApp (or "לעדכון הכרטיס" on /pay/<token>) → a fresh HYP page for this click: J2 card
@@ -20,6 +20,7 @@ export async function GET(request: Request, ctx: RouteContext<"/pay/card/[token]
   const back = (result: PayResult, error: string) => Response.redirect(payResultUrl(origin, { signedIn, result, message: error }).toString(), 303);
   const link = verifyCardLinkToken(token);
   if (!link) return back("card_link", 'הקישור לעדכון הכרטיס לא בתוקף. אפשר לבקש קישור חדש בשיחה: "עדכון כרטיס".');
+  if (!paymentsOpen()) return back("card_unavailable", "עדכון הכרטיס ייפתח יחד עם התשלום, בקרוב.");
   try {
     await ensureDemoSessionUser();
     const billing = getBillingContext();
