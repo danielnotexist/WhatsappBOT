@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryDb } from "@/lib/db/memory";
 import { activeGoogleConnection } from "@/lib/google";
 import { activeMicrosoftConnection } from "@/lib/ms";
-import { DELETE_CONFIRM_WORD, cancelSubscriptionFor, deleteAccountFor, disconnectConnectionFor, replaceOtherConnections, unlinkPhoneFor } from "./service";
+import { DELETE_CONFIRM_WORD, cancelSubscriptionFor, deleteAccountFor, deletedEmailRef, disconnectConnectionFor, replaceOtherConnections, unlinkPhoneFor } from "./service";
 
 describe("account service", () => {
   it("disconnects only the owner's connection and audits it", async () => {
@@ -56,6 +56,7 @@ describe("account service", () => {
   });
 
   it("deletes the account only with the confirmation word, revoking and cancelling first", async () => {
+    vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 7).toString("base64"));
     const db = new MemoryDb();
     const a = await db.createUser("a@b.co");
     db.seedConnection(a.id, "google", "a@gmail.com");
@@ -65,6 +66,23 @@ describe("account service", () => {
     expect(await deleteAccountFor(db, a.id, ` ${DELETE_CONFIRM_WORD} `)).toMatchObject({ ok: true });
     expect(await db.getUser(a.id)).toBeNull();
     expect(await db.listConnections(a.id)).toEqual([]);
-    expect(db.audit.some((x) => x.action === "account.delete" && x.target === "a@b.co")).toBe(true);
+    // the row outlives the account: a keyed hash of the address, never the address (security round H)
+    const row = db.audit.find((x) => x.action === "account.delete")!;
+    expect(row.user_id).toBeNull();
+    expect(row.target).toMatch(/^hmac:[A-Za-z0-9_-]{43}$/);
+    expect(row.target).toBe(deletedEmailRef(" A@b.co "));
+    expect(JSON.stringify(db.audit)).not.toContain("a@b.co");
+    vi.unstubAllEnvs();
+  });
+
+  it("deleting the account keeps its payments (billing records, 7 years) with the payer, and deletes its support tickets", async () => {
+    const db = new MemoryDb();
+    const a = await db.createUser("payer@b.co");
+    await db.updateUserProfile(a.id, { name: "דנה" });
+    await db.insertPayment({ user_id: a.id, hyp_trans_id: "T1", amount_ils: 99, ccode: "0", acode: null, invoice_url: null, raw: {} });
+    await db.createSupportTicket({ user_id: a.id, name: "דנה", email: "payer@b.co", subject: null, body: "שאלה", transcript: null });
+    expect(await deleteAccountFor(db, a.id, DELETE_CONFIRM_WORD)).toMatchObject({ ok: true });
+    expect(db.payments).toEqual([expect.objectContaining({ hyp_trans_id: "T1", user_id: null, payer_email: "payer@b.co", payer_name: "דנה" })]);
+    expect(db.supportTickets).toEqual([]);
   });
 });

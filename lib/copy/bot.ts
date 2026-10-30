@@ -154,9 +154,9 @@ export const copy = {
   "bill.trial_left_3": () => "—\nנשארו 3 הודעות בניסיון. אחרי זה המנוי: 99 ₪ לחודש.",
   "bill.trial_left_1": (payLink: string) => `—\nזו ההודעה הלפני-אחרונה בניסיון. כדי להמשיך בלי הפסקה:\n${payLink}`,
   "bill.trial_ended": (name: string | null, payLink: string) =>
-    `${name ? `${name}, 10 ההודעות של הניסיון נגמרו. תודה שניסית.` : "10 ההודעות של הניסיון נגמרו. תודה שניסית."}\n\nכדי להמשיך — מנוי של 99 ₪ לחודש (עד 750 הודעות), ביטול בכל רגע:\n${payLink}\n\nההודעה האחרונה שלך שמורה אצלי. ברגע שהתשלום יעבור, אמשיך ממנה.`,
+    `${name ? `${name}, 10 ההודעות של הניסיון נגמרו. תודה שניסית.` : "10 ההודעות של הניסיון נגמרו. תודה שניסית."}\n\nכדי להמשיך — מנוי של 99 ₪ לחודש (עד 750 הודעות), ביטול בכל רגע:\n${payLink}\n\nאחרי התשלום אפשר לשלוח שוב את ההודעה האחרונה, ואמשיך ממנה.`,
   "bill.trial_ended_repeat": (payLink: string) => `הניסיון הסתיים. אני כאן ברגע שהמנוי יופעל:\n${payLink}`,
-  "bill.payment_success": (planName: string, invoiceNote: string) => `החשבון פעיל. תודה.\nמסלול ${planName}, ${invoiceNote}\n\nממשיכה מאיפה שעצרנו.`,
+  "bill.payment_success": (planName: string, invoiceNote: string) => `החשבון פעיל. תודה.\nמסלול ${planName}, ${invoiceNote}\n\nההודעה האחרונה לפני התשלום לא טופלה. אפשר לשלוח אותה שוב, ואמשיך ממנה.`,
   "bill.payment_success_no_pending": (planName: string, invoiceNote: string) => `החשבון פעיל. תודה.\nמסלול ${planName}, ${invoiceNote}\n\nמה עושים קודם?`,
   "bill.payment_failed_initial": (payLink: string) => `התשלום לא עבר. לפעמים זה הבנק, לפעמים ספרה שגויה.\nאפשר לנסות שוב, גם עם כרטיס אחר:\n${payLink}`,
   "bill.past_due_blocked_reply": (updateLink: string) => `החשבון מושהה עד להסדרת התשלום:\n${updateLink}`,

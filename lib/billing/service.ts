@@ -179,6 +179,8 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
   const name = planNameHe(plan, cycle);
   const text = pendingInput ? copy["bill.payment_success"](name, "הקבלה נשלחה למייל.") : copy["bill.payment_success_no_pending"](name, "הקבלה נשלחה למייל.");
   const template = cycle === "annual" ? paymentSuccessTemplate({ plan: PLANS[plan].nameHe, amount: formatIls(priceOf(plan, cycle)), nextCharge: nextChargeAt ? shortDateHe(nextChargeAt) : "בעוד שנה", annual: true }) : { name: "payment_success", params: [PLANS[plan].nameHe, String(PLANS[plan].priceIls), "בעוד חודש"], buttons: [] };
+  // nothing replays the saved message (the copy asks to send it again): it is not kept after the payment
+  if (pendingInput !== null) await ctx.db.mergeUserProfile(user.id, { pending_input: null });
   const where = await deliver(ctx, user, { text, template });
   // the receipt in chat (inside the window: a document; the template above already says it was emailed)
   if (where?.windowOpen) await sendInvoice(ctx, user, { transId, amountIls, date: now, plan, nextChargeAt, cycle }, where);

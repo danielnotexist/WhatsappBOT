@@ -63,8 +63,7 @@ async function connectCallback(request: Request, url: URL, state: string, sso: R
   if (!user) return accountRedirect(request, "error", "החיבור לא הושלם: המצב לא זוהה (אולי הקישור פג). אפשר להתחיל שוב.");
   const pending = ((user.profile.oauth_pending as Record<string, unknown>)?.microsoft ?? {}) as { verifier?: string; admin?: boolean; meetings?: boolean; via?: string; returnTo?: string; started_at?: string };
   const returnTo = parseReturnTo(pending.returnTo);
-  const otherPending = (user.profile.oauth_pending as Record<string, unknown>) ?? {};
-  await db.mergeUserProfile(user.id, { oauth_pending: { ...otherPending, microsoft: null } });
+  await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: null } }, { deep: ["oauth_pending"] });
   if (!pending.started_at || Date.now() - Date.parse(pending.started_at) > STATE_TTL_MS) {
     await db.addAudit({ user_id: user.id, action: url.searchParams.get("admin_consent") ? "ms.admin_consent" : "ms.connect", result: "error:state_expired" });
     return finish(request, returnTo, "error", "החיבור לא הושלם: המצב לא זוהה (אולי הקישור פג). אפשר להתחיל שוב.");
@@ -89,9 +88,9 @@ async function connectCallback(request: Request, url: URL, state: string, sso: R
     const state2 = randomBytes(16).toString("base64url");
     const { verifier, challenge } = pkcePair();
     await db.mergeUserProfile(user.id, {
-      oauth_pending: { ...otherPending, microsoft: { state: state2, verifier, admin: false, meetings: false, started_at: new Date().toISOString(), via: pending.via ?? "web", returnTo } },
+      oauth_pending: { microsoft: { state: state2, verifier, admin: false, meetings: false, started_at: new Date().toISOString(), via: pending.via ?? "web", returnTo } },
       ms_meetings_consent: "admin_required",
-    });
+    }, { deep: ["oauth_pending"] });
     await db.addAudit({ user_id: user.id, action: "ms.connect", result: `retry_without_meetings:${reason}` });
     // the same browser goes on: its cookie now binds the fresh state
     return redirectSettingCookies(buildAuthorizeUrl(cfg, { state: state2, codeChallenge: challenge, loginHint: user.email, scopes: msScopesFor() }), [connectCookieHeader("microsoft", sealConnectPending({ provider: "microsoft", userId: user.id, state: state2 }))]);

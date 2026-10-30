@@ -80,10 +80,11 @@ select pg_temp.expect_state('a transcript of more than 20 messages is refused', 
 select pg_temp.expect_state('an unknown user is a foreign key violation', '23503',
   $sql$insert into public.support_tickets (user_id, name, email, body) values ('99999999-9999-4999-8999-999999999999', 'x', 'x@example.com', 'y')$sql$);
 
--- ---- the account is deleted: the ticket stays, without the link ----
+-- ---- the account is deleted: its ticket goes with it (0025; an anonymous ticket stays) ----
 delete from public.users where id = '91111111-1111-4111-8111-111111111111';
-select pg_temp.check('user deleted → the ticket stays with user_id null',
-  (select user_id is null from public.support_tickets where id = 'a1111111-1111-4111-8111-111111111111'));
+select pg_temp.check('user deleted → the ticket is deleted too (0025)',
+  not exists (select 1 from public.support_tickets where id = 'a1111111-1111-4111-8111-111111111111')
+  and exists (select 1 from public.support_tickets where id = 'a2222222-2222-4222-8222-222222222222'));
 
 -- ---- server only ----
 select pg_temp.check('RLS enabled',

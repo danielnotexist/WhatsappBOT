@@ -103,10 +103,10 @@ export async function GET(request: Request) {
 
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
-  const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
+  // only oauth_pending.google is written (atomic, one level deep): a Microsoft flow running meanwhile keeps its own
   await db.mergeUserProfile(user.id, {
-    oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, gmail_read: gmail.reason, drive_read: drive.reason, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
-  });
+    oauth_pending: { google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, gmail_read: gmail.reason, drive_read: drive.reason, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
+  }, { deep: ["oauth_pending"] });
   return redirectSettingCookies(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: account }), [connectCookieHeader("google", sealConnectPending({ provider: "google", userId: user.id, state }))]);
 }
 

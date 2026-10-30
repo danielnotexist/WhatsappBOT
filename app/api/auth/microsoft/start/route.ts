@@ -88,8 +88,8 @@ export async function GET(request: Request) {
   }
   const state = randomBytes(16).toString("base64url");
   const { verifier, challenge } = pkcePair();
-  const pendingOauth = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
-  await db.mergeUserProfile(user.id, { oauth_pending: { ...pendingOauth, microsoft: { state, verifier, admin, meetings, started_at: new Date().toISOString(), via: t ? "chat" : "web", returnTo } } });
+  // only oauth_pending.microsoft is written (atomic, one level deep): a Google flow running meanwhile keeps its own
+  await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { state, verifier, admin, meetings, started_at: new Date().toISOString(), via: t ? "chat" : "web", returnTo } } }, { deep: ["oauth_pending"] });
   const dest = admin
     ? buildAdminConsentUrl(cfg, { state, redirectUri: cfg.redirectUri, tenant: url.searchParams.get("tenant") ?? "organizations", scopes: msAdminScopesFor({ meetings }) })
     : buildAuthorizeUrl(cfg, { state, codeChallenge: challenge, loginHint: user.email, scopes: msScopesFor({ meetings }) });

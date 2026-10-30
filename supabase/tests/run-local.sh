@@ -163,4 +163,17 @@ linked="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select count(*) from pu
 [[ "$linked" == "1" ]] || { echo "✖ race: link_token_consume — $linked phones linked"; exit 1; }
 echo "ok - race: one link token from two phones at once → one phone"
 
+# profile_merge (0025): two writers of one profile at once → both keys kept (no read-modify-write lost update)
+run -d "$DB_NAME" -c "insert into public.users (id, email, profile) values ('c4444444-4444-4444-8444-444444444401', 'race-profile@example.com', '{\"login_token\": null}')"
+merge_a="$(mktemp)"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select count(*) from public.profile_merge('c4444444-4444-4444-8444-444444444401', '{\"ra\": 1}'); select pg_sleep(2); commit;" >"$merge_a" 2>&1 &
+pid_merge=$!
+sleep 0.7
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select count(*) from public.profile_merge('c4444444-4444-4444-8444-444444444401', '{\"rb\": 1}')" >/dev/null
+wait "$pid_merge" || { cat "$merge_a"; echo "✖ race: profile_merge — the first writer failed"; exit 1; }
+rm -f "$merge_a"
+both="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select profile ? 'ra' and profile ? 'rb' from public.users where id = 'c4444444-4444-4444-8444-444444444401'")"
+[[ "$both" == "t" ]] || { echo "✖ race: profile_merge — a concurrent write was lost"; exit 1; }
+echo "ok - race: two profile writers at once → both keys kept"
+
 echo "SUPABASE LOCAL: ALL TESTS PASSED"

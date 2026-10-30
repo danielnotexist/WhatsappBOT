@@ -203,7 +203,8 @@ export interface SubscriptionSecret {
 
 export interface PaymentRow {
   id: string;
-  user_id: string;
+  /** null once the account was deleted: the billing record stays (7 years, migration 0025) */
+  user_id: string | null;
   hyp_trans_id: string;
   amount_ils: number;
   ccode: string;
@@ -215,6 +216,9 @@ export interface PaymentRow {
   approval_id?: string | null;
   /** migration 0018: the cycle this payment paid for (absent / monthly on older rows) */
   billing_cycle?: BillingCycleKind;
+  /** migration 0025: the payer's email and name, written when the account is deleted (user_id → null) */
+  payer_email?: string | null;
+  payer_name?: string | null;
 }
 
 export type JobKind = "morning_summary" | "reminder" | "renew_subscription" | "charge" | "retry" | "proactive_scan" | "meeting_plan" | "meeting_summary" | "owner_alerts";
@@ -815,8 +819,12 @@ export interface Db {
 
   /** user whose profile.oauth_pending.<provider>.state equals `state` (OAuth callback lookup) */
   findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null>;
-  /** Deep-merges into users.profile (top-level keys replaced). */
-  mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow>;
+  /**
+   * Merges into users.profile in one atomic write (0025 profile_merge: `profile || patch`): top-level keys of `patch`
+   * replace the stored ones, every other key is kept even when another request wrote it meanwhile. Keys named in
+   * `deep` are merged one level down (oauth_pending: { microsoft: … } leaves oauth_pending.google alone).
+   */
+  mergeUserProfile(id: string, patch: Record<string, unknown>, opts?: { deep?: readonly string[] }): Promise<UserRow>;
 
   // wa_identities
   listWaIdentities(userId: string): Promise<WaIdentityRow[]>;

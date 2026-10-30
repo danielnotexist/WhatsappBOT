@@ -46,7 +46,7 @@ describe("billing service", () => {
     expect(args).toMatchObject({ Amount: 99, Coin: 1, Order: `${user.id}:basic`, Sign: true, MoreData: true, SendHesh: true, email: "dana@example.com", PageLang: "HEB", ClientName: "דנה", ClientLName: "לוי", Pritim: true, heshDesc: "[0~מנוי בסיסי — חודש~1~99]" });
   });
 
-  it("completes a verified payment: token saved, plan active, WhatsApp notified, pending input resumed", async () => {
+  it("completes a verified payment: token saved, plan active, WhatsApp notified, the unhandled message: ask to resend, then forget it", async () => {
     const { ctx, db, wa } = setup();
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
@@ -58,7 +58,8 @@ describe("billing service", () => {
     // inside the 24h window → free text, then the invoice as a document (our signed /invoice link)
     expect(wa.sent.map((x) => x.kind)).toEqual(["text", "document"]);
     expect(wa.sent[0]!.body).toContain("החשבון פעיל");
-    expect(wa.sent[0]!.body).toContain("ממשיכה מאיפה שעצרנו");
+    expect(wa.sent[0]!.body).toContain("אפשר לשלוח אותה שוב");
+    expect((await db.getUser(user.id))!.profile.pending_input).toBeNull();
     expect((wa.sent[1]!.extra as { link: string }).link).toMatch(/^https:\/\/app\.example\.co\.il\/invoice\//);
     expect(wa.sent[1]!.body).toBe("קבלה — 99 ₪, 20.10.2026");
     expect(await db.countTrialMessage(user.id)).toBe(749);

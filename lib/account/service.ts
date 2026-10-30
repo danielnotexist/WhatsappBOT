@@ -1,3 +1,4 @@
+import { derivedKey, hmac } from "@/lib/auth/keys";
 import { cycleOf, isPaidPlan, priceOf } from "@/lib/billing/plans";
 import type { ConnectionRow, Db } from "@/lib/db/types";
 import { revokeAtProvider } from "@/lib/google/revoke";
@@ -10,6 +11,20 @@ export type AccountActionResult = { ok: true; message: string } | { ok: false; m
 export type ProviderRevoker = (db: Db, connection: ConnectionRow) => Promise<unknown>;
 
 export const DELETE_CONFIRM_WORD = "מחיקה";
+
+/**
+ * What the account.delete audit row keeps of the address: a keyed hash (HMAC, "audit" sub-key of TOKEN_ENC_KEY), never
+ * the address itself — the row outlives the account (until the 24-month purge) and the policy promises the account's
+ * data is gone within 30 days. The owner can still answer "was this address deleted?" by hashing it again; without
+ * the key nobody can. null when there is no key to hash with.
+ */
+export function deletedEmailRef(email: string): string | null {
+  try {
+    return `hmac:${hmac(derivedKey("audit"), email.trim().toLowerCase()).toString("base64url")}`;
+  } catch {
+    return null;
+  }
+}
 
 export async function disconnectConnectionFor(db: Db, userId: string, connectionId: string, revoke: ProviderRevoker = revokeAtProvider): Promise<AccountActionResult> {
   if (!connectionId) return { ok: false, message: "לא נבחר חיבור." };
@@ -106,7 +121,7 @@ export async function deleteAccountFor(db: Db, userId: string, confirmWord: stri
   }
   const sub = await db.getSubscription(userId);
   if (sub && sub.status !== "cancelled") await db.cancelSubscription(userId);
-  await db.addAudit({ user_id: null, action: "account.delete", target: user.email, result: "ok" });
+  await db.addAudit({ user_id: null, action: "account.delete", target: deletedEmailRef(user.email), result: "ok" });
   await db.deleteUser(userId);
   return { ok: true, message: "החשבון נמחק." };
 }

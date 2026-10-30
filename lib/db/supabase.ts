@@ -170,10 +170,32 @@ export class SupabaseDb implements Db {
     return (data as unknown as UserRow | null) ?? null;
   }
 
-  async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
+  /** One atomic UPDATE (0025 profile_merge): never a read-modify-write of the whole profile. */
+  async mergeUserProfile(id: string, patch: Record<string, unknown>, opts: { deep?: readonly string[] } = {}): Promise<UserRow> {
+    if (!UUID_RE.test(id)) throw new Error("user not found");
+    const { data, error } = await this.client.rpc("profile_merge", { p_user_id: id, p_patch: patch, p_deep: [...(opts.deep ?? [])] });
+    if (error) {
+      if (/user not found/.test(error.message)) throw new Error("user not found");
+      // 0025 not applied yet: the old read-then-write, loudly, so a deploy ahead of the migration keeps working
+      if ((error as { code?: string }).code === "PGRST202" || /could not find the function/i.test(error.message)) {
+        console.error("[db] profile_merge missing — run supabase/migrations/0025_privacy_retention.sql; using the non-atomic merge");
+        return this.mergeUserProfileUnsafe(id, patch, opts.deep ?? []);
+      }
+      this.fail("mergeUserProfile", error);
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+    if (!row) throw new Error("user not found");
+    const cols = SupabaseDb.USER_COLS.split(",");
+    return Object.fromEntries(cols.map((c) => [c, row[c] ?? null])) as unknown as UserRow;
+  }
+
+  private async mergeUserProfileUnsafe(id: string, patch: Record<string, unknown>, deep: readonly string[]): Promise<UserRow> {
     const current = await this.getUser(id);
     if (!current) throw new Error("user not found");
-    return this.updateUserProfile(id, { profile: { ...current.profile, ...patch } } as Partial<UserRow>);
+    const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+    const next: Record<string, unknown> = { ...current.profile };
+    for (const [key, value] of Object.entries(patch)) next[key] = deep.includes(key) && isObject(value) && isObject(next[key]) ? { ...next[key], ...value } : value;
+    return this.updateUserProfile(id, { profile: next } as Partial<UserRow>);
   }
 
   async findWaIdentityByPhone(phoneE164: string): Promise<WaIdentityRow | null> {

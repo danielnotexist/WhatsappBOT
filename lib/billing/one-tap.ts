@@ -346,6 +346,8 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   // then a free month waiting for a charge (lib/referrals) moves the next one — after the lock is released
   const withCredit = async (out: Extract<ClaimedChargeOutcome, { kind: "charged" }>): Promise<ClaimedChargeOutcome> => {
     const credit = await applyPendingCredit(ctx.db, user.id, now);
+    // a message saved at the limit or while paused is never replayed (resendHint asks for it again): not kept after a charge
+    if (typeof user.profile.pending_input === "string" && !out.resendHint) await ctx.db.mergeUserProfile(user.id, { pending_input: null });
     return credit.nextChargeAt ? { ...out, nextChargeAt: credit.nextChargeAt } : out;
   };
   if (annualSwitch) {

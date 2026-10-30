@@ -101,9 +101,9 @@ describe("/api/support/ticket — a ticket", () => {
     expect((await send(req({ ...valid, email: "noa@example.com" }))).status).toBe(200);
     expect(db.supportTickets[0]!.user_id).toBe(user.id);
     expect(mailer.tickets[0]!.text).toContain(`משתמש רשום: כן (${user.id})`);
-    // the account is deleted later: the ticket stays, unlinked (SQL: on delete set null)
+    // the account is deleted later: its ticket goes with it (0025: on delete cascade)
     await db.deleteUser(user.id);
-    expect(db.supportTickets[0]!.user_id).toBeNull();
+    expect(db.supportTickets).toEqual([]);
     jar.set(SESSION_COOKIE, "v1.forged.123.abc");
     expect(await (await GET()).json()).toEqual({ ok: true, email: null });
   });

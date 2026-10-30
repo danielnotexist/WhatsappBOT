@@ -185,10 +185,18 @@ export class MemoryDb implements Db {
     return null;
   }
 
-  async mergeUserProfile(id: string, patch: Record<string, unknown>): Promise<UserRow> {
+  /** Mirrors public.profile_merge() (0025): shallow, and one level down for the `deep` keys. */
+  async mergeUserProfile(id: string, patch: Record<string, unknown>, opts: { deep?: readonly string[] } = {}): Promise<UserRow> {
     const u = this.users.get(id);
     if (!u) throw new Error("user not found");
-    u.profile = { ...u.profile, ...patch };
+    const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+    const next: Record<string, unknown> = { ...u.profile };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === undefined) continue; // JSON drops it, like the SQL patch
+      const prev = next[key];
+      next[key] = opts.deep?.includes(key) && isObject(value) && isObject(prev) ? { ...prev, ...value } : value;
+    }
+    u.profile = next;
     return u;
   }
 
@@ -200,6 +208,7 @@ export class MemoryDb implements Db {
   }
 
   async deleteUser(id: string): Promise<void> {
+    const deleted = this.users.get(id);
     this.users.delete(id);
     this.linkTokens = this.linkTokens.filter((t) => t.user_id !== id);
     for (const [k, v] of this.connectLinkUses) if (v.userId === id) this.connectLinkUses.delete(k);
@@ -218,7 +227,15 @@ export class MemoryDb implements Db {
     this.agents = this.agents.filter((a) => a.user_id !== id);
     this.billingApprovals = this.billingApprovals.filter((a) => a.user_id !== id);
     for (const key of [...this.aiSpendUsers.keys()]) if (key.endsWith(`|${id}`)) this.aiSpendUsers.delete(key); // the day totals stay
-    for (const t of this.supportTickets) if (t.user_id === id) t.user_id = null; // SQL: on delete set null
+    // 0025: the account's support tickets go with it (on delete cascade); its payments stay (7 years) without the link,
+    // with the payer's email and name (the users_keep_payer trigger)
+    this.supportTickets = this.supportTickets.filter((t) => t.user_id !== id);
+    for (const p of this.payments) {
+      if (p.user_id !== id) continue;
+      p.payer_email ??= deleted?.email ?? null;
+      p.payer_name ??= deleted?.name ?? null;
+      p.user_id = null;
+    }
     this.proactiveAlerts = this.proactiveAlerts.filter((a) => a.user_id !== id);
     this.meetingSummaries = this.meetingSummaries.filter((s) => s.user_id !== id);
     this.supportChats = this.supportChats.filter((c) => c.user_id !== id); // SQL: on delete cascade

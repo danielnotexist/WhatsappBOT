@@ -337,9 +337,12 @@ describe("failed renewals in WhatsApp", () => {
     await processInbound(p.h.ctx, p.h.inbound("מה יש לי מחר?"));
     expect(p.last().body).toContain("החשבון מושהה עד להסדרת התשלום. אפשר להסדיר כאן בלחיצה:");
     expect(p.last().buttons!.map((b) => b.title)).toEqual(["ניסיון חוזר", "עדכון כרטיס"]);
+    expect((await p.h.db.getUser(p.user.id))!.profile.pending_input).toBe("מה יש לי מחר?");
     await processInbound(p.h.ctx, p.h.button(p.okButton(), "ניסיון חוזר"));
     expect(p.charges()).toHaveLength(1);
     expect(await p.h.db.getSubscription(p.user.id)).toMatchObject({ status: "active", charge_failures: 0, next_charge_at: "2026-11-20T08:00:00.000Z" });
+    // the message saved while paused is never replayed: it is not kept after the charge
+    expect((await p.h.db.getUser(p.user.id))!.profile.pending_input).toBeNull();
   });
 
   it("a template quick reply pressed later than 10 minutes gets a fresh offer; a running monthly charge blocks the press", async () => {

@@ -59,7 +59,7 @@ async function connectCallback(request: Request, url: URL, state: string, sso: R
 
   const allPending = (user.profile.oauth_pending as Record<string, unknown> | undefined) ?? {};
   const pending = (allPending.google ?? {}) as PendingGoogle;
-  await db.mergeUserProfile(user.id, { oauth_pending: { ...allPending, google: null } });
+  await db.mergeUserProfile(user.id, { oauth_pending: { google: null } }, { deep: ["oauth_pending"] });
   const returnTo: OAuthReturnTo = parseReturnTo(pending.returnTo);
   const back = (outcome: { ok: true; notice: string } | { ok: false; error: string }) => Response.redirect(oauthReturnUrl(appUrl, returnTo, "google", outcome), 303);
   // bound to the browser that started it, and to the signed-in account when there is one
