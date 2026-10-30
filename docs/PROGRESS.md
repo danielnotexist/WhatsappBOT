@@ -1277,3 +1277,17 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **בדיקות:** `supabase/tests/ai_spend_pools.test.sql`, `lib/bot/approval-cards.test.ts`, `lib/ai/untrusted-turn.test.ts`, `lib/db/supabase-security-f.test.ts`, `lib/http/capped-body.test.ts`, `lib/ai/memory.test.ts`, `lib/ai/budget.test.ts`, `lib/bot/voice.test.ts`, `lib/bot/pending.test.ts`, `lib/meetings/find.test.ts`, `app/api/support/chat/support-chat-route.test.ts` (ועדכונים לבדיקות הכרטיסים וההתראות).
 
 **דרוש מדניאל:** להריץ את `0024_ai_spend_pools.sql` ב-Supabase **לפני** הפריסה (בלעדיה צ'אט התמיכה עונה ממאגר הידע בלבד — שגיאת RPC נבלעת). אופציונלי: `SUPPORT_AI_DAILY_BUDGET_USD` ב-Vercel (ברירת מחדל 0.5).
+
+### 2026-10-30 — אבטחה, אזור G: כותרות אבטחה, הגדרות, תלויות ותיעוד
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **ה-matcher של `proxy.ts`** כבר לא מדלג על כל נתיב שנגמר ב-.png / .svg וכו'. מדלגים רק על `_next/static`, `_next/image`, הקבצים האמיתיים ב-`public/brand/` וקבצי המטא של האפליקציה (favicon, robots, sitemap, icon). לכן `/pay/<token>.png` מקבל את כל הכותרות והשערים.
+- **גיבוי ב-`next.config.ts` (`headers()`)**: אותן כותרות בכל נתיב, ממקור אחד (`lib/security-headers.ts`). המיקרופון מותר רק ב-`/demo/chat`.
+- **CSP:** נשאר Report-Only. nonce לא אפשרי עם `cacheComponents` (PPR): המעטפת הסטטית נבנית מראש ולא יכולה לשאת nonce לכל בקשה. ההסבר המלא נמצא ב-`lib/security-headers.ts`. נוספו `report-uri` / `report-to` לנקודת קצה חדשה, `POST /api/csp-report`: לוג בלבד, מוגבלת לפי IP ובסך הכול, ו-URL נחתך למקור ולמקטע הראשון כדי שטוקן של `/pay/` לא יגיע ללוג. `img-src` רק מהאתר, ו-Supabase הוסר מ-`connect-src` (הדפדפן לא פונה למסד).
+- **`.gitignore`:** כל קובץ `.env.*` חוץ מקובצי ה-example, וגם `.vercel/`.
+- **תלויות:** `shadcn` (כלי CLI, נדרש רק לבנייה בגלל `shadcn/tailwind.css`) עבר ל-devDependencies. `pnpm audit --prod`: לפני 1 high + 1 low, אחרי 0. `cn` נשאר (בשימוש, מבית shadcn-ui).
+- **תיעוד:** מזהה הפרויקט ב-Supabase ושם הצוות הישן ב-Vercel הוסרו מ-`docs/migration-he.md`. `.env.example` הושלם (`MAIL_FROM`, `LIVE_WA/MS/GOOGLE/SUPPORT_MAIL`, `AI_ROUTER_MODEL`, `AI_STRONG_MODEL`).
+
+**בדיקות:** `proxy.test.ts` (matcher, CSP, `next.config` headers), `app/api/csp-report/csp-report-route.test.ts`. נבדק גם ב-`next start`: `/pay/x.y.png` מחזיר X-Frame-Options ו-CSP.
+
+**דרוש מדניאל:** אין. מזהה הפרויקט עדיין קיים בהיסטוריית git, והוא לא סוד.

@@ -1,8 +1,12 @@
 node_modules/
 .next/
+# every env file except the documented examples (a real .env.production must never reach the public repo)
 .env
-.env.local
+.env.*
 .env*.local
+!.env.example
+!scripts/hebrew-eval/.env.example
+.vercel/
 results/
 *.log
 .DS_Store

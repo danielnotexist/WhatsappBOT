@@ -1,6 +1,6 @@
 # מעבר לחשבונות האמיתיים (GitHub + Vercel)
 
-Supabase נשאר במקומו (`wrlmfpixcpqezakslzwz`, פרנקפורט). הכתובת החדשה: **https://alze-nine.vercel.app** (זמנית, עד שיהיה דומיין).
+Supabase נשאר במקומו (אותו פרויקט, פרנקפורט; המזהה בדשבורד בלבד). הכתובת החדשה: **https://alze-nine.vercel.app** (זמנית, עד שיהיה דומיין).
 
 ## מצב (25.10)
 - ✅ הריפו: `danielnotexist/WhatsappBOT`, ענף ברירת מחדל `main`.
@@ -41,7 +41,7 @@ Supabase נשאר במקומו (`wrlmfpixcpqezakslzwz`, פרנקפורט). הכ�
 | HYP | בדיקה אם מוגדרות כתובות בפאנל של HYP | 🤖 בודק, ✋ מעדכן |
 
 ## 5. אחרי 24 שעות תקינות
-- ✋ להשבית את הפרויקט הישן ב-Vercel (danielnotexist404s-projects/alze).
+- ✋ להשבית את הפרויקט הישן ב-Vercel.
 - ✋ להסיר את כתובות החזרה הישנות מ-Entra ומ-Google.
 
 ## אחר כך

@@ -130,7 +130,38 @@ describe("proxy.ts security headers", () => {
     expect(re.test("/start")).toBe(true);
     expect(re.test("/api/health")).toBe(true);
     expect(re.test("/_next/static/chunks/main.js")).toBe(false);
+    expect(re.test("/_next/image")).toBe(false);
     expect(re.test("/favicon.ico")).toBe(false);
-    expect(re.test("/images/hero.png")).toBe(false);
+    expect(re.test("/brand/mascot/front.webp")).toBe(false);
+    expect(re.test("/icon.png")).toBe(false);
+  });
+
+  it("never skips a dynamic route because its path ends in a file extension (/pay/<token>.png keeps the headers)", () => {
+    const [pattern] = config.matcher;
+    const re = new RegExp(`^${pattern}$`);
+    for (const path of ["/pay/abc.def.png", "/invoice/abc.svg", "/admin/users.woff2", "/login/w/x.webp", "/account.jpg", "/_next/staticx.png"]) {
+      expect(re.test(path), path).toBe(true);
+    }
+    expect(proxy("/pay/abc.def.png").headers.get("X-Frame-Options")).toBe("DENY");
+  });
+
+  it("CSP reports go to the site's own endpoint; no database host and no third-party images", () => {
+    expect(CSP_REPORT_ONLY).toContain("report-uri /api/csp-report");
+    expect(CSP_REPORT_ONLY).toContain("report-to csp");
+    expect(SECURITY_HEADERS["Reporting-Endpoints"]).toBe('csp="/api/csp-report"');
+    expect(CSP_REPORT_ONLY).not.toContain("supabase");
+    expect(CSP_REPORT_ONLY).toContain("img-src 'self' data: blob:;");
+  });
+
+  it("next.config.ts headers(): the same headers on every path as a backup, the mic only on the website chat", async () => {
+    const { default: nextConfig } = await import("./next.config");
+    const rules = await nextConfig.headers!();
+    const all = rules.find((r) => r.source === "/:path*")!;
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      expect(all.headers.find((h) => h.key === name)?.value, name).toBe(value);
+    }
+    const last = rules.filter((r) => r.source === "/demo/chat").at(-1)!;
+    expect(last.headers.find((h) => h.key === "Permissions-Policy")?.value).toContain("microphone=(self)");
+    expect(rules.indexOf(last)).toBeGreaterThan(rules.indexOf(all));
   });
 });
