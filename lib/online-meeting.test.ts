@@ -109,7 +109,7 @@ describe("online meeting copy", () => {
       // titles in the assistant's own words are quoted with gershayim, not straight quotes
       expect(t).not.toContain('"');
     }
-    expect(copy["act.cal.create_confirm"]({ title: "t", date: "d", start: "10:00", end: "11:00", attendees: "a@b.co", online: "פגישת Teams" })).toContain("\nמשתתפים: a@b.co\nפגישת Teams\n");
+    expect(copy["act.cal.create_confirm"]({ title: "t", date: "d", start: "10:00", end: "11:00", attendees: "a@b.co", online: "פגישת Teams" })).toBe("*פגישה חדשה*\nמשתתפים: a@b.co\nt\nd, 10:00–11:00\nפגישת Teams\n\nלקבוע?");
     expect(copy["act.cal.create_confirm"]({ title: "t", date: "d", start: "10:00", end: "11:00", withoutLink: true }).endsWith("לקבוע בלי קישור?")).toBe(true);
   });
 });

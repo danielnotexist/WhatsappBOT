@@ -1,3 +1,4 @@
+import { readCapped } from "@/lib/http/capped-body";
 import { randomBytes, randomUUID } from "node:crypto";
 import { joinUrlInText, safeJoinUrl } from "@/lib/online-meeting";
 import { buildMimeMessage, toGmailRaw, type MimeMessageInput } from "./mime";
@@ -186,7 +187,7 @@ export class GoogleClient {
 
   async bytes(url: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
     const res = await this.send(url, { method: "GET" });
-    return { bytes: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get("content-type") };
+    return { bytes: await readCapped(res), contentType: res.headers.get("content-type") }; // MAX_DOWNLOAD_BYTES
   }
 
   // ---------- identity ----------

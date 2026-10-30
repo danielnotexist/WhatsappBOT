@@ -1,5 +1,5 @@
 import "server-only";
-import { BudgetExceededError, spendGuardFromEnv } from "@/lib/ai/budget";
+import { BudgetExceededError, supportGuardFromEnv } from "@/lib/ai/budget";
 import { getAiProvider } from "@/lib/ai";
 import type { ChatMessage } from "@/lib/ai/types";
 import { sanitizeUntrusted } from "@/lib/ai/untrusted";
@@ -88,7 +88,8 @@ function fromKnowledge(question: string): SupportChatResponse {
 async function modelAnswer(question: string, history: SupportTurn[]): Promise<SupportChatResponse | null> {
   if (aiMocked()) return null;
   try {
-    const guard = spendGuardFromEnv(getDb()); // throws EnvError for a deployed live demo on the in-memory store
+    // its own day (ai_spend_pools "support"): anonymous visitors cannot spend the bot's budget
+    const guard = supportGuardFromEnv(getDb()); // throws EnvError for a deployed live demo on the in-memory store
     if (!guard) return null;
     const ai = guard.anonymousAi(getAiProvider(), SUPPORT_AI_TIMEOUT_MS);
     const res = await ai.complete({ tier: SUPPORT_TIER, system: supportSystemPrompt(), messages: toMessages(history, question), maxTokens: SUPPORT_MAX_TOKENS });

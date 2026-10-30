@@ -78,6 +78,7 @@ interface RawDriveHit {
   name?: string;
   mimeType?: string;
   modifiedTime?: string;
+  ownedByMe?: boolean;
 }
 
 /**
@@ -85,6 +86,9 @@ interface RawDriveHit {
  * "… - תמליל"; Workspace editions with transcription) and attaches to the organiser's event. First the event's
  * attachments, then a Drive search (drive.readonly) for a transcript Doc changed after the meeting began — the one
  * named after the meeting first. Exported as text/plain.
+ * Only a Doc the user owns counts: Meet saves the transcript in the organiser's own Drive, while anyone can attach a
+ * shared "… - Transcript" Doc to an invitation or share one named after the meeting — that would be summarised and
+ * pushed as the meeting's own record (with mail and task buttons).
  * The Meet REST API (conferenceRecords.transcripts) is not used: it needs meetings.space.readonly, a restricted scope
  * (CASA assessment), for meetings the app did not create (docs/google-setup.md).
  */
@@ -93,18 +97,25 @@ export async function meetTranscript(google: Pick<GoogleClient, "json" | "export
   if (!meetTranscriptsGranted(opts.scopes)) return { status: "consent", provider: "google" };
   try {
     let fileId = (m.attachments ?? []).find((a) => a.mimeType === GOOGLE_DOC_MIME && TRANSCRIPT_NAME.test(a.title))?.fileId ?? null;
+    if (fileId) {
+      const meta = await google.json<RawDriveHit>("GET", `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,mimeType,ownedByMe`).catch((e: unknown) => {
+        if (e instanceof GoogleApiError && e.notFound) return null;
+        throw e;
+      });
+      if (meta?.ownedByMe !== true) fileId = null;
+    }
     if (!fileId) {
       const since = new Date(m.startMs - 10 * 60_000).toISOString();
-      const q = [`mimeType = ${driveQueryLiteral(GOOGLE_DOC_MIME)}`, "trashed = false", `(name contains 'Transcript' or name contains 'תמליל')`, `modifiedTime > ${driveQueryLiteral(since)}`].join(" and ");
+      const q = [`mimeType = ${driveQueryLiteral(GOOGLE_DOC_MIME)}`, "trashed = false", `(name contains 'Transcript' or name contains 'תמליל')`, "'me' in owners", `modifiedTime > ${driveQueryLiteral(since)}`].join(" and ");
       const u = new URL("https://www.googleapis.com/drive/v3/files");
       u.searchParams.set("q", q);
       u.searchParams.set("pageSize", "20");
       u.searchParams.set("orderBy", "modifiedTime");
       u.searchParams.set("spaces", "drive");
-      u.searchParams.set("fields", "files(id,name,mimeType,modifiedTime)");
+      u.searchParams.set("fields", "files(id,name,mimeType,modifiedTime,ownedByMe)");
       const r = await google.json<{ files?: RawDriveHit[] }>("GET", u.toString());
       const title = m.title.trim().toLowerCase();
-      const hits = (r.files ?? []).filter((f) => (f.mimeType ?? GOOGLE_DOC_MIME) === GOOGLE_DOC_MIME && TRANSCRIPT_NAME.test(f.name ?? "") && (!f.modifiedTime || Date.parse(f.modifiedTime) >= m.startMs - 10 * 60_000));
+      const hits = (r.files ?? []).filter((f) => f.ownedByMe === true && (f.mimeType ?? GOOGLE_DOC_MIME) === GOOGLE_DOC_MIME && TRANSCRIPT_NAME.test(f.name ?? "") && (!f.modifiedTime || Date.parse(f.modifiedTime) >= m.startMs - 10 * 60_000));
       const named = title ? hits.filter((f) => (f.name ?? "").toLowerCase().includes(title)) : [];
       // the Doc named after the meeting; without one, only the single transcript Doc of the meeting's own window
       const inWindow = hits.filter((f) => !f.modifiedTime || Date.parse(f.modifiedTime) <= m.endMs + TRANSCRIPT_GRACE_MS);

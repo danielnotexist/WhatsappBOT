@@ -18,7 +18,7 @@ describe("bot copy", () => {
     expect(welcome).toContain("רואה רק מה ששולחים לי כאן");
     expect(copy["onb.welcome"](null).startsWith("ברוכים הבאים")).toBe(true);
     const draft = copy["act.mail.draft"]({ toName: "רונית", toEmail: "r@x.co", subject: "נושא", body: "שורה 1\nשורה 2" });
-    expect(draft).toContain("אל: רונית (r@x.co)");
+    expect(draft).toContain("אל: r@x.co (רונית)"); // the address first: the model-written name cannot pass for it
     expect(draft).toContain("> שורה 1\n> שורה 2");
     const sample = { toName: "רונית", toEmail: "r@x.co", subject: "s", body: "b", title: "t", date: "d", start: "09:00", end: "10:00" };
     for (const [id, fn] of Object.entries(copy)) {

@@ -1,4 +1,5 @@
 import { MAX_TEXT_CHARS, OFFICE_EXT, TEXT_EXT, extensionOf, pdfToText } from "@/lib/ms/files-text";
+import { MAX_DOWNLOAD_BYTES } from "@/lib/http/capped-body";
 import { GOOGLE_DOC_MIME, GOOGLE_SHEET_MIME, GOOGLE_SLIDES_MIME, type DriveFile, type GoogleClient } from "./client";
 
 /** Office uploads are converted through a temporary Google Doc/Sheet/Slides copy (multipart upload limit). */
@@ -30,12 +31,14 @@ const decode = (bytes: Uint8Array) => new TextDecoder("utf-8").decode(bytes).rep
 export async function driveFileText(g: GoogleClient, file: DriveFile): Promise<{ text: string; pages: number | null; truncated: boolean } | { error: "too_large" } | null> {
   let text: string;
   let pages: number | null = null;
+  let partial = false;
   const ext = extensionOf(file.name);
   const exportAs = EXPORT_AS[file.mimeType];
   if (exportAs) {
     text = decode((await g.exportFile(file.id, exportAs)).bytes);
   } else if (file.mimeType === "application/pdf" || ext === "pdf") {
-    ({ text, pages } = await pdfToText((await g.downloadFile(file.id)).bytes));
+    if (file.size !== null && file.size > MAX_DOWNLOAD_BYTES) return { error: "too_large" };
+    ({ text, pages, partial } = await pdfToText((await g.downloadFile(file.id)).bytes));
   } else if (OFFICE_EXT.has(ext) && OFFICE_TARGET[ext]) {
     if (file.size !== null && file.size > MAX_CONVERT_BYTES) return { error: "too_large" };
     const { bytes } = await g.downloadFile(file.id);
@@ -53,6 +56,6 @@ export async function driveFileText(g: GoogleClient, file: DriveFile): Promise<{
     return null;
   }
   text = text.replace(/\r\n/g, "\n").trim();
-  const truncated = text.length > MAX_TEXT_CHARS;
-  return { text: truncated ? text.slice(0, MAX_TEXT_CHARS) : text, pages, truncated };
+  const truncated = partial || text.length > MAX_TEXT_CHARS;
+  return { text: text.slice(0, MAX_TEXT_CHARS), pages, truncated };
 }

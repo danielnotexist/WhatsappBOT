@@ -81,7 +81,7 @@ describe("urgent alerts — at most 2 a day, free text inside the window, the te
     expect(stored.map((m) => m.type)).toEqual(["template", "template"]);
     // a press on [לטפל עכשיו] (the template's quick reply) goes on as a request for a reply draft
     await processInbound(h.ctx, h.inbound("לטפל עכשיו", { type: "template_button", reply: { id: `al:reply:${rows[1]!.id}`, title: "לטפל עכשיו" } }));
-    expect(h.ai.calls.some((c) => c.messages.some((m) => m.role === "user" && m.content.includes("לנסח תשובה למייל מ-עו״ד שפירא")))).toBe(true);
+    expect(h.ai.calls.some((c) => c.messages.some((m) => m.role === "user" && m.content.includes("לנסח תשובה למייל שבהתראה") && m.content.includes("מאת: עו״ד שפירא")))).toBe(true);
   });
 
   it("outside the window, when the template send fails (not approved yet): deferred — the items wait for the next morning summary", async () => {

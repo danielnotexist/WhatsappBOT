@@ -3,12 +3,14 @@ import type { Entitlements } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { acopy } from "@/lib/copy/bot-agents";
 import type { ConnectionRow } from "@/lib/db/types";
-import { onlineCheckFailed, onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
+import { COMMENT_MAX, onlineCheckFailed, onlineMeetingUnavailable, type ActionExecutor, type ActionResult } from "@/lib/bot/pending";
 import { TEAMS_PROVIDER, isPersonalMicrosoftAccount } from "@/lib/online-meeting";
 import { driveItemText } from "./files-text";
+import { DownloadTooLargeError } from "@/lib/http/capped-body";
 import { GraphError, type GraphClient, type GraphEvent, type GraphMessage } from "./graph";
 import { msWorkspaceTools } from "./workspace-tools";
 import { fromGraphMessage } from "@/lib/proactive/mail";
+import { UNTRUSTED_CONTENT_NOTE, UNTRUSTED_MAIL_NOTE, displayName, lineOrEmpty, oneLineUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
 import { lazyKnown, phishingFields } from "@/lib/proactive/read-warning";
 
 /**
@@ -34,12 +36,18 @@ export interface GraphToolDeps {
 const str = (description: string) => ({ type: "string", description });
 const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
-const compactMessage = (m: GraphMessage) => ({ id: m.id, subject: m.subject, from: m.from ? `${m.from.name} <${m.from.address}>` : "", received: m.receivedDateTime, unread: !m.isRead, attachments: m.hasAttachments, preview: m.bodyPreview.slice(0, 200) });
+/**
+ * Everything from the mailbox is outside content (PLAN §2.3): header fields as sanitized single lines, the preview and
+ * the body inside <data> (lib/ai/untrusted.ts), and UNTRUSTED_MAIL_NOTE on the result — the same as the Gmail tools.
+ */
+const fromLine = (m: GraphMessage) => (m.from ? (m.from.name ? `${oneLineUntrusted(m.from.name, 120)} <${oneLineUntrusted(m.from.address, 200)}>` : oneLineUntrusted(m.from.address, 200)) : "");
+const compactMessage = (m: GraphMessage) => ({ id: m.id, subject: lineOrEmpty(m.subject, 200), from: fromLine(m), received: m.receivedDateTime, unread: !m.isRead, attachments: m.hasAttachments, preview: wrapUntrusted(m.bodyPreview.slice(0, 200), { source: "outlook", id: m.id }) });
 /** The link to show for an event: its Teams / Skype meeting, else a meeting link written in its location or body. */
 const shownLink = (e: GraphEvent) => e.joinUrl ?? e.textJoinUrl;
 const compactEvent = (e: GraphEvent) => {
   const link = shownLink(e);
-  return { id: e.id, subject: e.subject, start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: e.location, attendees: e.attendees.map((a) => a.address), organizer_is_me: e.isOrganizer ?? true, ...(link ? { join_url: link } : {}) };
+  // anyone can put an invitation in the calendar: its title, place and attendees are outside content
+  return { id: e.id, subject: lineOrEmpty(e.subject, 200), start: e.start.slice(0, 16), end: e.end.slice(0, 16), all_day: e.isAllDay, location: lineOrEmpty(e.location, 200), attendees: e.attendees.map((a) => oneLineUntrusted(a.address, 200)), organizer_is_me: e.isOrganizer ?? true, ...(link ? { join_url: link } : {}) };
 };
 
 /**
@@ -50,6 +58,7 @@ const hasOnlineMeeting = (e: GraphEvent) => e.isOnlineMeeting || Boolean(e.joinU
 const addressesOf = (e: GraphEvent) => e.attendees.map((a) => a.address.trim().toLowerCase()).filter(Boolean);
 
 function graphErrorOutput(e: unknown) {
+  if (e instanceof DownloadTooLargeError) return { error: "too_large" };
   if (e instanceof GraphError) return { error: e.unauthorized ? "connection_expired" : e.retryable ? "provider_down" : e.message };
   return { error: (e as Error).message };
 }
@@ -69,9 +78,6 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
   const known = lazyKnown(async () => (await deps.graph()).sentRecipients({ top: 50 }));
   const warn = async (m: GraphMessage) => (phishingOn ? phishingFields(fromGraphMessage(m), await known(), self) : {});
 
-  /** Who a change or a cancellation of an event reaches (its attendees), for an agent limited to a list of addresses. */
-  const attendeesOf = async (id: string): Promise<string[] | { error: string }> => (await guard(async (g) => addressesOf(await g.getEvent(id, deps.timeZone)))) as string[] | { error: string };
-
   return [
     {
       name: "search_emails",
@@ -88,7 +94,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
             const w = await warn(m);
             messages.push({ ...compactMessage(m), ...("phishing_warning" in w ? w : {}) });
           }
-          return { count: list.length, messages };
+          return { count: list.length, messages, note: UNTRUSTED_MAIL_NOTE };
         }),
     },
     {
@@ -99,7 +105,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
       run: (input) =>
         guard(async (g) => {
           const m = await g.getMessage(String(input.id ?? ""));
-          return { ...compactMessage(m), to: m.toRecipients.map((r) => r.address), body: (m.bodyText ?? m.bodyPreview).slice(0, 6000), ...(await warn(m)) };
+          return { ...compactMessage(m), to: m.toRecipients.map((r) => oneLineUntrusted(r.address, 200)), body: wrapUntrusted((m.bodyText ?? m.bodyPreview).slice(0, 6000), { source: "outlook", id: m.id }), ...(await warn(m)), note: UNTRUSTED_MAIL_NOTE };
         }),
     },
     {
@@ -128,10 +134,10 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           provider: "microsoft",
           message_id: messageId,
           to_email: to,
-          comment: String(input.comment ?? "").trim().slice(0, 1000),
-          subject: info.m.subject,
-          from: info.m.from ? `${info.m.from.name || info.m.from.address} (${info.m.from.address})` : "",
-          attachments: info.attachments.map((a) => a.name).filter(Boolean).slice(0, 10),
+          comment: String(input.comment ?? "").trim().slice(0, COMMENT_MAX),
+          subject: lineOrEmpty(info.m.subject, 200),
+          from: info.m.from ? oneLineUntrusted(`${info.m.from.name || info.m.from.address} (${info.m.from.address})`, 200) : "",
+          attachments: info.attachments.map((a) => oneLineUntrusted(a.name, 120)).filter(Boolean).slice(0, 10),
         });
         return { status: "pending_approval", pending_action_id: pending.id, note: "ההעברה מוצגת למשתמש עם כפתורי העבר/ערוך/בטל. לענות במשפט קצר בלבד." };
       },
@@ -146,7 +152,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           const from = new Date(`${input.from_date}T00:00:00`);
           const to = new Date(`${input.to_date}T23:59:59`);
           const events = await g.calendarView(from, to, deps.timeZone);
-          return { count: events.length, events: events.map(compactEvent) };
+          return { count: events.length, events: events.map(compactEvent), ...(events.length ? { note: UNTRUSTED_CONTENT_NOTE } : {}) };
         }),
     },
     {
@@ -164,7 +170,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
         // the draft names the meeting and who hears about the change, so the event is read first (no event, no draft)
         const current = (await guard((g) => g.getEvent(id, deps.timeZone))) as GraphEvent | { error: string };
         if ("error" in current) return current;
-        const fields = { subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? "") };
+        const fields = { subject: lineOrEmpty(String(input.subject ?? ""), 200), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: lineOrEmpty(String(input.location ?? ""), 200) };
         const changes = Object.values(fields).some((v) => v.trim());
         const wantsLink = input.online_meeting === true;
         // a Teams meeting stays as it is ("תזיזי את פגישת הטימס" is a move, not a new link)
@@ -182,7 +188,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
           ...(addLink ? { provider: "microsoft", online_meeting: true } : {}),
           id,
           ...fields,
-          current_subject: current.subject,
+          current_subject: lineOrEmpty(current.subject, 200),
           current_date: current.start.slice(0, 10),
           current_start: current.isAllDay ? "" : current.start.slice(11, 16),
           current_attendee_count: current.attendees.length,
@@ -194,14 +200,22 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
     },
     {
       name: "delete_event",
-      description: "מכין ביטול של אירוע ומעביר לאישור המשתמש. לא מבטל בפועל.",
+      description: "מכין ביטול של אירוע ומעביר לאישור המשתמש. לא מבטל בפועל. הכרטיס מציג את האירוע כפי שהוא ביומן.",
       readOnly: false,
-      input_schema: { type: "object", properties: { id: str("מזהה האירוע"), subject: str("כותרת האירוע (לתצוגה)") }, required: ["id", "subject"], additionalProperties: false },
+      input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-list_events") }, required: ["id"], additionalProperties: false },
       run: async (input, ctx) => {
         const id = String(input.id ?? "");
-        const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
-        if (attendees && !Array.isArray(attendees)) return attendees;
-        const pending = await ctx.createPending("delete_event", { id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
+        // the card names the event that will be deleted, as the calendar has it (no event, no draft)
+        const current = (await guard((g) => g.getEvent(id, deps.timeZone))) as GraphEvent | { error: string };
+        if ("error" in current) return current;
+        const pending = await ctx.createPending("delete_event", {
+          id,
+          current_subject: lineOrEmpty(current.subject, 200),
+          current_date: current.start.slice(0, 10),
+          current_start: current.isAllDay ? "" : current.start.slice(11, 16),
+          current_attendee_count: current.attendees.length,
+          ...(ctx.checksRecipients ? { current_attendees: addressesOf(current) } : {}),
+        });
         return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
       },
     },
@@ -213,7 +227,7 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
       run: (input) =>
         guard(async (g) => {
           const items = await g.searchFiles(String(input.query ?? ""), 10);
-          return { count: items.length, files: items.map((i) => ({ id: i.id, name: i.name, modified: i.lastModifiedDateTime, size: i.size, folder: i.parentPath?.replace(/^\/drive\/root:/, "") ?? "" })) };
+          return { count: items.length, files: items.map((i) => ({ id: i.id, name: oneLineUntrusted(i.name, 160), modified: i.lastModifiedDateTime, size: i.size, folder: lineOrEmpty(i.parentPath?.replace(/^\/drive\/root:/, ""), 200) })), ...(items.length ? { note: UNTRUSTED_CONTENT_NOTE } : {}) };
         }),
     },
     {
@@ -225,8 +239,8 @@ export function graphTools(deps: GraphToolDeps): Tool[] {
         guard(async (g) => {
           const item = await g.getItem(String(input.id ?? ""));
           const res = await driveItemText(g, item);
-          if (!res) return { error: "unsupported_format", name: item.name };
-          return { name: item.name, pages: res.pages, truncated: res.truncated, text: res.text };
+          if (!res) return { error: "unsupported_format", name: oneLineUntrusted(item.name, 160) };
+          return { name: oneLineUntrusted(item.name, 160), pages: res.pages, truncated: res.truncated, text: wrapUntrusted(res.text, { source: "onedrive", id: item.id }), note: UNTRUSTED_CONTENT_NOTE };
         }),
     },
     ...msWorkspaceTools({ graph: deps.graph, scopes: deps.scopes, connectLink: deps.connectLink, entitlements: deps.entitlements }),
@@ -280,7 +294,7 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
         .map((x) => x.trim())
         .filter(Boolean);
       await graph.sendMail({ to: [to], ...(cc.length ? { cc } : {}), subject: String(p.subject ?? ""), body: String(p.body ?? ""), replyToMessageId: typeof p.reply_to === "string" ? p.reply_to : undefined });
-      return copy["act.mail.sent"](String(p.to_name || to));
+      return copy["act.mail.sent"](displayName(String(p.to_name ?? "")) || to);
     }),
     create_event: wrap(async ({ graph, timeZone, connection }, p, action) => {
       const attendees = Array.isArray(p.attendees) ? (p.attendees as string[]).filter(Boolean) : [];
@@ -352,7 +366,7 @@ export function graphExecutors(graphFor: (userId: string) => Promise<GraphForUse
     }),
     delete_event: wrap(async ({ graph }, p) => {
       await graph.deleteEvent(String(p.id ?? ""));
-      return copy["act.cal.cancelled"](String(p.subject ?? ""));
+      return copy["act.cal.cancelled"](String(p.current_subject ?? p.subject ?? ""));
     }),
     forward_mail: wrap(async ({ graph }, p) => {
       const to = String(p.to_email ?? "").trim();

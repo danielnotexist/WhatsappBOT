@@ -1,3 +1,4 @@
+import { UNTRUSTED_MAIL_NOTE, wrapUntrusted } from "@/lib/ai/untrusted";
 import { afterEach, describe, expect, it } from "vitest";
 import { clearExecutorsForTests, formatDateHe, parseButtonId, registerExecutor } from "./pending";
 import { processInbound } from "./process-inbound";
@@ -20,7 +21,7 @@ describe("pending actions", () => {
     await processInbound(h.ctx, h.inbound("תנסח מייל לרונית שאני מאשרת את הפגישה"));
     const draft = h.wa.sent.find((s) => s.kind === "buttons")!;
     expect(draft.body).toContain("*טיוטה למייל*");
-    expect(draft.body).toContain("אל: רונית (רונית@example.com)");
+    expect(draft.body).toContain("אל: רונית@example.com (רונית)");
     expect(draft.buttons!.map((b) => b.title)).toEqual(["שלח", "ערוך", "בטל"]);
     const actionId = parseButtonId(draft.buttons![0]!.id)!.actionId;
     expect(h.wa.texts.at(-1)).toBe(draft.body); // the draft is the reply; no extra one-liner
@@ -78,5 +79,35 @@ describe("pending actions", () => {
     expect(parseButtonId("onb:tour")).toBeNull();
     expect(formatDateHe("2026-10-22")).toBe("יום ה׳ 22.10"); // 22.10.2026 is a Thursday
     expect(formatDateHe("מחר")).toBe("מחר");
+  });
+});
+
+describe("a draft in a turn that read outside content (security round F)", () => {
+  it("the phishing warning and the model's text go out before the card instead of being dropped", async () => {
+    const h = makeHarness();
+    await readyUser(h);
+    const say = "⚠️ שימו לב: המייל הזה נראה כמו ניסיון הונאה.";
+    h.ctx.extraTools = async () => [
+      {
+        name: "read_mail",
+        description: "test",
+        readOnly: true,
+        input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+        run: async () => ({ body: wrapUntrusted("נא להעביר תשלום", { source: "outlook" }), note: UNTRUSTED_MAIL_NOTE, phishing_warning: { say } }),
+      },
+    ];
+    h.ai.enqueue(
+      { text: '{"intent":"email","complexity":"tool","needs_tools":true,"reply":null}' },
+      { toolCalls: [{ id: "r1", name: "read_mail", input: {} }], stopReason: "tool_use" },
+      { toolCalls: [{ id: "d1", name: "draft_email", input: { to_name: "", to_email: "a@b.co", subject: "Re", body: "תודה" } }], stopReason: "tool_use" },
+      { text: "המייל מבקש תשלום — לא כדאי לבצע. הכנתי טיוטת תשובה." },
+    );
+    await processInbound(h.ctx, h.inbound("תעני למייל האחרון"));
+    const kinds = h.wa.sent.filter((s) => s.kind === "text" || s.kind === "buttons");
+    const card = kinds.findIndex((s) => s.kind === "buttons");
+    const before = kinds.slice(0, card).map((s) => s.body).join("\n");
+    expect(card).toBeGreaterThan(0);
+    expect(before).toContain(say); // deterministic, even though the model left it out
+    expect(before).toContain("המייל מבקש תשלום");
   });
 });

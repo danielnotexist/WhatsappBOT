@@ -149,6 +149,26 @@ async function afterStored(
     await say(budgetReply(reason, ctx.spend?.limits.demo ?? false, ctx.spend?.limits.userDailyMessages ?? null));
     return { handled: true, note: `ai cap: ${reason}` };
   };
+  /** the trial or the plan's messages are used up (the message, or a voice note before its transcription) */
+  const quotaReached = async (sub: Awaited<ReturnType<typeof ctx.db.getSubscription>>, text: string) => {
+    const payLink = payLinkFor(ctx.appUrl, user.id);
+    const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
+    if (paidPlan === "basic") {
+      await basicLimitReached(ctx, user, to, text);
+    } else if (paidPlan === "pro") {
+      await say(copy["err.rate_limit"]());
+    } else {
+      const lastNotice = typeof user.profile.trial_ended_notified_at === "string" ? Date.parse(user.profile.trial_ended_notified_at) : 0;
+      const first = !lastNotice;
+      await ctx.db.mergeUserProfile(user.id, { pending_input: text, trial_ended_notified_at: ctx.now().toISOString() });
+      if (first) await say(copy["bill.trial_ended"](user.name, payLink));
+      else if (ctx.now().getTime() - lastNotice > 24 * 3_600_000) {
+        await ctx.db.mergeUserProfile(user.id, { trial_ended_notified_at: ctx.now().toISOString() });
+        await say(copy["bill.trial_ended_repeat"](payLink));
+      }
+    }
+    return { handled: true, note: "quota exhausted" };
+  };
   /** a read-only look before work that needs a paid call (nothing is counted yet) */
   const spendBlocked = async () => (spendTurn ? spendTurn.blocked() : null);
 
@@ -156,6 +176,17 @@ async function afterStored(
   if (msg.type === "audio" && ctx.stt) {
     const blocked = await spendBlocked();
     if (blocked) return capReached(blocked);
+    // paid STT only for an account that may use it now: a suspended account or a used-up trial gets its usual answer
+    // without the recording ever reaching the provider (nothing counted)
+    const voiceSub = await ctx.db.getSubscription(user.id);
+    if (voiceSub?.status === "past_due") {
+      await pausedAccount(ctx, user, to, "");
+      return { handled: true, note: "past_due (voice not transcribed)" };
+    }
+    if (!(voiceSub && isPaidPlan(voiceSub.plan) && voiceSub.status !== "trial")) {
+      const usage = await ctx.db.getCurrentUsage(user.id);
+      if (usage && usage.free_remaining <= 0) return quotaReached(voiceSub, "");
+    }
     const voice = await transcribeVoiceNote(ctx, user.id, msg, stored.id);
     if (!voice.ok) return { handled: true, note: voice.note };
     msg = { ...msg, type: "text", text: voice.transcript };
@@ -240,24 +271,7 @@ async function afterStored(
   const blocked = await spendBlocked();
   if (blocked) return capReached(blocked);
   const remaining = await ctx.db.countTrialMessage(user.id);
-  if (remaining < 0) {
-    const paidPlan = sub && isPaidPlan(sub.plan) && sub.status !== "trial" ? sub.plan : null;
-    if (paidPlan === "basic") {
-      await basicLimitReached(ctx, user, to, text);
-    } else if (paidPlan === "pro") {
-      await say(copy["err.rate_limit"]());
-    } else {
-      const lastNotice = typeof user.profile.trial_ended_notified_at === "string" ? Date.parse(user.profile.trial_ended_notified_at) : 0;
-      const first = !lastNotice;
-      await ctx.db.mergeUserProfile(user.id, { pending_input: text, trial_ended_notified_at: ctx.now().toISOString() });
-      if (first) await say(copy["bill.trial_ended"](user.name, payLink));
-      else if (ctx.now().getTime() - lastNotice > 24 * 3_600_000) {
-        await ctx.db.mergeUserProfile(user.id, { trial_ended_notified_at: ctx.now().toISOString() });
-        await say(copy["bill.trial_ended_repeat"](payLink));
-      }
-    }
-    return { handled: true, note: "quota exhausted" };
-  }
+  if (remaining < 0) return quotaReached(sub, text);
 
   // 6. explicit connect requests ("לחבר את המייל", "חבר שוב") — no model needed. The plan decides which accounts the
   //    turn may use (lib/billing/plans.ts): on a one-account plan a second account is refused here (and by the start
@@ -313,12 +327,21 @@ async function afterStored(
     });
     const header = out.agent ? `${acopy["agent.reply_header"](out.agent.name)}\n` : "";
     reply = out.text.trim() ? rtlLines(`${header}${out.text}`) : out.text;
+    // the phishing warning of a mail read in this turn is deterministic: it reaches the user even when the model left it out
+    const missingWarnings = (out.warnings ?? []).filter((w) => !reply.includes(w));
     // A pending action is rendered by us (draft + buttons), and a flow (upgrade, a new agent) sends its own messages:
     // the model's one-liner would be redundant — unless the text also answers something else in the same message.
     // Reply buttons (a reminder's "move to the next date") ride on the reply.
     const flowOnly = out.flows.length > 0 && !out.textBeyondFlows;
     const rendered = out.pendingActions.length > 0 || flowOnly;
+    if (missingWarnings.length && !out.pendingActions.length) reply = [...missingWarnings, reply].filter((t) => t.trim()).join("\n\n");
     let withButtons = out.replyButtons.length > 0 && reply.length <= MAX_BUTTON_BODY;
+    if (out.pendingActions.length) {
+      // a turn that read outside content: the model's text may carry a warning or a question (an internal action it
+      // was not allowed to run), so it goes out before the drafts instead of being dropped; and so does any warning
+      const before = [...missingWarnings, out.untrustedRead ? reply : ""].filter((t) => t.trim()).join("\n\n");
+      if (before) await ctx.wa.sendText(to, before);
+    }
     if (reply.trim() && !rendered) {
       if (withButtons) {
         // the buttons are an extra; the answer itself (a reminder's confirmation) must never be lost with them

@@ -1,3 +1,4 @@
+import { wrapUntrusted } from "@/lib/ai/untrusted";
 import { effectivePlan, entitlements } from "@/lib/billing/plans";
 import { copyM5 } from "@/lib/copy/bot-m5";
 import { pcopy } from "@/lib/copy/bot-proactive";
@@ -73,6 +74,9 @@ async function say(deps: AlertActionDeps, user: UserRow, to: string, text: strin
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
+/** The request, then the alert's third-party pieces wrapped as data (they reach the model in a user turn). */
+const withData = (request: string, details: string) => `${request}\n${wrapUntrusted(details, { source: "alert" })}`;
+
 /** A press on an `al:` button or list row. A request for the assistant comes back as `request` (the pipeline goes on). */
 export async function handleAlertButton(deps: AlertActionDeps, user: UserRow, to: string, buttonId: string): Promise<AlertPress> {
   const parsed = parseAlertButton(buttonId);
@@ -100,14 +104,14 @@ export async function handleAlertButton(deps: AlertActionDeps, user: UserRow, to
   switch (parsed.verb) {
     case "reply": {
       if (!str(p.message_id)) break;
-      return { handled: false, request: pcopy["alert.request.reply"](str(p.who), str(p.subject), str(p.message_id), p.provider === "google") };
+      return { handled: false, request: withData(pcopy["alert.request.reply"](str(p.message_id), p.provider === "google"), pcopy["alert.request.reply_details"](str(p.who), str(p.subject))) };
     }
     case "brief":
       if (!str(p.meeting)) break;
-      return { handled: false, request: pcopy["alert.request.brief"](str(p.meeting), str(p.attendees)) };
+      return { handled: false, request: withData(pcopy["alert.request.brief"](), pcopy["alert.request.brief_details"](str(p.meeting), str(p.attendees))) };
     case "conf":
       if (!str(p.a) || !str(p.b)) break;
-      return { handled: false, request: pcopy["alert.request.conflict"](str(p.a), str(p.b)) };
+      return { handled: false, request: withData(pcopy["alert.request.conflict"](), pcopy["alert.request.conflict_details"](str(p.a), str(p.b))) };
     case "remind": {
       const r = await createReminder(deps.db, user, { text: pcopy["alert.reminder.reply"](str(p.who), str(p.subject)), when: "מחר ב-9" }, now);
       await say(deps, user, to, r.reply);

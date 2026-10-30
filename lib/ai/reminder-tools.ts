@@ -17,6 +17,7 @@ export const createReminderTool: Tool = {
   description:
     'קובע תזכורת (חד-פעמית או חוזרת) שתישלח למשתמש בוואטסאפ בזמן שביקש. פעולה פנימית, בלי אישור. את הזמן מעבירים בדיוק כפי שהמשתמש כתב ("מחר ב-9", "עוד שעתיים", "ביום ראשון הבא ב-8:30", "כל יום בשמונה") — המערכת מחשבת את השעה המדויקת. אם לא צוין זמן — when ריק, והמערכת תשאל.',
   readOnly: true,
+  internalWrite: true,
   input_schema: {
     type: "object",
     properties: {
@@ -61,6 +62,7 @@ export const cancelReminderTool: Tool = {
   name: "cancel_reminder",
   description: "מבטל תזכורת פתוחה לפי מזהה (מ-list_reminders) או לפי מילים מהטקסט שלה. אם יש כמה התאמות — מחזיר אותן כדי לשאול איזו.",
   readOnly: true,
+  internalWrite: true,
   input_schema: {
     type: "object",
     properties: { reminder_id: str("מזהה התזכורת, או ריק"), text_query: str("מילים מתוך טקסט התזכורת, או ריק") },

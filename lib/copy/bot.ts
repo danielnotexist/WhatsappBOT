@@ -73,13 +73,22 @@ export const copy = {
   "proc.transcript_echo": (transcript: string) => `הבנתי כך: "${transcript}"\nממשיכה לפי זה.`,
 
   // ---- 4. actions ----
-  "act.mail.draft": (d: { toName: string; toEmail: string; subject: string; body: string; cc?: string; attachment?: string }) =>
-    `*טיוטה למייל*\nאל: ${d.toName ? `${d.toName} (${d.toEmail})` : d.toEmail}\n${d.cc ? `עותק: ${d.cc}\n` : ""}נושא: ${d.subject}\n${d.attachment ? `מצורף: ${d.attachment}\n` : ""}\n> ${d.body.replace(/\n/g, "\n> ")}\n\nלשלוח כך?`,
+  /**
+   * The address first (the name, written by the model, after it); `bodyAbove`: the body did not fit the card (1,024
+   * characters) and was sent in full in the message just above it (lib/bot/pending.ts).
+   */
+  "act.mail.draft": (d: { toName: string; toEmail: string; subject: string; body: string; cc?: string; attachment?: string; bodyAbove?: boolean }) =>
+    `*טיוטה למייל*\nאל: ${d.toEmail || "(אין כתובת)"}${d.toName ? ` (${d.toName})` : ""}\n${d.cc ? `עותק: ${d.cc}\n` : ""}${d.attachment ? `מצורף: ${d.attachment}\n` : ""}נושא: ${d.subject}\n\n${d.bodyAbove ? "(גוף המייל המלא בהודעה שלמעלה)" : `> ${d.body.replace(/\n/g, "\n> ")}`}\n\nלשלוח כך?`,
+  /** the message above a draft card whose body or list did not fit the card */
+  "act.mail.body_above": (body: string) => `*גוף המייל שבטיוטה*\n\n${body}`,
+  "act.list_above": (title: string, ...items: string[]) => `*${title}*\n${items.map((i) => `• ${i}`).join("\n")}`,
+  "act.list_count": (count: number) => `${count} כתובות (הרשימה המלאה בהודעה שלמעלה)`,
   "act.mail.sent": (toName: string) => `נשלח ל${toName}. אעדכן כשתגיע תשובה.`,
   "act.mail.edit_prompt": () => "מה לשנות?",
   "act.mail.cancelled": () => "בוטל. הטיוטה נמחקה ולא נשלחה.",
+  /** who gets the invitation first, before any model-written field (a title or place cannot push it off the card) */
   "act.cal.create_confirm": (e: { title: string; date: string; start: string; end: string; location?: string; attendees?: string; online?: string; withoutLink?: boolean }) =>
-    `*פגישה חדשה*\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.attendees ? `משתתפים: ${e.attendees}\n` : ""}${e.online ? `${e.online}\n` : ""}\n${e.withoutLink ? "לקבוע בלי קישור?" : "לקבוע?"}`,
+    `*פגישה חדשה*\n${e.attendees ? `משתתפים: ${e.attendees}` : "משתתפים: אין (לא נשלחת הזמנה)"}\n${e.title}\n${e.date}, ${e.start}–${e.end}\n${e.location ? `מקום: ${e.location}\n` : ""}${e.online ? `${e.online}\n` : ""}\n${e.withoutLink ? "לקבוע בלי קישור?" : "לקבוע?"}`,
   "act.cal.created": (title: string, date: string, start: string) => `נקבע: ${title}, ${date} ב-${start}.`,
   /** the draft line of a meeting that gets a link; `withInvite` = it has attendees, who get the link in the invitation */
   "act.cal.online_label": (provider: string, withInvite = false) => `פגישת ${onlineService(provider)}${withInvite ? " (הקישור יישלח בהזמנה)" : ""}`,
@@ -120,7 +129,9 @@ export const copy = {
   },
   "act.cal.move_confirm": (e: { title: string; oldDate: string; oldStart: string; newDate: string; newStart: string; newEnd: string }) => `*הזזת פגישה*\n${e.title}\nמ: ${e.oldDate}, ${e.oldStart}\nאל: ${e.newDate}, ${e.newStart}–${e.newEnd}\nלהזיז?`,
   "act.cal.moved": (title: string, newDate: string, newStart: string) => `הוזז. ${title} עכשיו ב-${newDate}, ${newStart}.`,
-  "act.cal.cancel_confirm": (title: string, date: string, start: string) => `*ביטול פגישה*\n${title}\n${date}, ${start}\nלבטל? המשתתפים יקבלו הודעת ביטול.`,
+  /** the event as read from the calendar when the draft was made (never the model's words) */
+  "act.cal.cancel_confirm": (title: string, date: string, start: string, attendees = 0) =>
+    `*ביטול פגישה*\n${title || "(ללא כותרת)"}\n${date}${start ? `, ${start}` : ""}\n${attendees > 0 ? `לבטל? ${attendees} המשתתפים יקבלו הודעת ביטול.` : "לבטל?"}`,
   "act.cal.cancelled": (title: string) => `הפגישה "${title}" בוטלה.`,
   "act.pending_expired": () => "האישור הזה כבר לא בתוקף (עברו יותר מ-10 דקות). אם עדיין רלוונטי — אפשר לבקש שוב ואכין מחדש.",
   "act.pending_replaced": () => `שמתי את הטיוטה הקודמת בצד. אפשר לחזור אליה — פשוט לכתוב "חזור לטיוטה".`,

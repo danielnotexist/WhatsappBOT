@@ -1,3 +1,4 @@
+import { UNTRUSTED_CONTENT_NOTE } from "@/lib/ai/untrusted";
 import { randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "@/lib/ai/tools";
@@ -65,7 +66,7 @@ describe("Google tools in the assistant", () => {
     const tools = h.ai.calls[1]!.tools!.map((t) => t.name);
     expect(tools).toEqual(expect.arrayContaining(["gcal_list_events", "gcal_free_slots", "gcal_create_event", "gcal_update_event", "gcal_delete_event", "gdrive_list_files", "gdrive_get_file_text", "gdrive_save_doc", "gmail_draft_email", "gmail_read_status", "draft_email"]));
     const draft = h.wa.sent.filter((s) => s.kind === "buttons").at(-1)!;
-    expect(draft.body).toContain("אל: יוסי אברהם (avraham@example.co.il)");
+    expect(draft.body).toContain("אל: avraham@example.co.il (יוסי אברהם)");
     expect(draft.body).toContain("מצורף: סיכום פגישה — כהן");
     const id = pendingIdFrom(h);
     expect((await h.db.getPendingAction(id))!.payload).toMatchObject({ provider: "google", attachment_file_id: "gdoc1" });
@@ -160,9 +161,12 @@ describe("Google tools in the assistant", () => {
     // one read: the draft says which meeting changes and whether its attendees hear about it
     expect(fixture.state.calls.map((c) => c.method)).toEqual(["GET"]);
     expect(drafts.at(-1)).toMatchObject({ current_subject: "שיחה עם משפחת אברהם", current_date: "2026-10-21", current_start: "13:00", current_attendee_count: 1 });
+    // a cancellation reads the event too: the card shows it as the calendar has it, never a subject the model passed
     await run("gcal_delete_event", { id: "gev1", subject: "דיון" }, false);
     expect(drafts.at(-1)).not.toHaveProperty("current_attendees");
-    expect(fixture.state.calls).toHaveLength(1); // a cancellation by the main assistant: no extra call
+    expect(drafts.at(-1)).not.toHaveProperty("subject");
+    expect(drafts.at(-1)).toMatchObject({ kind: "delete_event", current_subject: expect.any(String), current_date: expect.stringMatching(/^2026-/), current_attendee_count: 0 });
+    expect(fixture.state.calls).toHaveLength(2);
     await run("gcal_update_event", move, true);
     expect(drafts.at(-1)).toMatchObject({ kind: "update_event", provider: "google", id: "gev2", current_attendees: ["avraham@example.co.il"] });
     await run("gcal_delete_event", { id: "gev1", subject: "דיון" }, true);
@@ -299,9 +303,10 @@ describe("Google Tasks and Drive read (23.10.2026)", () => {
     const found = (await run("gdrive_list_files", { query: "פעימות" })) as { files: { id: string }[] };
     expect(found.files.map((f) => f.id)).toEqual(["gdoc1"]);
     expect(new URL(fixture.state.calls.at(-1)!.url).searchParams.get("q")).toContain("fullText contains 'פעימות'");
-    expect(await run("gdrive_get_file_text", { id: "gdoc1" })).toMatchObject({ text: "סיכום: הוסכם על תשלום בשלוש פעימות." });
-    expect(await run("gdrive_get_file_text", { id: "gsheet1" })).toMatchObject({ text: "חודש,סכום\nינואר,4200" });
-    expect(await run("gdrive_get_file_text", { id: "gslides1" })).toMatchObject({ text: "שקף 1: הצמיחה ברבעון" });
+    // file text is outside content: wrapped as <data>, with the untrusted note (lib/ai/untrusted.ts)
+    expect(await run("gdrive_get_file_text", { id: "gdoc1" })).toMatchObject({ text: '<data source="gdrive" id="gdoc1">\nסיכום: הוסכם על תשלום בשלוש פעימות.\n</data>', note: UNTRUSTED_CONTENT_NOTE });
+    expect(await run("gdrive_get_file_text", { id: "gsheet1" })).toMatchObject({ text: '<data source="gdrive" id="gsheet1">\nחודש,סכום\nינואר,4200\n</data>' });
+    expect(await run("gdrive_get_file_text", { id: "gslides1" })).toMatchObject({ text: '<data source="gdrive" id="gslides1">\nשקף 1: הצמיחה ברבעון\n</data>' });
     const exports = fixture.state.calls.filter((c) => c.url.includes("/export")).map((c) => new URL(c.url).searchParams.get("mimeType"));
     expect(exports).toEqual(["text/plain", "text/csv", "text/plain"]);
 

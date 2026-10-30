@@ -847,6 +847,12 @@ export interface Db {
   createPendingAction(userId: string, kind: PendingActionKind, payload: Record<string, unknown>, expiresAt: Date, meta?: PendingActionMeta): Promise<PendingActionRow>;
   getPendingAction(id: string): Promise<PendingActionRow | null>;
   updatePendingAction(id: string, patch: Partial<Pick<PendingActionRow, "status" | "payload" | "approved_msg_id" | "executed_at" | "error">>): Promise<PendingActionRow | null>;
+  /**
+   * The press on a pending action, atomically: `pending` → `status` (with `patch`) only while the row is the user's,
+   * still pending and not expired at `now` — one conditional UPDATE … RETURNING. Null when another press (or the
+   * expiry) got there first: the caller does nothing.
+   */
+  claimPendingAction(id: string, userId: string, status: "approved" | "cancelled" | "edited", now: Date, patch?: Partial<Pick<PendingActionRow, "approved_msg_id">>): Promise<PendingActionRow | null>;
   listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]>;
 
   // usage — atomic counter (SQL: count_trial_message). Returns messages left after counting, or -1 when exhausted.
@@ -889,6 +895,11 @@ export interface Db {
   reserveAiSpend(day: string, costUsd: number, budgetUsd: number): Promise<number>;
   /** After it (migration 0010): moves the day's total by `deltaUsd` (actual − estimate, may be negative), never below 0. */
   adjustAiSpend(day: string, deltaUsd: number): Promise<number>;
+  // ai_spend_pools (migration 0024) — a budget of its own, apart from the bot's day total (`pool`: "support" — the
+  // website's anonymous support chat). The same contract as getAiSpend / reserveAiSpend / adjustAiSpend.
+  getAiPoolSpend(pool: string, day: string): Promise<number>;
+  reserveAiPoolSpend(pool: string, day: string, costUsd: number, budgetUsd: number): Promise<number>;
+  adjustAiPoolSpend(pool: string, day: string, deltaUsd: number): Promise<number>;
   /** how many of the user's messages reached a paid call on that day */
   getAiUserMessages(day: string, userId: string): Promise<number>;
   /** counts one more message for the user unless `limit` is reached (atomic); the new count, or -1 when the cap is full */

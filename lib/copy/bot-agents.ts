@@ -119,10 +119,11 @@ export const acopy = {
   "act.mail.forward_confirm": (f: ForwardConfirm) =>
     [
       "*העברת מייל*",
+      // the destination first: the mail's own fields (written by its sender) come after it, each one line and capped
+      `אל: ${f.to}`,
       `נושא: ${f.subject || "(בלי נושא)"}`,
       f.from ? `מאת: ${f.from}` : "",
       f.attachments.length ? `קבצים: ${f.attachments.join(", ")}` : "",
-      `אל: ${f.to}`,
       f.comment ? `\n${quote(f.comment)}` : "",
       "\nלהעביר?",
     ]

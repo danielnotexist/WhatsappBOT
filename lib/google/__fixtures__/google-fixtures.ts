@@ -143,6 +143,8 @@ export interface FixtureFile {
   size?: string;
   webViewLink: string;
   trashed?: boolean;
+  /** false: someone else's file shared with the user (Drive's ownedByMe; default true) */
+  ownedByMe?: boolean;
   content: Uint8Array;
 }
 
@@ -380,11 +382,13 @@ function parseMultipart(body: Buffer, contentType: string): { metadata: Record<s
   return { metadata: JSON.parse(meta.content.toString("utf8")) as Record<string, unknown>, mediaType: media.type, media: new Uint8Array(media.content) };
 }
 
-const fileMeta = (f: FixtureFile) => {
-  const { content: _content, trashed: _trashed, ...meta } = f;
+const fileMeta = (f: FixtureFile, url?: URL) => {
+  const { content: _content, trashed: _trashed, ownedByMe: _owned, ...meta } = f;
   void _content;
   void _trashed;
-  return meta;
+  void _owned;
+  // ownedByMe only when the request's `fields` asks for it, like Drive
+  return url?.searchParams.get("fields")?.includes("ownedByMe") ? { ...meta, ownedByMe: f.ownedByMe !== false } : meta;
 };
 
 export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleFixtureState } {
@@ -539,8 +543,9 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
         // `(name contains 'x' or fullText contains 'x')` (drive.readonly search): the name, or the text content
         const fullText = /fullText contains/.test(q);
         const matches = (f: FixtureFile) => !name || f.name.toLowerCase().includes(name) || (fullText && Buffer.from(f.content).toString("utf8").toLowerCase().includes(name));
-        const files = state.files.filter((f) => !f.trashed && f.mimeType !== "application/vnd.google-apps.folder" && matches(f)).sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime));
-        return json({ kind: "drive#fileList", incompleteSearch: false, files: files.slice(0, Number(url.searchParams.get("pageSize") ?? 100)).map(fileMeta) });
+        const mineOnly = q.includes("'me' in owners");
+        const files = state.files.filter((f) => !f.trashed && f.mimeType !== "application/vnd.google-apps.folder" && matches(f) && (!mineOnly || f.ownedByMe !== false)).sort((a, b) => b.modifiedTime.localeCompare(a.modifiedTime));
+        return json({ kind: "drive#fileList", incompleteSearch: false, files: files.slice(0, Number(url.searchParams.get("pageSize") ?? 100)).map((f) => fileMeta(f, url)) });
       }
       if (url.pathname === "/upload/drive/v3/files" && method === "POST") {
         const { metadata, mediaType, media } = parseMultipart(raw!, ct);
@@ -572,7 +577,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
           if (f.mimeType.startsWith("application/vnd.google-apps.")) return apiError(403, "fileNotDownloadable", "Only files with binary content can be downloaded. Use Export with Docs Editors files.");
           return new Response(Buffer.from(f.content), { status: 200, headers: { "content-type": f.mimeType } });
         }
-        return json(fileMeta(f));
+        return json(fileMeta(f, url));
       }
     }
 

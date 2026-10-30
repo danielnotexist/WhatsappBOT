@@ -9,6 +9,8 @@ import type { BotContext } from "./context";
 
 /** err.media_too_large: up to 20MB */
 export const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+/** err.voice_too_long: a longer recording is not sent to the paid STT (an Opus note of 20MB can run for hours) */
+export const MAX_VOICE_MS = 5 * 60_000;
 /** proc.transcript_echo: only for long (> 20 s) or low-confidence recordings (confidence only when the provider reports it — Soniox) */
 export const ECHO_MIN_DURATION_MS = 20_000;
 export const ECHO_MAX_CONFIDENCE = 0.75;
@@ -41,6 +43,8 @@ export async function transcribeVoiceNote(ctx: BotContext, userId: string, msg: 
     return fail("audio download failed");
   }
   if (audio.bytes.byteLength > MAX_AUDIO_BYTES) return fail("audio too large", copy["err.media_too_large"]());
+  const knownLength = oggOpusDurationMs(audio.bytes);
+  if (knownLength !== null && knownLength > MAX_VOICE_MS) return fail("audio too long", copyM5["err.voice_too_long"](MAX_VOICE_MS / 60_000));
 
   let text: string;
   let durationMs: number | null = null;

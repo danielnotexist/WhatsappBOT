@@ -15,7 +15,8 @@ import { googleExecutors, googleTools } from "./tools";
 const TZ = "Asia/Jerusalem";
 const ROUTER = { text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' };
 const MEETING = { title: "שיחה עם כהן", date: "2026-10-22", start: "10:00", end: "10:30", location: "", attendees: ["cohen@example.co.il"] };
-const DRAFT = "*פגישה חדשה*\nשיחה עם כהן\nיום ה׳ 22.10, 10:00–10:30\nמשתתפים: cohen@example.co.il";
+// who gets the invitation first (lib/copy/bot.ts act.cal.create_confirm)
+const DRAFT = "*פגישה חדשה*\nמשתתפים: cohen@example.co.il\nשיחה עם כהן\nיום ה׳ 22.10, 10:00–10:30";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 type FetchWrap = (f: typeof fetch) => typeof fetch;
@@ -120,7 +121,7 @@ describe("Google Meet on Google Calendar", () => {
     fixture.state.conferenceMode = "pending";
     h.ai.enqueue(ROUTER, { toolCalls: [{ id: "e1", name: "create_event", input: { ...MEETING, attendees: [], online_meeting: true } }], stopReason: "tool_use" }, { text: "" });
     await processInbound(h.ctx, h.inbound("תקבעי פגישת זום עם כהן מחר ב-10"));
-    expect(lastDraft(h).body).toBe("*פגישה חדשה*\nשיחה עם כהן\nיום ה׳ 22.10, 10:00–10:30\nפגישת Google Meet\n\nלקבוע?");
+    expect(lastDraft(h).body).toBe("*פגישה חדשה*\nמשתתפים: אין (לא נשלחת הזמנה)\nשיחה עם כהן\nיום ה׳ 22.10, 10:00–10:30\nפגישת Google Meet\n\nלקבוע?");
     expect((await h.db.getPendingAction(idOf(lastDraft(h))))!.payload).toMatchObject({ online_meeting: true, provider: "google" });
     await processInbound(h.ctx, h.button(`pa:approve:${idOf(lastDraft(h))}`, "קבע"));
     const created = fixture.state.events.at(-1)!;

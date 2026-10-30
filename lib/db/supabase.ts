@@ -299,6 +299,22 @@ export class SupabaseDb implements Db {
     return (data as unknown as PendingActionRow | null) ?? null;
   }
 
+  /** One conditional UPDATE … RETURNING: Postgres re-checks `status = 'pending'` on a row another press just changed. */
+  async claimPendingAction(id: string, userId: string, status: "approved" | "cancelled" | "edited", now: Date, patch: Partial<Pick<PendingActionRow, "approved_msg_id">> = {}): Promise<PendingActionRow | null> {
+    if (!UUID_RE.test(id) || !UUID_RE.test(userId)) return null;
+    const { data, error } = await this.client
+      .from("pending_actions")
+      .update({ ...patch, status })
+      .eq("id", id)
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .gt("expires_at", now.toISOString())
+      .select(SupabaseDb.PA_COLS)
+      .maybeSingle();
+    if (error) this.fail("claimPendingAction", error);
+    return (data as unknown as PendingActionRow | null) ?? null;
+  }
+
   async listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]> {
     const { data, error } = await this.client
       .from("pending_actions")
@@ -608,6 +624,24 @@ export class SupabaseDb implements Db {
   async adjustAiSpend(day: string, deltaUsd: number): Promise<number> {
     const { data, error } = await this.client.rpc("ai_spend_adjust", { p_day: day, p_delta: Number.isFinite(deltaUsd) ? deltaUsd : 0 });
     if (error) this.fail("adjustAiSpend", error);
+    return Number(data ?? 0);
+  }
+
+  async getAiPoolSpend(pool: string, day: string): Promise<number> {
+    const { data, error } = await this.client.from("ai_spend_pools").select("cost_usd").eq("pool", pool).eq("day", day).maybeSingle();
+    if (error) this.fail("getAiPoolSpend", error);
+    return Number((data as { cost_usd: number | string } | null)?.cost_usd ?? 0);
+  }
+
+  async reserveAiPoolSpend(pool: string, day: string, costUsd: number, budgetUsd: number): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_pool_reserve", { p_pool: pool, p_day: day, p_cost: Number.isFinite(costUsd) ? costUsd : 0, p_budget: budgetUsd });
+    if (error) this.fail("reserveAiPoolSpend", error);
+    return Number(data ?? -1);
+  }
+
+  async adjustAiPoolSpend(pool: string, day: string, deltaUsd: number): Promise<number> {
+    const { data, error } = await this.client.rpc("ai_spend_pool_adjust", { p_pool: pool, p_day: day, p_delta: Number.isFinite(deltaUsd) ? deltaUsd : 0 });
+    if (error) this.fail("adjustAiPoolSpend", error);
     return Number(data ?? 0);
   }
 

@@ -17,7 +17,8 @@ import { graphExecutors, graphTools, teamsAvailability } from "./tools";
 const TZ = "Asia/Jerusalem";
 const ROUTER = { text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' };
 const MEETING = { title: "פגישה עם ברק", date: "2026-10-22", start: "10:00", end: "11:00", location: "", attendees: ["barak@cpa-barak.co.il"] };
-const DRAFT = "*פגישה חדשה*\nפגישה עם ברק\nיום ה׳ 22.10, 10:00–11:00\nמשתתפים: barak@cpa-barak.co.il";
+// who gets the invitation first (lib/copy/bot.ts act.cal.create_confirm)
+const DRAFT = "*פגישה חדשה*\nמשתתפים: barak@cpa-barak.co.il\nפגישה עם ברק\nיום ה׳ 22.10, 10:00–11:00";
 const TEAMS_DRAFT = `${DRAFT}\nפגישת Teams (הקישור יישלח בהזמנה)\n\nלקבוע?`;
 const WORK = "בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams.";
 const PERSONAL = "בחשבון Microsoft הזה אין אפשרות ליצור פגישת Teams (יצירת פגישת Teams מהיומן זמינה רק בחשבון עבודה או בית ספר).";
@@ -303,7 +304,7 @@ describe("Teams meetings on Microsoft 365", () => {
 
     h.ai.enqueue(ROUTER, updateCall("AAMkAGe1"), { text: "" });
     await processInbound(h.ctx, h.inbound("תוסיפי קישור טימס לדיון"));
-    expect(lastDraft(h).body).toBe(`*שינוי פגישה*\n${HEARING}\nהוספת פגישת Teams\nהמשתתפים יקבלו עדכון עם הקישור.\nלעדכן?`);
+    expect(lastDraft(h).body).toBe(`*שינוי פגישה*\n${HEARING}\nהמשתתפים יקבלו עדכון עם הקישור.\nהוספת פגישת Teams\nלעדכן?`);
     const pressed = idOf(lastDraft(h));
     await processInbound(h.ctx, h.button(`pa:approve:${pressed}`, "עדכן"));
     expect(patches(fixture.state.calls)).toHaveLength(1);
@@ -462,7 +463,7 @@ describe("Teams meetings on Microsoft 365", () => {
     const updated = await h.db.createPendingAction(user.id, "update_event", change, expires(), asAgent);
     await processInbound(h.ctx, h.button(`pa:approve:${updated.id}`, "עדכן"));
     const offer = lastDraft(h);
-    expect(offer.body).toBe(`${acopy["agent.reply_header"]("מזכירה")}\n${WORK}\n\n*שינוי פגישה*\n${HEARING}\nמקום: חדר ישיבות\nהמשתתפים יקבלו עדכון.\nלעדכן בלי קישור?`);
+    expect(offer.body).toBe(`${acopy["agent.reply_header"]("מזכירה")}\n${WORK}\n\n*שינוי פגישה*\n${HEARING}\nהמשתתפים יקבלו עדכון.\nמקום: חדר ישיבות\nלעדכן בלי קישור?`);
     const row = (await h.db.getPendingAction(idOf(offer)))!;
     expect(row).toMatchObject({ kind: "update_event", agent_key: "builtin:secretary", payload: { current_attendees: ["barak@cpa-barak.co.il"], online_fallback: "microsoft", location: "חדר ישיבות" } });
     expect(row.payload).not.toHaveProperty("online_meeting");

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { aiBudgetAlert } from "@/lib/admin/alerts";
 import type { Db } from "@/lib/db/types";
 import { isDemo } from "@/lib/demo";
-import { EnvError, dataMode, liveAiInDemo } from "@/lib/env";
+import { EnvError, aiMocked, dataMode, liveAiInDemo } from "@/lib/env";
 import type { AudioInput, SttProvider, TranscribeOptions, Transcript } from "@/lib/stt/types";
 import { DEFAULT_TZ, dateKey, localDateOf } from "@/lib/time/zoned";
 import { DEFAULT_MODELS, costUsd, maxTokensFor } from "./anthropic";
@@ -12,8 +12,12 @@ import type { AiProvider, CompletionRequest, CompletionResponse } from "./types"
  * The daily spend cap for paid model / STT calls (round plan §2, Daniel: $3 a day) and the per-user daily message cap.
  *
  *   - Where: the demo with LIVE_AI=1 (lib/env.ts liveAiInDemo) — AI_DAILY_BUDGET_USD (default 3) and
- *     DEMO_USER_DAILY_MESSAGES (default 60). Outside the demo only when AI_DAILY_BUDGET_USD is set (an operator's safety
- *     net; no per-user cap there). The demo without LIVE_AI pays nothing and has no guard: behaviour unchanged.
+ *     DEMO_USER_DAILY_MESSAGES (default 60). Outside the demo wherever the real model runs: AI_DAILY_BUDGET_USD, or
+ *     DEFAULT_LIVE_DAILY_BUDGET_USD when it is not set — never uncapped (no per-user cap there). The mock model (the demo
+ *     without LIVE_AI, DATA_MODE=memory) pays nothing and has no guard.
+ *   - The website's anonymous support chat has a budget of its own (supportGuardFromEnv, ai_spend_pools 0024):
+ *     SUPPORT_AI_DAILY_BUDGET_USD (default DEFAULT_SUPPORT_DAILY_BUDGET_USD, never above the bot's), so visitors cannot
+ *     spend the bot's day.
  *     A deployed live demo (NODE_ENV=production or on Vercel) must keep the totals in Supabase (ai_spend): on the
  *     in-memory store every instance would have its own cap, reset on each cold start — `spendLimits` refuses that.
  *   - What: every paid call RESERVES an upper-bound estimate of its cost first (ai_spend_reserve, migration 0010: atomic,
@@ -31,6 +35,11 @@ import type { AiProvider, CompletionRequest, CompletionResponse } from "./types"
  */
 
 export const DEFAULT_DAILY_BUDGET_USD = 3;
+/** Outside the demo with the real model and no AI_DAILY_BUDGET_USD: a safety net, not a plan (set the env to change it). */
+export const DEFAULT_LIVE_DAILY_BUDGET_USD = 10;
+/** The anonymous support chat's own day (SUPPORT_AI_DAILY_BUDGET_USD). */
+export const DEFAULT_SUPPORT_DAILY_BUDGET_USD = 0.5;
+export const SUPPORT_POOL = "support";
 export const DEFAULT_DEMO_USER_DAILY_MESSAGES = 60;
 
 /** A model missing from the price table (an AI_*_MODEL override) is billed as the most expensive one we know. */
@@ -71,6 +80,7 @@ export class BudgetExceededError extends Error {
 const blank = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
 const limitsSchema = z.object({
   AI_DAILY_BUDGET_USD: z.preprocess(blank, z.coerce.number({ message: "AI_DAILY_BUDGET_USD חייב להיות מספר דולרים, למשל 3" }).min(0).max(10_000).optional()),
+  SUPPORT_AI_DAILY_BUDGET_USD: z.preprocess(blank, z.coerce.number({ message: "SUPPORT_AI_DAILY_BUDGET_USD חייב להיות מספר דולרים, למשל 0.5" }).min(0).max(10_000).optional()),
   DEMO_USER_DAILY_MESSAGES: z.preprocess(
     blank,
     z.coerce.number({ message: "DEMO_USER_DAILY_MESSAGES חייב להיות מספר שלם, למשל 60" }).int({ message: "DEMO_USER_DAILY_MESSAGES חייב להיות מספר שלם, למשל 60" }).min(0).max(100_000).optional(),
@@ -100,7 +110,9 @@ export function spendLimits(source: Record<string, string | undefined> = process
   if (!parsed.success) throw new EnvError(parsed.error.issues);
   const { AI_DAILY_BUDGET_USD: budget, DEMO_USER_DAILY_MESSAGES: perUser } = parsed.data;
   if (live) return { dailyBudgetUsd: budget ?? DEFAULT_DAILY_BUDGET_USD, userDailyMessages: perUser ?? DEFAULT_DEMO_USER_DAILY_MESSAGES, demo: true };
-  return budget === undefined ? null : { dailyBudgetUsd: budget, userDailyMessages: null, demo: false };
+  if (budget !== undefined) return { dailyBudgetUsd: budget, userDailyMessages: null, demo: false };
+  // the real model with no budget set: capped by default (an unset env must never mean unlimited spend)
+  return aiMocked(source) ? null : { dailyBudgetUsd: DEFAULT_LIVE_DAILY_BUDGET_USD, userDailyMessages: null, demo: false };
 }
 
 /** What a model call cost: the provider's figure, else the usage at the highest known price. */
@@ -169,12 +181,15 @@ export interface SpendGuardOptions {
    * the owner's 80% / 100% alert (lib/admin/alerts.ts aiBudgetAlert), never awaited on the paid call's path.
    */
   onSpend?: (day: string, totalUsd: number, budgetUsd: number) => void;
+  /** a budget of its own (ai_spend_pools, 0024) instead of the bot's day total — the support chat's "support" */
+  pool?: string;
 }
 
 export class SpendGuard {
   private readonly now: () => Date;
   readonly turnMs: number | null;
   private readonly onSpend: ((day: string, totalUsd: number, budgetUsd: number) => void) | null;
+  readonly pool: string | null;
 
   constructor(
     private readonly db: Db,
@@ -185,6 +200,11 @@ export class SpendGuard {
     this.now = o.now ?? (() => new Date());
     this.turnMs = o.turnMs ?? null;
     this.onSpend = o.onSpend ?? null;
+    this.pool = o.pool ?? null;
+  }
+
+  private total(day: string): Promise<number> {
+    return this.pool ? this.db.getAiPoolSpend(this.pool, day) : this.db.getAiSpend(day);
   }
 
   /** Tells the spend hook, if any; a hook that throws never fails the call. */
@@ -209,7 +229,7 @@ export class SpendGuard {
   async blocked(userId: string, admitted = false): Promise<SpendBlock | null> {
     const day = this.day();
     const cap = admitted ? null : this.limits.userDailyMessages;
-    const [spent, used] = await Promise.all([this.db.getAiSpend(day), cap === null ? Promise.resolve(0) : this.db.getAiUserMessages(day, userId)]);
+    const [spent, used] = await Promise.all([this.total(day), cap === null ? Promise.resolve(0) : this.db.getAiUserMessages(day, userId)]);
     if (spent >= this.limits.dailyBudgetUsd) return "budget";
     if (cap !== null && used >= cap) return "user_messages";
     return null;
@@ -217,7 +237,7 @@ export class SpendGuard {
 
   /** A read-only check: throws when the day's budget is spent. */
   async assertBudget(): Promise<void> {
-    if ((await this.db.getAiSpend(this.day())) >= this.limits.dailyBudgetUsd) throw new BudgetExceededError("budget", this.limits.demo);
+    if ((await this.total(this.day())) >= this.limits.dailyBudgetUsd) throw new BudgetExceededError("budget", this.limits.demo);
   }
 
   /**
@@ -228,7 +248,7 @@ export class SpendGuard {
     const day = this.day();
     if (!(this.limits.dailyBudgetUsd > 0)) throw new BudgetExceededError("budget", this.limits.demo);
     const carried = unsettledUsd;
-    const total = await this.db.reserveAiSpend(day, estimate + carried, this.limits.dailyBudgetUsd);
+    const total = this.pool ? await this.db.reserveAiPoolSpend(this.pool, day, estimate + carried, this.limits.dailyBudgetUsd) : await this.db.reserveAiSpend(day, estimate + carried, this.limits.dailyBudgetUsd);
     if (total < 0) {
       this.spent(day, this.limits.dailyBudgetUsd);
       throw new BudgetExceededError("budget", this.limits.demo);
@@ -243,7 +263,7 @@ export class SpendGuard {
     const delta = actual - estimate;
     if (delta === 0) return;
     try {
-      const total = await this.db.adjustAiSpend(day, delta);
+      const total = this.pool ? await this.db.adjustAiPoolSpend(this.pool, day, delta) : await this.db.adjustAiSpend(day, delta);
       if (delta > 0) this.spent(day, total);
     } catch (e) {
       if (delta > 0) unsettledUsd += delta; // the next reservation carries it
@@ -269,8 +289,8 @@ export class SpendGuard {
   }
 
   /**
-   * The model for a call with no user behind it (the website's support chat, app/api/support/chat): the same day's
-   * budget — reserved before the call, settled to its cost after, given back when the provider answered with an error
+   * The model for a call with no user behind it (the website's support chat, app/api/support/chat — through
+   * supportGuardFromEnv, so on its own pool): reserved before the call, settled to its cost after, given back when the provider answered with an error
    * status — and no per-user count (there is no account to count against). `timeoutMs` aborts a call that runs long.
    */
   anonymousAi(inner: AiProvider, timeoutMs?: number): AiProvider {
@@ -374,4 +394,19 @@ export class SpendTurn {
 export function spendGuardFromEnv(db: Db, source: Record<string, string | undefined> = process.env): SpendGuard | null {
   const limits = spendLimits(source);
   return limits ? new SpendGuard(db, limits, { turnMs: limits.demo ? DEMO_TURN_MS : undefined, onSpend: (day, total, budget) => aiBudgetAlert(db, day, total, budget) }) : null;
+}
+
+/**
+ * The website's anonymous support chat: its own day (ai_spend_pools "support", SUPPORT_AI_DAILY_BUDGET_USD, default
+ * DEFAULT_SUPPORT_DAILY_BUDGET_USD and never above the bot's budget). Null where the bot itself has no guard (the mock
+ * model): there the chat answers from the knowledge base. A full support pool never blocks the bot, and the bot's day
+ * never blocks the chat beyond its own share.
+ */
+export function supportGuardFromEnv(db: Db, source: Record<string, string | undefined> = process.env): SpendGuard | null {
+  const limits = spendLimits(source);
+  if (!limits) return null;
+  const parsed = limitsSchema.safeParse({ AI_DAILY_BUDGET_USD: undefined, DEMO_USER_DAILY_MESSAGES: undefined, SUPPORT_AI_DAILY_BUDGET_USD: source.SUPPORT_AI_DAILY_BUDGET_USD });
+  if (!parsed.success) throw new EnvError(parsed.error.issues);
+  const own = parsed.data.SUPPORT_AI_DAILY_BUDGET_USD ?? DEFAULT_SUPPORT_DAILY_BUDGET_USD;
+  return new SpendGuard(db, { dailyBudgetUsd: Math.min(own, limits.dailyBudgetUsd), userDailyMessages: null, demo: limits.demo }, { pool: SUPPORT_POOL });
 }

@@ -1,4 +1,5 @@
-import { extractText, getDocumentProxy } from "unpdf";
+import { getDocumentProxy } from "unpdf";
+import { DownloadTooLargeError, MAX_DOWNLOAD_BYTES } from "@/lib/http/capped-body";
 import type { DriveItem, GraphClient } from "./graph";
 
 /** Office / PDF / text documents the assistant can read (PLAN §11 milestone 4: Word/Excel/PPT → PDF → text). */
@@ -10,10 +11,30 @@ export function extensionOf(name: string): string {
   return (name.split(".").pop() ?? "").toLowerCase();
 }
 
-export async function pdfToText(bytes: Uint8Array): Promise<{ text: string; pages: number }> {
+/** A PDF is read page by page and stops here (a "page bomb" in a shared library cannot keep the worker busy). */
+export const MAX_PDF_PAGES = 200;
+
+/**
+ * The text of a PDF, page by page, until MAX_TEXT_CHARS or MAX_PDF_PAGES (`partial`: pages were left unread). The same
+ * text unpdf's extractText({ mergePages: true }) gives for the pages read.
+ */
+export async function pdfToText(bytes: Uint8Array): Promise<{ text: string; pages: number; partial: boolean }> {
   const pdf = await getDocumentProxy(bytes);
-  const { text, totalPages } = await extractText(pdf, { mergePages: true });
-  return { text: (text as string).replace(/[ \t]+\n/g, "\n").trim(), pages: totalPages };
+  const total = pdf.numPages;
+  const texts: string[] = [];
+  let chars = 0;
+  for (let i = 1; i <= Math.min(total, MAX_PDF_PAGES); i++) {
+    const content = await (await pdf.getPage(i)).getTextContent();
+    const page = (content.items as { str?: string; hasEOL?: boolean }[])
+      .filter((item) => item.str != null)
+      .map((item) => item.str + (item.hasEOL ? "\n" : ""))
+      .join("");
+    texts.push(page);
+    chars += page.length;
+    if (chars > MAX_TEXT_CHARS) break;
+  }
+  const merged = texts.join("\n").replace(/[^\S\n]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n");
+  return { text: merged.replace(/[ \t]+\n/g, "\n").trim(), pages: total, partial: texts.length < total };
 }
 
 /**
@@ -26,18 +47,21 @@ export async function driveItemText(graph: GraphClient, item: DriveItem, opts: {
   const download = (format?: "pdf") => (opts.driveId ? graph.downloadDriveItem(opts.driveId, item.id, format) : graph.downloadItem(item.id, format));
   let text: string;
   let pages: number | null = null;
+  let partial = false;
+  // the item's own size is known before any download (the PDF rendition of an Office file is capped as it is read)
+  if ((ext === "pdf" || OFFICE_EXT.has(ext) || TEXT_EXT.has(ext)) && item.size > MAX_DOWNLOAD_BYTES) throw new DownloadTooLargeError(MAX_DOWNLOAD_BYTES);
   if (ext === "pdf") {
     const { bytes } = await download();
-    ({ text, pages } = await pdfToText(bytes));
+    ({ text, pages, partial } = await pdfToText(bytes));
   } else if (OFFICE_EXT.has(ext)) {
     const { bytes } = await download("pdf");
-    ({ text, pages } = await pdfToText(bytes));
+    ({ text, pages, partial } = await pdfToText(bytes));
   } else if (TEXT_EXT.has(ext)) {
     const { bytes } = await download();
     text = new TextDecoder("utf-8").decode(bytes);
   } else {
     return null;
   }
-  const truncated = text.length > MAX_TEXT_CHARS;
-  return { text: truncated ? text.slice(0, MAX_TEXT_CHARS) : text, pages, truncated };
+  const truncated = partial || text.length > MAX_TEXT_CHARS;
+  return { text: text.slice(0, MAX_TEXT_CHARS), pages, truncated };
 }

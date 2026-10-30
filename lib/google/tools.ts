@@ -14,6 +14,7 @@ import { MimeError, isValidEmail, type MimeAttachment } from "./mime";
 import { GOOGLE_BASE_SCOPES, GOOGLE_SCOPES, GoogleOAuthError, driveReadActive, gmailReadActive, hasScope, type GoogleFeature } from "./oauth";
 import { googleTasksTools } from "./tasks-tools";
 import { connectHeadsUpSuffix } from "./user-cap";
+import { UNTRUSTED_CONTENT_NOTE, displayName, lineOrEmpty, oneLineUntrusted, wrapUntrusted } from "@/lib/ai/untrusted";
 import { DATE_RE, TIME_RE, addMinutesLocal, freeSlots, localToInstant, minutesBetweenLocal, wallClock } from "./time";
 
 /**
@@ -55,14 +56,15 @@ const shownLink = (e: GoogleEvent) => e.joinUrl ?? e.textJoinUrl;
 /** Any conference, or a meeting link in the text (Zoom, Teams): a new Meet would give the attendees a second link. */
 const hasLink = (e: GoogleEvent) => e.hasConference || Boolean(e.textJoinUrl);
 
+/** Anyone can put an invitation in the calendar: its title, place and attendees are outside content (one line each). */
 const compactEvent = (e: GoogleEvent) => ({
   id: e.id,
-  title: e.summary,
+  title: lineOrEmpty(e.summary, 200),
   start: e.isAllDay ? e.start : e.start.slice(0, 16),
   end: e.isAllDay ? e.end : e.end.slice(0, 16),
   all_day: e.isAllDay,
-  location: e.location,
-  attendees: e.attendees.filter((a) => !a.self).map((a) => a.email),
+  location: lineOrEmpty(e.location, 200),
+  attendees: e.attendees.filter((a) => !a.self).map((a) => oneLineUntrusted(a.email, 200)),
   organizer_is_me: e.organizer?.self ?? true,
   ...(shownLink(e) ? { join_url: shownLink(e) } : {}),
 });
@@ -87,9 +89,6 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
   };
   const tools: Tool[] = [];
   const consentFor = (feature: GoogleFeature) => (deps.consentLink ? () => deps.consentLink!(feature) : undefined);
-  /** Who a change or a cancellation of an event reaches (its attendees but the user), for an agent limited to a list. */
-  const attendeesOf = async (id: string): Promise<string[] | { error: string }> =>
-    (await guard(async (g) => othersOf(await g.getEvent(id, deps.timeZone)))) as string[] | { error: string };
 
   if (hasScope(granted, GOOGLE_SCOPES.calendarEvents)) {
     tools.push(
@@ -103,7 +102,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
             const range = dayRange(String(input.from_date ?? ""), String(input.to_date ?? ""), deps.timeZone);
             if (!range) return { error: "bad_date_format" };
             const events = await g.listEvents({ ...range, timeZone: deps.timeZone, q: String(input.query ?? "").trim() || undefined });
-            return { count: events.length, events: events.map(compactEvent) };
+            return { count: events.length, events: events.map(compactEvent), ...(events.length ? { note: UNTRUSTED_CONTENT_NOTE } : {}) };
           }),
       },
       {
@@ -135,7 +134,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         },
         run: async (input, ctx) => {
           const online = input.online_meeting === true;
-          const pending = await ctx.createPending("create_event", { provider: "google", title: String(input.title ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? ""), attendees: Array.isArray(input.attendees) ? input.attendees.map(String).filter(Boolean) : [], ...(online ? { online_meeting: true } : {}) });
+          const pending = await ctx.createPending("create_event", { provider: "google", title: lineOrEmpty(String(input.title ?? ""), 200), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: lineOrEmpty(String(input.location ?? ""), 200), attendees: Array.isArray(input.attendees) ? input.attendees.map((a) => oneLineUntrusted(String(a), 254)).filter(Boolean) : [], ...(online ? { online_meeting: true } : {}) });
           return { status: "pending_approval", pending_action_id: pending.id, ...(online ? { online_service: "Google Meet" } : {}), note: `הפרטים מוצגים למשתמש עם כפתורי אישור. לענות במשפט קצר בלבד${online ? ", ולציין בו שתיווצר פגישת Google Meet" : ""}.` };
         },
       },
@@ -162,7 +161,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           // the draft names the meeting and who hears about the change, so the event is read first (no event, no draft)
           const current = (await guard((g) => g.getEvent(id, deps.timeZone))) as GoogleEvent | { error: string };
           if ("error" in current) return current;
-          const fields = { subject: String(input.subject ?? ""), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: String(input.location ?? "") };
+          const fields = { subject: lineOrEmpty(String(input.subject ?? ""), 200), date: String(input.date ?? ""), start: String(input.start ?? ""), end: String(input.end ?? ""), location: lineOrEmpty(String(input.location ?? ""), 200) };
           const changes = Object.values(fields).some((v) => v.trim());
           const wantsLink = input.online_meeting === true;
           // a meeting with any conference keeps it: a new Meet request would replace the link the attendees already have
@@ -177,7 +176,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
             id,
             ...fields,
             ...(addLink ? { online_meeting: true } : {}),
-            current_subject: current.summary,
+            current_subject: lineOrEmpty(current.summary, 200),
             current_date: when.date,
             current_start: when.time,
             current_attendee_count: others.length,
@@ -189,14 +188,25 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
       },
       {
         name: "gcal_delete_event",
-        description: "מכין ביטול של אירוע ביומן Google ומעביר לאישור המשתמש. לא מבטל בפועל.",
+        description: "מכין ביטול של אירוע ביומן Google ומעביר לאישור המשתמש. לא מבטל בפועל. הכרטיס מציג את האירוע כפי שהוא ביומן.",
         readOnly: false,
-        input_schema: { type: "object", properties: { id: str("מזהה האירוע"), subject: str("כותרת האירוע (לתצוגה)") }, required: ["id", "subject"], additionalProperties: false },
+        input_schema: { type: "object", properties: { id: str("מזהה האירוע מ-gcal_list_events") }, required: ["id"], additionalProperties: false },
         run: async (input, ctx) => {
           const id = String(input.id ?? "");
-          const attendees = ctx.checksRecipients ? await attendeesOf(id) : null;
-          if (attendees && !Array.isArray(attendees)) return attendees;
-          const pending = await ctx.createPending("delete_event", { provider: "google", id, subject: String(input.subject ?? ""), ...(attendees ? { current_attendees: attendees } : {}) });
+          // the card names the event that will be deleted, as the calendar has it (no event, no draft)
+          const current = (await guard((g) => g.getEvent(id, deps.timeZone))) as GoogleEvent | { error: string };
+          if ("error" in current) return current;
+          const others = othersOf(current);
+          const when = current.isAllDay ? { date: current.start.slice(0, 10), time: "" } : wallClock(current.start);
+          const pending = await ctx.createPending("delete_event", {
+            provider: "google",
+            id,
+            current_subject: lineOrEmpty(current.summary, 200),
+            current_date: when.date,
+            current_start: when.time,
+            current_attendee_count: others.length,
+            ...(ctx.checksRecipients ? { current_attendees: others } : {}),
+          });
           return { status: "pending_approval", pending_action_id: pending.id, note: "הביטול מוצג למשתמש עם כפתורי אישור. לענות במשפט קצר." };
         },
       },
@@ -223,7 +233,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
                 : plan.driveFullRead
                   ? "רק קבצים שנפתחו או נוצרו דרך האפליקציה נגישים. לחיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) צריך אישור נוסף: gdrive_read_status מחזיר מה לומר למשתמש."
                   : "רק קבצים שנפתחו דרך האפליקציה נגישים. חיפוש בכל ה-Drive (כולל Docs, Sheets ו-Slides קיימים) כלול רק במסלול פרו: pro_feature מחזיר מה לומר למשתמש.";
-            return { count: files.length, files: files.map((f) => ({ id: f.id, name: f.name, modified: f.modifiedTime.slice(0, 10), type: f.mimeType })), note };
+            return { count: files.length, files: files.map((f) => ({ id: f.id, name: oneLineUntrusted(f.name, 160), modified: f.modifiedTime.slice(0, 10), type: f.mimeType })), note: [note, files.length ? UNTRUSTED_CONTENT_NOTE : ""].filter(Boolean).join(" ") || undefined };
           }),
       },
       {
@@ -235,9 +245,10 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           guard(async (g) => {
             const file = await g.getFile(String(input.id ?? ""));
             const res = await driveFileText(g, file);
-            if (!res) return { error: "unsupported_format", name: file.name };
-            if ("error" in res) return { error: res.error, name: file.name };
-            return { name: file.name, pages: res.pages, truncated: res.truncated, text: res.text };
+            const name = oneLineUntrusted(file.name, 160);
+            if (!res) return { error: "unsupported_format", name };
+            if ("error" in res) return { error: res.error, name };
+            return { name, pages: res.pages, truncated: res.truncated, text: wrapUntrusted(res.text, { source: "gdrive", id: file.id }), note: UNTRUSTED_CONTENT_NOTE };
           }),
       },
     );
@@ -248,6 +259,7 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
         name: "gdrive_save_doc",
         description: "שומר טקסט (סיכום, טיוטה, רשימה) כמסמך Google Docs חדש ב-Drive של המשתמש עצמו. לא משתף עם אף אחד, ולכן לא דורש אישור. להשתמש רק כשהמשתמש ביקש לשמור.",
         readOnly: true,
+        internalWrite: true,
         input_schema: { type: "object", properties: { title: str("שם המסמך"), text: str("התוכן המלא") }, required: ["title", "text"], additionalProperties: false },
         run: (input, ctx) =>
           guard(async (g) => {
@@ -279,14 +291,16 @@ export function googleTools(deps: GoogleToolDeps): Tool[] {
           if ("error" in (file as object)) return file;
           attachmentName = (file as { name: string }).name;
         }
+        const toEmail = String(input.to_email ?? "").trim();
+        if (toEmail && !isValidEmail(toEmail)) return { status: "error", error: "invalid_recipient", note: "כתובת הנמען לא תקינה — לשאול את המשתמש לאיזו כתובת לשלוח." };
         const pending = await ctx.createPending("send_mail", {
           provider: "google",
-          to_name: String(input.to_name ?? ""),
-          to_email: String(input.to_email ?? "").trim(),
-          cc: String(input.cc ?? "").trim(),
-          subject: String(input.subject ?? ""),
+          to_name: displayName(String(input.to_name ?? "")),
+          to_email: toEmail,
+          cc: oneLineUntrusted(String(input.cc ?? ""), 2000),
+          subject: lineOrEmpty(String(input.subject ?? ""), 200),
           body: String(input.body ?? ""),
-          ...(attachmentId ? { attachment_file_id: attachmentId, attachment_name: attachmentName } : {}),
+          ...(attachmentId ? { attachment_file_id: attachmentId, attachment_name: oneLineUntrusted(attachmentName, 120) } : {}),
         });
         return { status: "pending_approval", pending_action_id: pending.id, note: "הטיוטה מוצגת למשתמש עם כפתורי שלח/ערוך/בטל. לענות במשפט קצר בלבד." };
       },
@@ -457,7 +471,7 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
       if (!to || !isValidEmail(to)) return "לא נמצאה כתובת מייל תקינה לנמען. אפשר לכתוב לי את הכתובת ואכין מחדש.";
       const attachments = typeof p.attachment_file_id === "string" && p.attachment_file_id ? [await driveAttachment(google, p.attachment_file_id)] : [];
       await google.sendMail({ to: [{ email: to, name: String(p.to_name ?? "") || null }], cc: splitEmails(p.cc).map((email) => ({ email })), subject: String(p.subject ?? ""), body: String(p.body ?? ""), attachments });
-      return gcopy["g.mail.sent"](String(p.to_name || to), connection.account_email ?? "");
+      return gcopy["g.mail.sent"](displayName(String(p.to_name ?? "")) || to, connection.account_email ?? "");
     }),
     create_event: wrap("create_event", async ({ google, timeZone }, p, action) => {
       const date = String(p.date ?? "");
@@ -554,7 +568,7 @@ export function googleExecutors(googleFor: (userId: string) => Promise<GoogleFor
     }),
     delete_event: wrap("delete_event", async ({ google }, p) => {
       await google.deleteEvent(String(p.id ?? ""));
-      return copy["act.cal.cancelled"](String(p.subject ?? ""));
+      return copy["act.cal.cancelled"](String(p.current_subject ?? p.subject ?? ""));
     }),
   };
 }

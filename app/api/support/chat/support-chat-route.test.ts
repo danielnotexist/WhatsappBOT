@@ -146,9 +146,11 @@ describe("/api/support/chat — the model (LIVE_AI demo / production), under the
       { role: "assistant", content: "שלום, במה אפשר לעזור?" },
       { role: "user", content: "כמה עולה פרו?" },
     ]);
-    // counted in the shared daily total (ai_spend), settled to the reported cost
+    // counted in the support chat's own pool (ai_spend_pools "support", 0024), settled to the reported cost — never in
+    // the bot's day total, so anonymous visitors cannot stop the bot
     const day = new SpendGuard(db, { dailyBudgetUsd: 3, userDailyMessages: null, demo: true }).day();
-    expect(await db.getAiSpend(day)).toBeCloseTo(0.0004, 6);
+    expect(await db.getAiPoolSpend("support", day)).toBeCloseTo(0.0004, 6);
+    expect(await db.getAiSpend(day)).toBe(0);
   });
 
   it("the ticket marker becomes the ticket offer and is removed from the text", async () => {
@@ -170,7 +172,7 @@ describe("/api/support/chat — the model (LIVE_AI demo / production), under the
     setAiProviderForTests(failing);
     expect(ok(await send(req({ message: "איך מתחברים?" })))).toMatchObject({ source: "kb", topic: "connect" });
     expect(JSON.stringify(errors.mock.calls)).not.toContain("איך מתחברים");
-    expect(await db.getAiSpend(new SpendGuard(db, { dailyBudgetUsd: 3, userDailyMessages: null, demo: true }).day())).toBe(0); // given back
+    expect(await db.getAiPoolSpend("support", new SpendGuard(db, { dailyBudgetUsd: 3, userDailyMessages: null, demo: true }).day())).toBe(0); // given back
 
     setAiProviderForTests(ai);
     ai.enqueue({ text: "אפשר להירשם באתר ו", stopReason: "max_tokens" }, { text: "   " });
@@ -178,10 +180,13 @@ describe("/api/support/chat — the model (LIVE_AI demo / production), under the
     expect(ok(await send(req({ message: "איך מתחברים?" })))).toMatchObject({ source: "kb", topic: "connect" });
   });
 
-  it("outside the demo: the model only when AI_DAILY_BUDGET_USD is set (an anonymous page never calls it uncapped)", async () => {
+  it("outside the demo: always under its own cap (default $0.5 a day); once it is spent, the knowledge base", async () => {
     vi.stubEnv("DATA_MODE", "");
+    const day = new SpendGuard(db, { dailyBudgetUsd: 3, userDailyMessages: null, demo: false }).day();
+    await db.reserveAiPoolSpend("support", day, 0.5, 0.5); // visitors spent the support chat's day
     expect(ok(await send(req({ message: "כמה זה עולה?" })))).toMatchObject({ source: "kb" });
     expect(ai.calls).toHaveLength(0);
+    await db.adjustAiPoolSpend("support", day, -0.5);
     vi.stubEnv("AI_DAILY_BUDGET_USD", "2");
     ai.enqueue({ text: "בסיסי ב-99 ₪ לחודש." });
     expect(ok(await send(req({ message: "כמה זה עולה?" })))).toMatchObject({ source: "ai", answer: "בסיסי ב-99 ₪ לחודש." });

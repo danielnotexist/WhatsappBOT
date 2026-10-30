@@ -314,7 +314,7 @@ describe("agents in WhatsApp — pro", () => {
     );
     await processInbound(h.ctx, h.inbound("@מנהלת חשבונות תעבירי את חשבונית 1023 לרו״ח, office@barak-cpa.example"));
     const draft = lastButtons(h);
-    expect(draft.body!.startsWith("*מנהלת חשבונות:*\n*העברת מייל*\nנושא: אישור חשבונית 1023")).toBe(true);
+    expect(draft.body!.startsWith("*מנהלת חשבונות:*\n*העברת מייל*\nאל: office@barak-cpa.example\nנושא: אישור חשבונית 1023")).toBe(true); // the destination first
     expect(draft.buttons!.map((b) => b.title)).toEqual(["העבר", "ערוך", "בטל"]);
     const actionId = draft.buttons![0]!.id.split(":")[2]!;
     expect(await h.db.getPendingAction(actionId)).toMatchObject({ kind: "forward_mail", agent_key: "builtin:bookkeeper", agent_name: "מנהלת חשבונות", status: "pending" });

@@ -1,3 +1,4 @@
+import { readCapped } from "@/lib/http/capped-body";
 import { TEAMS_PROVIDER, joinUrlInText, safeJoinUrl } from "@/lib/online-meeting";
 
 /**
@@ -229,11 +230,12 @@ export class GraphClient {
     return json as T;
   }
 
+  /** A file's bytes, capped at MAX_DOWNLOAD_BYTES (lib/http/capped-body.ts: DownloadTooLargeError above it). */
   async requestBytes(path: string): Promise<{ bytes: Uint8Array; contentType: string | null }> {
     const token = await this.opts.getAccessToken();
     const res = await this.fetchImpl(`${this.base}${path}`, { headers: { Authorization: `Bearer ${token}` }, redirect: "follow" });
     if (!res.ok) throw new GraphError(`Graph ${res.status} downloading ${path}`, res.status, res.status === 403 ? "accessDenied" : null);
-    return { bytes: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get("content-type") };
+    return { bytes: await readCapped(res), contentType: res.headers.get("content-type") };
   }
 
   // ---------- me ----------

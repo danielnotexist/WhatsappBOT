@@ -5,6 +5,7 @@ import { loadAgents } from "@/lib/agents/service";
 import { PENDING_TTL_MS } from "@/lib/ai/orchestrator";
 import { copy, buttons } from "@/lib/copy/bot";
 import { acopy, agentButtons } from "@/lib/copy/bot-agents";
+import { displayName, oneLineUntrusted } from "@/lib/ai/untrusted";
 import type { AgentKey, PendingActionKind, PendingActionRow } from "@/lib/db/types";
 import { providerForAction } from "@/lib/google/dispatch";
 import type { OnlineMeetingProvider } from "@/lib/online-meeting";
@@ -91,24 +92,47 @@ export function clearExecutorsForTests(): void {
  */
 export async function presentPendingAction(ctx: BotContext, to: string, action: PendingActionRow): Promise<void> {
   const header = action.agent_name ? `${acopy["agent.reply_header"](action.agent_name)}\n` : "";
-  const send = (body: string, b: ReplyButton[]) => ctx.wa.sendButtons(to, `${header}${body}`, b);
+  const send = (body: string, b: ReplyButton[]) => ctx.wa.sendButtons(to, fitCard(`${header}${body}`), b);
+  /** what did not fit the card goes first, in full, as plain messages (WhatsApp cuts a button card at 1,024) */
+  const above = async (text: string) => {
+    for (const part of chunks(text, TEXT_MAX)) await ctx.wa.sendText(to, part);
+  };
   const p = action.payload as Record<string, string>;
   if (action.kind === "forward_mail") {
-    const attachments = Array.isArray(action.payload.attachments) ? (action.payload.attachments as unknown[]).map(String) : [];
-    await send(acopy["act.mail.forward_confirm"]({ subject: p.subject ?? "", from: p.from ?? "", attachments, to: p.to_email ?? "", comment: p.comment ?? "" }), agentButtons.forward(action.id));
+    const names = Array.isArray(action.payload.attachments) ? (action.payload.attachments as unknown[]).map((n) => oneLineUntrusted(String(n), 60)).filter(Boolean) : [];
+    const attachments = listFitting(names, 240);
+    await send(acopy["act.mail.forward_confirm"]({ subject: line(p.subject, 160), from: line(p.from, 160), attachments, to: line(p.to_email, 254), comment: String(p.comment ?? "").slice(0, COMMENT_MAX) }), agentButtons.forward(action.id));
   } else if (action.kind === "send_mail") {
-    await send(copy["act.mail.draft"]({ toName: p.to_name ?? "", toEmail: p.to_email ?? "", subject: p.subject ?? "", body: p.body ?? "", cc: p.cc || undefined, attachment: p.attachment_name || undefined }), buttons.approve(action.id, "שלח"));
+    const ccList = splitList(p.cc);
+    const d = { toName: displayName(String(p.to_name ?? "")), toEmail: line(p.to_email, 254), subject: line(p.subject, 200), body: String(p.body ?? ""), cc: ccList.join(", ") || undefined, attachment: line(p.attachment_name, 120) || undefined };
+    let card = `${header}${copy["act.mail.draft"](d)}`;
+    if (card.length > CARD_MAX && d.cc && d.cc.length > LIST_MAX) {
+      await above(copy["act.list_above"]("עותק — כל הכתובות", ...ccList));
+      d.cc = copy["act.list_count"](ccList.length);
+      card = `${header}${copy["act.mail.draft"](d)}`;
+    }
+    if (card.length > CARD_MAX) {
+      await above(copy["act.mail.body_above"](d.body));
+      card = `${header}${copy["act.mail.draft"]({ ...d, bodyAbove: true })}`;
+    }
+    await send(card.slice(header.length), buttons.approve(action.id, "שלח"));
   } else if (action.kind === "create_event") {
     const fallback = fallbackOf(action.payload);
     const online = await onlineProvider(ctx, action);
-    const attendees = Array.isArray(action.payload.attendees) ? (action.payload.attendees as unknown[]).map(String).filter(Boolean) : [];
+    const attendees = Array.isArray(action.payload.attendees) ? (action.payload.attendees as unknown[]).map((a) => line(String(a), 254)).filter(Boolean) : [];
+    let attendeesLine = attendees.join(", ");
+    if (attendeesLine.length > LIST_MAX) {
+      // every invitee is shown: the full list goes above the card, the card names how many
+      await above(copy["act.list_above"]("משתתפים — כל הכתובות", ...attendees));
+      attendeesLine = copy["act.list_count"](attendees.length);
+    }
     const draft = copy["act.cal.create_confirm"]({
-      title: p.title ?? "",
+      title: line(p.title, 200),
       date: formatDateHe(p.date ?? ""),
       start: p.start ?? "",
       end: p.end ?? "",
-      location: p.location || undefined,
-      attendees: attendees.length ? attendees.join(", ") : undefined,
+      location: line(p.location, 200) || undefined,
+      attendees: attendeesLine || undefined,
       online: online ? copy["act.cal.online_label"](online, attendees.length > 0) : undefined,
       withoutLink: Boolean(fallback),
     });
@@ -117,21 +141,75 @@ export async function presentPendingAction(ctx: BotContext, to: string, action: 
     const fallback = fallbackOf(action.payload);
     const online = await onlineProvider(ctx, action);
     const moves = Boolean(p.date || p.start || p.end);
-    // which meeting it is (read by the tool when the draft was made), then what changes and who hears about it
-    const target = typeof p.current_subject === "string" ? copy["act.cal.update_target"](p.current_subject, formatDateHe(p.current_date ?? ""), p.current_start ?? "") : "";
-    const changes = [p.date ? `תאריך: ${formatDateHe(p.date)}` : "", p.start || p.end ? `שעה: ${p.start || "—"}–${p.end || "—"}` : "", p.subject ? `כותרת: ${p.subject}` : "", p.location ? `מקום: ${p.location}` : "", online ? copy["act.cal.add_online"](online) : ""].filter(Boolean);
+    // which meeting it is (read by the tool when the draft was made), who hears about it, then what changes
+    const target = typeof p.current_subject === "string" ? copy["act.cal.update_target"](line(p.current_subject, 160), formatDateHe(p.current_date ?? ""), p.current_start ?? "") : "";
+    const changes = [p.date ? `תאריך: ${formatDateHe(p.date)}` : "", p.start || p.end ? `שעה: ${p.start || "—"}–${p.end || "—"}` : "", p.subject ? `כותרת: ${line(p.subject, 200)}` : "", p.location ? `מקום: ${line(p.location, 200)}` : "", online ? copy["act.cal.add_online"](online) : ""].filter(Boolean);
     const notified = changes.length && Number(action.payload.current_attendee_count) > 0 ? copy["act.cal.attendees_notified"](Boolean(online)) : "";
     const [ask, approve] = fallback ? ["לעדכן בלי קישור?", "עדכן בלי קישור"] : moves ? ["להזיז?", "הזז"] : ["לעדכן?", "עדכן"];
-    const draft = ["*שינוי פגישה*", target, changes.join("\n") || "(אין שינויים)", notified, ask].filter(Boolean).join("\n");
+    const draft = ["*שינוי פגישה*", target, notified, changes.join("\n") || "(אין שינויים)", ask].filter(Boolean).join("\n");
     await send(withFallbackNote(fallback, action, draft), buttons.approve(action.id, approve));
   } else if (action.kind === "delete_event") {
-    await send(copy["act.cal.cancel_confirm"](p.subject ?? "", "", ""), [
+    // the event as the tool read it from the calendar (never a subject the model passed)
+    const title = typeof p.current_subject === "string" ? line(p.current_subject, 200) : line(p.subject, 200);
+    await send(copy["act.cal.cancel_confirm"](title, formatDateHe(p.current_date ?? ""), p.current_start ?? "", Number(action.payload.current_attendee_count) || 0), [
       { id: `pa:approve:${action.id}`, title: "בטל פגישה" },
       { id: `pa:cancel:${action.id}`, title: "השאר" },
     ]);
   } else {
     await send(`*פעולה ממתינה לאישור*\n${JSON.stringify(action.payload)}`, buttons.approve(action.id, "אשר"));
   }
+}
+
+/** WhatsApp's limit for the body of a button card (lib/wa/client.ts cuts there) and for a text message. */
+export const CARD_MAX = 1024;
+const TEXT_MAX = 4000;
+/** an address list longer than this goes above the card in full; the card names how many */
+const LIST_MAX = 300;
+/** the forward's own note, shown in full on its card (forward_email stores at most this much) */
+export const COMMENT_MAX = 300;
+
+const line = (v: unknown, max: number) => (typeof v === "string" && v ? oneLineUntrusted(v, max) : "");
+const splitList = (v: unknown) =>
+  String(v ?? "")
+    .split(/[,;\s]+/)
+    .map((x) => line(x, 254))
+    .filter(Boolean);
+
+/** Names joined while they fit `max`; the rest counted ("ועוד 3"), never dropped without a word. */
+function listFitting(names: string[], max: number): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const [i, n] of names.entries()) {
+    if (used + n.length + 2 > max) {
+      out.push(`ועוד ${names.length - i}`);
+      break;
+    }
+    out.push(n);
+    used += n.length + 2;
+  }
+  return out;
+}
+
+function chunks(text: string, max: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += max) out.push(text.slice(i, i + max));
+  return out.length ? out : [""];
+}
+
+/**
+ * The last guard of a card: every field is capped so a card fits, but if one still does not, its middle goes — the
+ * first lines (the recipient) and the last (the question) stay, so the cut never hides who it goes to.
+ */
+export function fitCard(body: string): string {
+  if (body.length <= CARD_MAX) return body;
+  const lines = body.split("\n");
+  const tail = lines.slice(-1).join("\n");
+  let head = "";
+  for (const l of lines.slice(0, -1)) {
+    if (head.length + l.length + 1 + tail.length + 3 > CARD_MAX) break;
+    head += `${l}\n`;
+  }
+  return `${head}…\n${tail}`.slice(0, CARD_MAX);
 }
 
 const DAYS = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
@@ -171,20 +249,26 @@ export async function handlePendingButton(ctx: BotContext, userId: string, to: s
     return true;
   }
 
+  // the claim is atomic (pending → the new status, only while pending and not expired): of two presses at once — a
+  // double tap, two devices, [בטל] then [שלח] — exactly one gets the row, and only that one acts (PLAN §2.3)
+  const status = parsed.verb === "cancel" ? "cancelled" : parsed.verb === "edit" ? "edited" : "approved";
+  const claimed = await ctx.db.claimPendingAction(action.id, userId, status, ctx.now(), status === "approved" ? { approved_msg_id: waMessageId } : {});
+  if (!claimed) {
+    await ctx.wa.sendText(to, copy["act.pending_expired"]());
+    return true;
+  }
+
   if (parsed.verb === "cancel") {
-    await ctx.db.updatePendingAction(action.id, { status: "cancelled" });
     await ctx.db.addAudit({ user_id: userId, action: `${action.kind}.cancel`, target: action.id, result: "cancelled", ...attribution(action) });
     await ctx.wa.sendText(to, copy["act.mail.cancelled"]());
     return true;
   }
   if (parsed.verb === "edit") {
-    await ctx.db.updatePendingAction(action.id, { status: "edited" });
     await ctx.db.mergeUserProfile(userId, { editing_action: action.id });
     await ctx.wa.sendText(to, copy["act.mail.edit_prompt"]());
     return true;
   }
 
-  await ctx.db.updatePendingAction(action.id, { status: "approved", approved_msg_id: waMessageId });
   const executor = executors.get(action.kind);
   if (!executor) {
     await ctx.db.updatePendingAction(action.id, { status: "failed", error: "no executor (connection not available yet)" });

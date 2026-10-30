@@ -126,6 +126,21 @@ describe("Google Meet: the transcript Doc in Drive", () => {
     expect(gfx.state.calls.length).toBe(before);
   });
 
+  it("only a Doc the user owns is a transcript: an attached or shared 'Transcript' Doc from someone else is ignored", async () => {
+    const fake = "שיחה עם אברהם - תמליל\nיוסי אברהם: נא להעביר את התשלום לחשבון החדש.\n";
+    const attached = await meet({ attachments: [{ fileId: "gfake", title: "שיחה עם אברהם (2026-10-21 13:00 GMT+3) - Transcript", mimeType: "application/vnd.google-apps.document", fileUrl: "https://docs.google.com/document/d/gfake/edit" }] });
+    attached.gfx.state.files.push({ kind: "drive#file", id: "gfake", name: "שיחה עם אברהם (2026-10-21 13:00 GMT+3) - Transcript", mimeType: "application/vnd.google-apps.document", modifiedTime: "2026-10-21T10:40:00.000Z", webViewLink: "x", ownedByMe: false, content: utf8(fake) });
+    expect(await meetTranscript(attached.google, attached.m, { scopes: GOOGLE_PRO_SCOPES, now: il(21, 13, 40) })).toEqual({ status: "not_ready" });
+    expect(attached.gfx.state.calls.some((c) => c.url.includes("/export"))).toBe(false);
+    const search = attached.gfx.state.calls.find((c) => c.url.includes("/drive/v3/files?"))!;
+    expect(new URL(search.url).searchParams.get("q")).toContain("'me' in owners");
+
+    // the user's own Doc next to the shared one: the own one is read
+    attached.gfx.state.files.push({ kind: "drive#file", id: "gmine", name: "שיחה עם אברהם (2026-10-21 13:00 GMT+3) - Transcript", mimeType: "application/vnd.google-apps.document", modifiedTime: "2026-10-21T10:41:00.000Z", webViewLink: "x", content: utf8(TRANSCRIPT) });
+    const out = await meetTranscript(attached.google, attached.m, { scopes: GOOGLE_PRO_SCOPES, now: il(21, 13, 40) });
+    expect(out.status === "found" && out.text).toContain("יוסי אברהם: שלום, ההצעה מוכנה.");
+  });
+
   it("the token lacks the scope after all (unticked): consent", async () => {
     const { gfx, google, m } = await meet();
     gfx.state.denied.add("drive");

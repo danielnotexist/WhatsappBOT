@@ -8,7 +8,7 @@ import { EnvError } from "@/lib/env";
 import { MockStt } from "@/lib/stt/mock";
 import { zonedToUtc } from "@/lib/time/zoned";
 import { AiProviderError } from "./types";
-import { BudgetExceededError, DEMO_TURN_MS, SpendGuard, aiCallCostUsd, aiCallEstimateUsd, resetUnsettledSpendForTests, spendGuardFromEnv, spendLimits, sttCallCostUsd, sttCallEstimateUsd, type SpendLimits } from "./budget";
+import { BudgetExceededError, DEFAULT_LIVE_DAILY_BUDGET_USD, DEFAULT_SUPPORT_DAILY_BUDGET_USD, DEMO_TURN_MS, SUPPORT_POOL, SpendGuard, supportGuardFromEnv, aiCallCostUsd, aiCallEstimateUsd, resetUnsettledSpendForTests, spendGuardFromEnv, spendLimits, sttCallCostUsd, sttCallEstimateUsd, type SpendLimits } from "./budget";
 import { MockProvider } from "./mock";
 
 const KEY = Buffer.alloc(32, 4).toString("base64");
@@ -24,12 +24,33 @@ describe("spendLimits — where the caps apply", () => {
     expect(spendLimits(demo({ LIVE_AI: "1", AI_DAILY_BUDGET_USD: "0" }))!.dailyBudgetUsd).toBe(0); // a kill switch
   });
 
-  it("no guard in the mock demo or a plain deployment; outside the demo only an explicit budget, no per-user cap", () => {
+  it("no guard where the model is mocked; outside the demo the real model is always capped (default $10), no per-user cap", () => {
     expect(spendLimits(demo())).toBeNull();
     expect(spendLimits(demo({ AI_DAILY_BUDGET_USD: "5" }))).toBeNull(); // the mock demo pays nothing
-    expect(spendLimits({ ANTHROPIC_API_KEY: "x" })).toBeNull();
-    expect(spendLimits({ LIVE_AI: "1" })).toBeNull();
+    expect(spendLimits({ DATA_MODE: "memory", ANTHROPIC_API_KEY: "x" })).toBeNull(); // dev / tests: the mock model
+    // a plain deployment with the real model and no AI_DAILY_BUDGET_USD: never uncapped (it used to be)
+    expect(spendLimits({ ANTHROPIC_API_KEY: "x" })).toEqual({ dailyBudgetUsd: DEFAULT_LIVE_DAILY_BUDGET_USD, userDailyMessages: null, demo: false });
+    expect(spendLimits({ LIVE_AI: "1" })).toEqual({ dailyBudgetUsd: 10, userDailyMessages: null, demo: false });
     expect(spendLimits({ AI_DAILY_BUDGET_USD: "20", DEMO_USER_DAILY_MESSAGES: "5" })).toEqual({ dailyBudgetUsd: 20, userDailyMessages: null, demo: false });
+  });
+
+  it("the support chat has its own pool: default $0.5, never above the bot's budget; a full pool never blocks the bot", async () => {
+    const db = new MemoryDb();
+    const support = supportGuardFromEnv(db, { AI_DAILY_BUDGET_USD: "3" })!;
+    expect(support.pool).toBe(SUPPORT_POOL);
+    expect(support.limits).toEqual({ dailyBudgetUsd: DEFAULT_SUPPORT_DAILY_BUDGET_USD, userDailyMessages: null, demo: false });
+    expect(supportGuardFromEnv(db, { AI_DAILY_BUDGET_USD: "0.2", SUPPORT_AI_DAILY_BUDGET_USD: "5" })!.limits.dailyBudgetUsd).toBe(0.2);
+    expect(supportGuardFromEnv(db, demo())).toBeNull(); // the mock model: the knowledge base answers
+    expect(() => supportGuardFromEnv(db, { AI_DAILY_BUDGET_USD: "3", SUPPORT_AI_DAILY_BUDGET_USD: "x" })).toThrow(EnvError);
+    // anonymous visitors fill the support pool …
+    await support.reserve(0.5);
+    await expect(support.reserve(0.01)).rejects.toBeInstanceOf(BudgetExceededError);
+    // … and the bot's day is untouched
+    const bot = spendGuardFromEnv(db, { AI_DAILY_BUDGET_USD: "3" })!;
+    expect(await db.getAiSpend(bot.day())).toBe(0);
+    expect(await bot.blocked("u1")).toBeNull();
+    await bot.reserve(1);
+    expect(await db.getAiPoolSpend(SUPPORT_POOL, bot.day())).toBe(0.5);
   });
 
   it("an invalid value fails fast in Hebrew, naming the variable", () => {

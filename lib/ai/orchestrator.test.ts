@@ -119,7 +119,7 @@ describe("runAssistant", () => {
     const db = new MemoryDb();
     const user = await db.createUser("a@b.co");
     await db.insertMessage({ user_id: user.id, direction: "in", type: "text", text: "שלום" });
-    await db.insertMessage({ user_id: user.id, direction: "out", type: "text", text: "היי" });
+    await db.insertMessage({ user_id: user.id, direction: "out", type: "text", text: "היי", model_used: "claude-sonnet" });
     const row = (await db.insertMessage({ user_id: user.id, direction: "in", type: "text", text: "@מזכירה מה יש לי מחר?" }))!;
     const ai = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null,"agent":null}' }, { text: "מחר פנוי." });
     await runAssistant({ db, ai, user, connections: [], text: "מה יש לי מחר?", inboundId: row.id });
@@ -284,7 +284,7 @@ describe("runAssistant with agents", () => {
     });
     expect((await runAssistant({ db, ai: ai2, user, connections: [], text: "x", tools, agent: other.agent, now: NOW })).pendingActions).toEqual([]);
 
-    // the main assistant keeps no attendee list: a move reads the meeting once (its draft names it), a cancellation not at all
+    // the main assistant keeps no attendee list, but each draft reads the meeting it names: a move and a cancellation once each
     const reads = () => fixture.state.calls.filter((c) => c.method === "GET" && c.url.includes("/me/events/")).length;
     const before = reads();
     const ai3 = new MockProvider().enqueue({ text: '{"intent":"calendar","complexity":"tool","needs_tools":true,"reply":null}' }, { toolCalls: [move("AAMkAGe2", "u3"), cancel("AAMkAGe1", "c4")], stopReason: "tool_use" }, { text: "" });
@@ -294,7 +294,7 @@ describe("runAssistant with agents", () => {
       ["delete_event", false],
       ["update_event", false],
     ]);
-    expect(reads()).toBe(before + 1);
+    expect(reads()).toBe(before + 2);
   });
 
   it("parallel draft calls in one response cannot pass the daily cap: drafts are created one at a time", async () => {

@@ -509,6 +509,14 @@ export class MemoryDb implements Db {
     return row;
   }
 
+  /** Mirrors SupabaseDb.claimPendingAction: the check and the change in one synchronous step (no await between). */
+  async claimPendingAction(id: string, userId: string, status: "approved" | "cancelled" | "edited", now: Date, patch: Partial<Pick<PendingActionRow, "approved_msg_id">> = {}): Promise<PendingActionRow | null> {
+    const row = this.pendingActions.find((p) => p.id === id && p.user_id === userId);
+    if (!row || row.status !== "pending" || Date.parse(row.expires_at) <= now.getTime()) return null;
+    Object.assign(row, patch, { status });
+    return { ...row };
+  }
+
   async listPendingActions(userId: string, status: PendingActionStatus): Promise<PendingActionRow[]> {
     return this.pendingActions.filter((p) => p.user_id === userId && p.status === status);
   }
@@ -706,6 +714,32 @@ export class MemoryDb implements Db {
     if (!Number.isFinite(budgetUsd) || next > budgetUsd) return -1;
     this.aiSpend.set(day, { cost_usd: next, calls: cur.calls + 1 });
     return next;
+  }
+
+  /** ai_spend_pools (0024): one total per (pool, day), apart from the bot's `aiSpend`. */
+  aiSpendPools = new Map<string, { cost_usd: number; calls: number }>();
+
+  async getAiPoolSpend(pool: string, day: string): Promise<number> {
+    return this.aiSpendPools.get(`${pool}|${day}`)?.cost_usd ?? 0;
+  }
+
+  async reserveAiPoolSpend(pool: string, day: string, costUsd: number, budgetUsd: number): Promise<number> {
+    if (!/^[a-z][a-z0-9_]{0,31}$/.test(pool)) throw new Error(`ai_spend_pools: bad pool ${pool}`); // the SQL check
+    const key = `${pool}|${day}`;
+    const cost = Math.max(Number.isFinite(costUsd) ? costUsd : 0, 0);
+    const cur = this.aiSpendPools.get(key) ?? { cost_usd: 0, calls: 0 };
+    const next = Math.round((cur.cost_usd + cost) * 1e6) / 1e6;
+    if (!Number.isFinite(budgetUsd) || next > budgetUsd) return -1;
+    this.aiSpendPools.set(key, { cost_usd: next, calls: cur.calls + 1 });
+    return next;
+  }
+
+  async adjustAiPoolSpend(pool: string, day: string, deltaUsd: number): Promise<number> {
+    const key = `${pool}|${day}`;
+    const cur = this.aiSpendPools.get(key) ?? { cost_usd: 0, calls: 0 };
+    cur.cost_usd = Math.max(Math.round((cur.cost_usd + (Number.isFinite(deltaUsd) ? deltaUsd : 0)) * 1e6) / 1e6, 0);
+    this.aiSpendPools.set(key, cur);
+    return cur.cost_usd;
   }
 
   async adjustAiSpend(day: string, deltaUsd: number): Promise<number> {

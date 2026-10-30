@@ -54,6 +54,7 @@ export function googleTasksTools(deps: GoogleTasksDeps): Tool[] {
       name: "gtasks_create_task",
       description: "מוסיף משימה לרשימת המשימות הראשית של המשתמש ב-Google Tasks. פעולה פנימית, בלי אישור. להשתמש כשמבקשים משימה ב-Google Tasks, או משימה כש-Google הוא החשבון היחיד שמחובר.",
       readOnly: true,
+      internalWrite: true,
       input_schema: {
         type: "object",
         properties: { title: str("המשימה, קצרה ובלשון המשתמש"), notes: str("פרטים נוספים או ריק"), due_date: str("תאריך יעד YYYY-MM-DD או ריק") },

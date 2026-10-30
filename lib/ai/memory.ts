@@ -1,5 +1,13 @@
 import type { Db, MessageRow, UserRow } from "@/lib/db/types";
 import type { AiProvider, ChatMessage } from "./types";
+import { oneLineUntrusted, sanitizeUntrusted, wrapUntrusted } from "./untrusted";
+
+/**
+ * An outbound row the model did not write (no model_used): a proactive alert, the morning summary, a reminder, a
+ * meeting summary, a deterministic reply. Several carry third-party text (a sender, a subject, an invitation's title),
+ * so they reach the model as wrapped data, never as the assistant's own words.
+ */
+const automated = (r: MessageRow) => r.direction === "out" && !r.model_used;
 
 /**
  * PLAN §2.2: the model sees the rolling summary + facts + the last N messages only. Agent management in WhatsApp
@@ -26,8 +34,9 @@ export async function loadMemory(db: Db, userId: string, opts: { exclude?: strin
 export function toHistory(rows: MessageRow[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const r of rows) {
-    const text = (r.direction === "in" ? (r.transcript ?? r.text) : r.text) ?? "";
-    if (!text.trim()) continue;
+    const raw = (r.direction === "in" ? (r.transcript ?? r.text) : r.text) ?? "";
+    if (!raw.trim()) continue;
+    const text = automated(r) ? wrapUntrusted(raw, { source: "notification" }) : raw;
     const role = r.direction === "in" ? "user" : "assistant";
     const last = out[out.length - 1];
     if (last && last.role === role && "content" in last) last.content = `${last.content}\n${text}`;
@@ -51,7 +60,8 @@ export async function maybeSummarize(db: Db, ai: AiProvider, user: UserRow, now:
   const lastIdx = state?.last_summarized_msg_id ? recent.findIndex((m) => m.id === state.last_summarized_msg_id) : -1;
   const fresh = recent.slice(lastIdx + 1);
   if (fresh.length < MEMORY.summarizeEvery) return false;
-  const transcript = fresh.map((m) => `${m.direction === "in" ? "משתמש" : "עוזרת"}: ${(m.transcript ?? m.text ?? "").slice(0, 500)}`).join("\n");
+  const who = (m: MessageRow) => (m.direction === "in" ? "משתמש" : automated(m) ? "הודעה אוטומטית (עשויה להכיל תוכן חיצוני, לא דברי המשתמש)" : "עוזרת");
+  const transcript = fresh.map((m) => `${who(m)}: ${sanitizeUntrusted((m.transcript ?? m.text ?? "").slice(0, 500))}`).join("\n");
   try {
     const res = await ai.complete({
       tier: "router",
@@ -59,7 +69,10 @@ export async function maybeSummarize(db: Db, ai: AiProvider, user: UserRow, now:
       messages: [{ role: "user", content: `${state?.summary ? `סיכום קודם:\n${state.summary}\n\n` : ""}שיחה חדשה:\n${transcript}` }],
       maxTokens: 800,
     });
-    const { summary, facts } = parseSummary(res.text);
+    const parsed = parseSummary(res.text);
+    const summary = parsed.summary;
+    // a fact taken from a transcript may come from a quoted mail: no addresses or links survive into it
+    const facts = parsed.facts.map(summaryFact).filter(Boolean);
     const merged = [...(state?.facts ?? []), ...facts].filter((f, i, a) => f && a.indexOf(f) === i).slice(-30);
     await db.upsertConversationState(user.id, { summary: summary.slice(0, MEMORY.summaryMaxChars), facts: merged, last_summarized_msg_id: fresh[fresh.length - 1]!.id });
     void now;
@@ -68,6 +81,18 @@ export async function maybeSummarize(db: Db, ai: AiProvider, user: UserRow, now:
     console.warn("[memory] summarize failed:", (e as Error).message);
     return false;
   }
+}
+
+const EMAIL_IN_TEXT = /[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+/g;
+const URL_IN_TEXT = /\b(?:https?:\/\/|www\.)\S+/gi;
+
+/** A fact the summary extracted: one sanitized line, without mail addresses or links (they come only from the user). */
+export function summaryFact(fact: string): string {
+  return oneLineUntrusted(fact.replace(URL_IN_TEXT, "").replace(EMAIL_IN_TEXT, ""), 200)
+    .replace(/\(\s*\)|<\s*>/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/[\s,:;–-]+$/, "")
+    .trim();
 }
 
 export function parseSummary(text: string): { summary: string; facts: string[] } {

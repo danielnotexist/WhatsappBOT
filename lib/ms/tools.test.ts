@@ -106,7 +106,8 @@ describe("Graph tools in the assistant", () => {
       },
     );
     const out = await runAssistant({ db: mem, ai, user, connections: [], text: "מה כתוב בהסכם של כהן?", tools });
-    expect(out.text).toBe("בקובץ הסכם כהן.docx כתוב: Hello PDF 42");
+    // the file's text reaches the model as data (lib/ai/untrusted.ts), with the untrusted note
+    expect(out.text).toBe('בקובץ הסכם כהן.docx כתוב: <data source="onedrive" id="01ITEM1">\nHello PDF 42\n</data>');
 
     const expired = new GraphClient({ getAccessToken: async () => "expired", fetchImpl: fixture.fetchImpl });
     const t2 = graphTools({ graph: async () => expired, timeZone: "Asia/Jerusalem" });

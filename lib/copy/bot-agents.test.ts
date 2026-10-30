@@ -44,8 +44,8 @@ describe("agent copy", () => {
     expect(render("agent.list")).toBe(
       "*הסוכנים שלך*\n\n• @מזכירה — קריאת יומן\n• @חשבוניות — קריאת מייל (נעול)\n\nסוכנים משלך: 1 מתוך 1.\n\nלפנות לסוכן: ״@שם״ בתחילת ההודעה. ליצירה: ״סוכן חדש״. לעריכה: ״עריכת סוכן <שם>״.",
     );
-    expect(render("act.mail.forward_confirm")).toBe("*העברת מייל*\nנושא: חשבונית 2291\nמאת: ספק (billing@x.co)\nקבצים: invoice.pdf\nאל: office@barak-cpa.example\n\n> לטיפולך\n\nלהעביר?");
-    expect(acopy["act.mail.forward_confirm"]({ subject: "", from: "", attachments: [], to: "a@b.co", comment: "" })).toBe("*העברת מייל*\nנושא: (בלי נושא)\nאל: a@b.co\n\nלהעביר?");
+    expect(render("act.mail.forward_confirm")).toBe("*העברת מייל*\nאל: office@barak-cpa.example\nנושא: חשבונית 2291\nמאת: ספק (billing@x.co)\nקבצים: invoice.pdf\n\n> לטיפולך\n\nלהעביר?");
+    expect(acopy["act.mail.forward_confirm"]({ subject: "", from: "", attachments: [], to: "a@b.co", comment: "" })).toBe("*העברת מייל*\nאל: a@b.co\nנושא: (בלי נושא)\n\nלהעביר?");
     expect(acopy["agent.not_found"]("שיווק", [])).toContain("״סוכן חדש״ יוצר אחד");
     expect(acopy["agent.limit.trial"]("https://x/pay/t")).toContain("@מזכירה מה יש לי מחר?");
   });

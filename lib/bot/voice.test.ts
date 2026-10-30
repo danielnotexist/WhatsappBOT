@@ -98,3 +98,31 @@ describe("voice notes", () => {
     expect(h.wa.texts.at(-1)).toContain("עם הקלטות אני עדיין לא עובד");
   });
 });
+
+describe("voice notes and paid STT (security round F)", () => {
+  it("a suspended (past_due) account: its usual answer, and the recording never reaches STT", async () => {
+    const { h, user, voice, stt } = await setup();
+    h.db.seedSubscription(user.id, "basic", "past_due");
+    const r = await processInbound(h.ctx, voice());
+    expect(r.note).toBe("past_due (voice not transcribed)");
+    expect(stt!.calls).toHaveLength(0);
+  });
+
+  it("a used-up trial: the trial-ended answer, and the recording never reaches STT", async () => {
+    const { h, user, voice, stt } = await setup();
+    for (let i = 0; i < 10; i++) await h.db.countTrialMessage(user.id);
+    const r = await processInbound(h.ctx, voice());
+    expect(r.note).toBe("quota exhausted");
+    expect(stt!.calls).toHaveLength(0);
+    expect(h.wa.texts.some((t) => t.includes("/pay/"))).toBe(true);
+  });
+
+  it("a recording longer than 5 minutes is not transcribed", async () => {
+    const { h, voice, stt } = await setup();
+    h.wa.media.set("media-1", { bytes: fakeOggOpus(6 * 60_000), mimeType: "audio/ogg; codecs=opus" });
+    const r = await processInbound(h.ctx, voice());
+    expect(r.note).toBe("audio too long");
+    expect(stt!.calls).toHaveLength(0);
+    expect(h.wa.texts.at(-1)).toContain("עד 5 דקות");
+  });
+});
