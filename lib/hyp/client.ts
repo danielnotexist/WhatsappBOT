@@ -240,8 +240,10 @@ export class MockHypGateway implements HypGateway {
   async verifyRedirect(redirect: HypQueryInput): Promise<{ ok: boolean; response: Record<string, string> }> {
     this.calls.push({ method: "verifyRedirect", args: redirect });
     const r = typeof redirect === "string" ? Object.fromEntries(new URLSearchParams(redirect.includes("?") ? redirect.split("?")[1] : redirect)) : Object.fromEntries(redirect instanceof URLSearchParams ? redirect : (redirect as Iterable<[string, string]>));
-    const signed = !this.opts.signKey || mockSignOk(r, this.opts.signKey);
-    return { ok: signed && (HYP_SUCCESS_CODES as readonly string[]).includes(r.CCode ?? ""), response: r as Record<string, string> };
+    // with the key (the app): like HYP's VERIFY, the signature alone — a signed decline verifies too (the caller reads
+    // CCode); without it (unit tests that build their own gateway) a success code stands in for a valid signature
+    const ok = this.opts.signKey ? mockSignOk(r, this.opts.signKey) : (HYP_SUCCESS_CODES as readonly string[]).includes(r.CCode ?? "");
+    return { ok, response: r as Record<string, string> };
   }
   async getToken(transId: string, opts: { allowFalse?: boolean } = {}): Promise<{ token: string; tokef: string }> {
     this.calls.push({ method: "getToken", args: { transId, ...opts } });

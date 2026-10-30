@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createUpgradeOfferToken, verifyUpgradeOfferToken } from "@/lib/billing/links";
-import { createPayLinkToken } from "@/lib/billing/pay-link";
+import { createPayLinkToken, verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { activateSubscription } from "@/lib/billing/subscription";
 import { webUpgradeView } from "@/lib/billing/web-upgrade";
 import { setDbForTests } from "@/lib/db";
@@ -10,7 +10,7 @@ import { setHypForTests } from "@/lib/hyp";
 import { MockHypGateway } from "@/lib/hyp/client";
 import { setWaSenderForTests } from "@/lib/wa";
 import { RecordingWaSender } from "@/lib/wa/sender";
-import { upgradeAction } from "./actions";
+import { startPaymentAction, upgradeAction } from "./actions";
 
 /**
  * [לשדרג עכשיו] on /pay/<token> (a server action — a POST): the pay token names the account, the signed offer must be
@@ -22,7 +22,8 @@ const h = vi.hoisted(() => {
       super(`redirect ${url}`);
     }
   }
-  return { Redirect };
+  /** the signed-in account of the request (getSession) */
+  return { Redirect, current: null as string | null };
 });
 
 vi.mock("next/navigation", () => ({
@@ -30,7 +31,7 @@ vi.mock("next/navigation", () => ({
     throw new h.Redirect(url);
   },
 }));
-vi.mock("@/lib/auth/current-user", () => ({ ensureDemoSessionUser: async () => undefined }));
+vi.mock("@/lib/auth/current-user", () => ({ ensureDemoSessionUser: async () => undefined, getSession: async () => (h.current ? { userId: h.current } : null) }));
 
 let db: MemoryDb;
 let hyp: MockHypGateway;
@@ -67,7 +68,8 @@ async function basicUser(plan: "basic" | "pro" = "basic") {
 }
 
 /** Submits the form and returns where the action redirected (path + query). */
-async function submit(fields: Record<string, string>): Promise<{ path: string; upgrade: string | null; r: string | null; error: string | null }> {
+async function submit(fields: Record<string, string>, session: string | null | undefined = undefined): Promise<{ path: string; upgrade: string | null; r: string | null; error: string | null }> {
+  h.current = session === undefined ? (verifyPayLinkToken(fields.token)?.userId ?? null) : session;
   const fd = new FormData();
   for (const [k, v] of Object.entries(fields)) fd.append(k, v);
   const thrown = await upgradeAction(fd).then(
@@ -91,6 +93,15 @@ describe("upgradeAction", () => {
     expect(charges()).toHaveLength(1);
     expect((await db.getSubscription(user.id))!.plan).toBe("pro");
     expect(wa.sent.some((s) => s.kind === "template" || s.kind === "text")).toBe(true);
+  });
+
+  it("charges only with the account's own session: the pay link alone (no session, another account's) → ?r=signin, nothing charged", async () => {
+    const { user, token, offer } = await basicUser();
+    const other = await basicUser();
+    expect(await submit({ token, offer: await offer() }, null)).toMatchObject({ path: `/pay/${token}`, upgrade: null, r: "signin" });
+    expect(await submit({ token, offer: await offer() }, other.user.id)).toMatchObject({ upgrade: null, r: "signin" });
+    expect(charges()).toHaveLength(0);
+    expect((await db.getSubscription(user.id))!.plan).toBe("basic");
   });
 
   it("is idempotent: the same form again (double click, refresh, back + resubmit) shows the first result, no second charge", async () => {
@@ -157,6 +168,29 @@ describe("upgradeAction", () => {
     };
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect((await submit(form)).r).toBe("error");
+  });
+});
+
+describe("startPaymentAction", () => {
+  const start = async (token: string, plan: string) => {
+    const fd = new FormData();
+    fd.append("token", token);
+    fd.append("plan", plan);
+    const thrown = await startPaymentAction(fd).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    if (!(thrown instanceof h.Redirect)) throw new Error(`expected a redirect, got ${String(thrown)}`);
+    return thrown.url;
+  };
+
+  it("never opens a payment page over a paid period that is running (the page shows the card update instead)", async () => {
+    const { user, token } = await basicUser();
+    expect(await start(token, "pro")).toBe(`/pay/${encodeURIComponent(token)}`);
+    expect(hyp.calls.filter((c) => c.method === "createPaymentPage")).toHaveLength(0);
+    // a paused account settles from the same page
+    await db.upsertSubscription(user.id, { status: "past_due", charge_failures: 4 });
+    expect(await start(token, "basic")).toContain("/api/pay/mock");
   });
 });
 

@@ -53,6 +53,7 @@ export const UPGRADE_NOTICES = {
   changed: "המצב של המנוי השתנה מאז שהמחיר הוצג, ולכן לא בוצע חיוב.",
   busy: "יש חיוב קודם שעדיין בבדיקה. כדי לא לחייב פעמיים, לא בוצע חיוב נוסף.",
   error: "לא הצלחנו להשלים את השדרוג כרגע, ולא בוצע חיוב. אפשר לנסות שוב בעוד רגע.",
+  signin: "השדרוג מחויב בכרטיס השמור, ולכן הוא נעשה אחרי כניסה לחשבון. אחרי הכניסה, באזור האישי: ״לשדרוג לפרו״.",
 } as const;
 export type UpgradeNotice = keyof typeof UPGRADE_NOTICES;
 
@@ -384,6 +385,7 @@ export function CardUpdateFace({
   nextDay,
   cardUpdateHref,
   upgradeHref,
+  signInHref = null,
   block,
   notice,
   gate,
@@ -396,6 +398,8 @@ export function CardUpdateFace({
   cardUpdateHref: string;
   /** basic with a one-tap upgrade available: the upgrade face of this page */
   upgradeHref: string | null;
+  /** basic, viewed without the account's session: the upgrade waits for a sign-in (the link to it) */
+  signInHref?: string | null;
   /** basic without one: why (shown above the paper) */
   block: { reason: UpgradeBlock; last4?: string } | null;
   notice?: UpgradeNotice | null;
@@ -433,6 +437,10 @@ export function CardUpdateFace({
       {upgradeHref ? (
         <p className="mt-8">
           <StageLink href={upgradeHref as Route}>לשדרוג לפרו</StageLink>
+        </p>
+      ) : signInHref ? (
+        <p className="mt-8">
+          <StageLink href={signInHref as Route}>כניסה לחשבון</StageLink>
         </p>
       ) : plan === "pro" ? (
         <p className="mt-8 max-w-[38rem] text-[0.9375rem] leading-relaxed text-cream-muted">מעבר למסלול הבסיסי: בשיחה עם {BRAND.name}, לכתוב ״מעבר לבסיסי״.</p>

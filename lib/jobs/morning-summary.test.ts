@@ -9,7 +9,8 @@ import { FIXTURE_TEAMS_JOIN_URL, createGraphFixture } from "@/lib/ms/__fixtures_
 import { GraphClient, type GraphMessage } from "@/lib/ms/graph";
 import { createReminder } from "@/lib/reminders/service";
 import { zonedToUtc } from "@/lib/time/zoned";
-import { MORNING_TEXT_BUDGET, emailsAwaitingReply, morningDedupeKey, nextMorningRun, renderMorningText, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
+import { meetingSummariesIncluded } from "@/lib/meetings/jobs";
+import { MORNING_TEXT_BUDGET, emailsAwaitingReply, morningDedupeKey, nextMorningRun, proactiveAlertsOn, renderMorningText, runMorningSummaryJob, scheduleMorningSummary, type MorningDeps } from "./morning-summary";
 
 const il = (y: number, mo: number, d: number, h: number, mi = 0) => zonedToUtc({ year: y, month: mo, day: d, hour: h, minute: mi }, "Asia/Jerusalem");
 
@@ -65,6 +66,20 @@ describe("morning summary — the job", () => {
     expect(h.wa.texts.at(-1)).toBe(
       `*בוקר טוב. יום ד׳ 21.10*\n\n*פגישות היום*\n• 09:00 דיון בבית משפט השלום ת״א\n• 12:00 פגישה עם רו״ח ברק\n${TEAMS_LINE}\n\n*מיילים שמחכים לתשובה*\n• עו״ד שפירא — הצעת פשרה, תיק 4471\n\nרוצה שאנסח תשובה למישהו מהם?`,
     );
+  });
+
+  it("a paused account (past_due) gets no summary, no proactive section, no meeting summaries; the next day stays queued", async () => {
+    const { h, user, deps, job } = await setup();
+    await h.db.upsertSubscription(user.id, { plan: "pro", status: "past_due", next_charge_at: "2026-10-01T10:00:00Z", charge_failures: 4 });
+    expect(await runMorningSummaryJob(deps, job)).toEqual({ status: "skipped", reason: "account paused (past_due)" });
+    expect(h.wa.sent).toEqual([]);
+    expect(h.db.jobs.some((j) => j.kind === "morning_summary" && j.status === "queued")).toBe(true);
+    expect(await proactiveAlertsOn(h.db, user, h.ctx.now())).toBe(false);
+    expect(await meetingSummariesIncluded(h.db, user, h.ctx.now())).toBe(false);
+    // paid again → back on
+    await h.db.upsertSubscription(user.id, { status: "active", next_charge_at: "2026-11-21T10:00:00Z", charge_failures: 0 });
+    expect(await proactiveAlertsOn(h.db, user, h.ctx.now())).toBe(true);
+    expect(await meetingSummariesIncluded(h.db, user, h.ctx.now())).toBe(true);
   });
 
   it("is idempotent per user per day and queues the next workday", async () => {

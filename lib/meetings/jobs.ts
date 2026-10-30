@@ -1,5 +1,5 @@
 import { BudgetExceededError } from "@/lib/ai/budget";
-import { effectivePlan, entitlements } from "@/lib/billing/plans";
+import { entitlements, servicePlan } from "@/lib/billing/plans";
 import { copy } from "@/lib/copy/bot";
 import { mcopy } from "@/lib/copy/bot-meetings";
 import type { Db, JobRow, UserRow } from "@/lib/db/types";
@@ -48,10 +48,10 @@ export const PLAN_LAST_HOUR = 22;
 const tzOf = (user: UserRow) => user.timezone || DEFAULT_TZ;
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/** Pro (server-side) — the on-demand summary and the buttons. */
+/** Pro (server-side, not paused for an unpaid renewal — servicePlan) — the on-demand summary and the buttons. */
 export async function meetingSummariesIncluded(db: Db, user: UserRow, now: Date): Promise<boolean> {
   if (user.deleted_at) return false;
-  return entitlements(effectivePlan(await db.getSubscription(user.id), now)).meetingSummaries;
+  return entitlements(servicePlan(await db.getSubscription(user.id), now)).meetingSummaries;
 }
 
 /** The automatic summaries: pro, and not turned off ("בלי סיכומי פגישות", or every proactive message). */

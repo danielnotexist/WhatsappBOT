@@ -16,7 +16,7 @@ import type { BillingContext } from "./context";
 import { formatIls, quoteAnnualSwitch, quotePeriod, quoteUpgrade, vatOf } from "./money";
 import { shortDateHe } from "./notify";
 import { PLANS, addCycle, addOneYear, cycleOf, isBillingCycle, isPaidPlan, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
-import { applyPendingCredit, loadCardToken, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
+import { applyPendingCredit, keptChanges, loadCardToken, renewalItem, renewalPlan, scheduleCharge } from "./subscription";
 
 export type OfferKind = Exclude<BillingApprovalKind, "renewal">;
 
@@ -374,18 +374,21 @@ export async function executeClaimedCharge(ctx: BillingContext, user: UserRow, a
   // retry in grace → the cycle continues from its due date; paused / ended → a new period from today
   const cycle = approvalCycle(a);
   const nextChargeAt = a.kind === "retry" && st.inGrace ? addCycle(new Date(sub.next_charge_at!), cycle) : addCycle(now, cycle);
+  // a cancel pressed while HYP was charging is kept: the period just paid runs to its end, nothing more is charged
+  const kept = keptChanges(sub, await ctx.db.getSubscription(user.id));
   await ctx.db.upsertSubscription(user.id, {
-    status: "active",
+    status: kept.cancelled ? "cancelled" : "active",
     plan: a.plan,
-    scheduled_plan: null,
+    scheduled_plan: kept.scheduledPlan,
     billing_cycle: cycle,
-    scheduled_cycle: null,
+    scheduled_cycle: kept.scheduledCycle,
     charge_failures: 0,
     next_charge_at: nextChargeAt.toISOString(),
-    cancelled_at: null,
+    ...(kept.cancelled ? {} : { cancelled_at: null }),
     started_at: sub.started_at ?? now.toISOString(),
   });
-  await scheduleCharge(ctx.db, user.id, nextChargeAt);
+  if (kept.cancelled) await ctx.db.cancelJobs(user.id, "charge");
+  else await scheduleCharge(ctx.db, user.id, nextChargeAt);
   await finishApproval(ctx, a, { status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
   await audit("ok", a.kind === "retry" ? "subscription.charge" : "subscription.renew");
   return withCredit({ kind: "charged", transId: result.transId, amountIls: a.amount_ils, plan: a.plan, cycle, nextChargeAt, nextAmountIls: priceOf(a.plan, cycle), resendHint: false, before: sub, inGrace: st.inGrace });

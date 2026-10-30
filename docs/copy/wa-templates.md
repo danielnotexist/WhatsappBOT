@@ -240,7 +240,7 @@
     {
       "type": "BUTTONS",
       "buttons": [
-        { "type": "URL", "text": "לשדרג לפרו", "url": "https://APP_DOMAIN/upgrade/{{1}}", "example": ["https://APP_DOMAIN/upgrade/u_7f3a9c"] }
+        { "type": "URL", "text": "לשדרג לפרו", "url": "https://APP_DOMAIN/pay/{{1}}", "example": ["https://APP_DOMAIN/pay/u_7f3a9c"] }
       ]
     }
   ]

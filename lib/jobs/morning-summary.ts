@@ -17,7 +17,7 @@
  */
 import type { AiProvider } from "@/lib/ai/types";
 import { oneLineUntrusted } from "@/lib/ai/untrusted";
-import { effectivePlan, entitlements } from "@/lib/billing/plans";
+import { entitlements, servicePlan } from "@/lib/billing/plans";
 import { pcopy } from "@/lib/copy/bot-proactive";
 import { copy } from "@/lib/copy/bot";
 import { copyM5, morningClosers } from "@/lib/copy/bot-m5";
@@ -55,10 +55,13 @@ export interface MorningDeps extends ProactiveDeps {
   ai?: AiProvider;
 }
 
-/** Proactive alerts for this user: pro (server-side entitlement) and not turned off ("בלי התראות" / the toggle in /account). */
+/**
+ * Proactive alerts for this user: pro (server-side entitlement, and not paused for an unpaid renewal — servicePlan) and
+ * not turned off ("בלי התראות" / the toggle in /account).
+ */
 export async function proactiveAlertsOn(db: Db, user: UserRow, now: Date): Promise<boolean> {
   if (user.profile.alerts_disabled === true || user.profile.proactive_disabled === true || user.deleted_at) return false;
-  return entitlements(effectivePlan(await db.getSubscription(user.id), now)).proactive;
+  return entitlements(servicePlan(await db.getSubscription(user.id), now)).proactive;
 }
 
 const tzOf = (user: UserRow) => user.timezone || DEFAULT_TZ;
@@ -340,6 +343,8 @@ export async function runMorningSummaryJob(deps: MorningDeps, job: Pick<JobRow, 
     if (!MORNING_DAYS.includes(weekdayOf(day))) return { status: "skipped", reason: "weekend" };
     if (user.profile.morning_summary_last_date === localDate) return { status: "skipped", reason: "already sent today" };
     if (proactivePaused(user, now)) return { status: "skipped", reason: "paused" };
+    // a paused account (an unpaid renewal) gets no scheduled service until it pays (the next day stays scheduled)
+    if ((await deps.db.getSubscription(user.id))?.status === "past_due") return { status: "skipped", reason: "account paused (past_due)" };
 
     const summary = await buildMorningSummary(deps, user, day);
     if (!summary.connected && summary.empty) return { status: "skipped", reason: "nothing to report (no connection)" };

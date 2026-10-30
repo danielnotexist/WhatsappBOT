@@ -756,7 +756,9 @@ export class MemoryDb implements Db {
   }
 
   async getSubscription(userId: string): Promise<SubscriptionRow | null> {
-    return this.subscriptions.get(userId) ?? null;
+    // a copy, like a row read from Postgres: a read never changes when the subscription is written later
+    const row = this.subscriptions.get(userId);
+    return row ? { ...row } : null;
   }
 
   async cancelSubscription(userId: string): Promise<SubscriptionRow | null> {
@@ -764,7 +766,7 @@ export class MemoryDb implements Db {
     if (!row) return null;
     row.status = "cancelled";
     row.cancelled_at = iso();
-    return row;
+    return { ...row };
   }
 
   async upsertSubscription(userId: string, patch: Partial<Omit<SubscriptionRow, "id" | "user_id">> & { hyp_token_enc?: string | null }): Promise<SubscriptionRow> {
@@ -776,7 +778,7 @@ export class MemoryDb implements Db {
       const sec = this.secrets.get(userId) ?? { hyp_token_enc: null, hyp_tokef: null };
       this.secrets.set(userId, { hyp_token_enc: hyp_token_enc === undefined ? sec.hyp_token_enc : hyp_token_enc, hyp_tokef: rest.hyp_tokef === undefined ? sec.hyp_tokef : rest.hyp_tokef });
     }
-    return next;
+    return { ...next };
   }
 
   async getSubscriptionSecret(userId: string): Promise<SubscriptionSecret | null> {

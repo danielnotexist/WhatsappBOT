@@ -1,4 +1,5 @@
 import { ownerAlert } from "@/lib/admin/alerts";
+import { reportError } from "@/lib/errors/report";
 import { copy } from "@/lib/copy/bot";
 import { chargeReason } from "@/lib/copy/owner-alerts";
 import { billButtons, billCopy, renewalWhatHe } from "@/lib/copy/bot-billing";
@@ -6,14 +7,14 @@ import type { UserRow } from "@/lib/db/types";
 import { classifyHypFailure, tokenLast4 } from "@/lib/hyp/codes";
 import { formatHeshDesc } from "@/lib/hyp/sign";
 import { announceCredit, announceReward, rewardReferralAfterFirstPayment } from "@/lib/referrals/service";
-import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate, paymentSuccessTemplate } from "@/lib/wa/templates";
+import { accountPausedTemplate, cardUpdateNeededTemplate, paymentFailedTemplate, paymentSuccessTemplate, templateParam } from "@/lib/wa/templates";
 import type { BillingContext } from "./context";
 import { cardLinkFor, createCardLinkToken } from "./links";
 import { formatIls, vatOf } from "./money";
 import { activePhone, deliver, isWindowOpen, sendInvoice, shortDateHe } from "./notify";
 import { payLinkFor } from "./pay-link";
 import { PLANS, cycleOf, isBillingCycle, isPaidPlan, planNameHe, priceOf, renewalCycleOf, type BillingCycle, type PaidPlan } from "./plans";
-import { activateSubscription, applyPendingCredit, chargeSubscription, nextChargeRun, resumeAfterCardUpdate, saveCardToken, type ChargeOutcome } from "./subscription";
+import { activateSubscription, applyPendingCredit, chargeSubscription, loadCardToken, nextChargeRun, resumeAfterCardUpdate, saveCardToken, type ChargeOutcome } from "./subscription";
 import { createRetryApproval, dayLabel } from "./whatsapp";
 
 export type { BillingContext } from "./context";
@@ -77,58 +78,95 @@ export async function startCardUpdate(ctx: BillingContext, user: UserRow): Promi
 
 export type PaymentReturn =
   | { ok: true; userId: string; plan: PaidPlan; cycle?: BillingCycle; transId: string; firstTime: boolean; mode: "payment" | "card" }
-  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription" | "charged_not_checked"; userId?: string; message: string; mode?: "payment" | "card" };
+  | { ok: false; reason: "invalid_signature" | "declined" | "bad_order" | "no_user" | "token_failed" | "no_subscription" | "charged_not_checked" | "amount_mismatch"; userId?: string; message: string; mode?: "payment" | "card" };
+
+const INVALID_SIGNATURE: PaymentReturn = { ok: false, reason: "invalid_signature", message: "אימות התשלום נכשל. אם חויבת - נבדוק ונחזור אלייך." };
 
 /**
- * The HYP success/error redirect (PLAN §4): VERIFY the whole query → parse Order → getToken → activate → notify in WhatsApp.
- * Idempotent: the same redirect twice activates once (payments.hyp_trans_id unique).
+ * The HYP success/error redirect (PLAN §4): parse Order → VERIFY the whole query → (CCode 0) check the amount against
+ * the plan and cycle of the Order → getToken → activate → notify in WhatsApp. Nothing is sent, written or alerted for
+ * a redirect HYP did not sign: the query is the attacker's until VERIFY says otherwise (and its Amount is never
+ * echoed — alerts carry our own price). Idempotent: the same redirect twice activates once (payments.hyp_trans_id
+ * unique); a repeat after a failed getToken saves the card then.
  */
 export async function completePayment(ctx: BillingContext, redirectQuery: string): Promise<PaymentReturn> {
   const params = Object.fromEntries(new URLSearchParams(redirectQuery));
   const orderMatch = (params.Order ?? "").match(/^([0-9a-f-]{36}):(basic|pro|card)(?::(monthly|annual))?$/);
   if (!orderMatch) return { ok: false, reason: "bad_order", message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין." };
   const userId = orderMatch[1]!;
-  const user = await ctx.db.getUser(userId);
-  if (!user) return { ok: false, reason: "no_user", userId, message: "החשבון לא נמצא." };
-  if (orderMatch[2] === "card") {
-    if (orderMatch[3]) return { ok: false, reason: "bad_order", userId, message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין.", mode: "card" };
-    return completeCardUpdate(ctx, user, redirectQuery, params);
+  if (orderMatch[2] === "card" && orderMatch[3]) return { ok: false, reason: "bad_order", userId, message: "ההפניה מ-HYP לא כוללת מזהה הזמנה תקין.", mode: "card" };
+
+  // VERIFY first: before the account is even looked up, and before any message, audit row or alert
+  const verified = await ctx.hyp.verifyRedirect(redirectQuery);
+  if (!verified.ok) {
+    console.warn(`[billing] /api/pay/return: an unsigned redirect for Order ${orderMatch[2]} was refused`);
+    return orderMatch[2] === "card" ? { ok: false, reason: "invalid_signature", message: "אימות הכרטיס נכשל. הכרטיס הקודם נשאר.", mode: "card" } : INVALID_SIGNATURE;
   }
+
+  const user = await ctx.db.getUser(userId);
+  if (!user) {
+    // signed by HYP for an account that is gone (deleted between the page and the payment): a real charge nobody serves
+    if (orderMatch[2] !== "card" && params.CCode === "0") {
+      const plan = orderMatch[2] as PaidPlan;
+      const cycle: BillingCycle = isBillingCycle(orderMatch[3]) ? orderMatch[3] : "monthly";
+      console.error(`[billing] payment ${params.Id ?? "?"} for a missing account ${userId} — refund it in the HYP portal`);
+      ownerAlert({ type: "charge_unknown", userId, amountIls: priceOf(plan, cycle), reason: "תשלום ראשון עבר בדף התשלום, אבל החשבון לא נמצא. צריך לבדוק בפורטל HYP ולהחזיר.", ref: `first:${params.Id ?? userId}` }, { db: ctx.db });
+      await reportError("billing.return", new Error(`a verified payment ${params.Id ?? "?"} for a missing account`), { db: ctx.db, context: { transId: params.Id ?? "", stage: "no_user" } });
+    }
+    return { ok: false, reason: "no_user", userId, message: "החשבון לא נמצא." };
+  }
+  if (orderMatch[2] === "card") return completeCardUpdate(ctx, user, params);
   const plan = orderMatch[2] as PaidPlan;
   const requestedCycle: BillingCycle = isBillingCycle(orderMatch[3]) ? orderMatch[3] : "monthly";
 
-  const verified = await ctx.hyp.verifyRedirect(redirectQuery);
-  if (!verified.ok || params.CCode !== "0") {
-    const declined = verified.ok || (params.CCode && params.CCode !== "0");
+  if (params.CCode !== "0") {
+    // a decline HYP signed: the result page says so; the chat gets the retry link, the owner our price (never the query's)
     const payLink = payLinkFor(ctx.appUrl, user.id);
-    if (declined) await notify(ctx, user, copy["bill.payment_failed_initial"](payLink), { name: "trial_ended_payment", params: [user.name ?? ""], link: payLink });
-    await ctx.db.addAudit({ user_id: user.id, action: "payment.return", target: params.Id ?? "", result: declined ? `declined:${params.CCode}` : "invalid_signature" });
-    if (declined) ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls: Number(params.Amount ?? PLANS[plan].priceIls) || PLANS[plan].priceIls, reason: chargeReason(`תשלום ראשון בדף התשלום (${PLANS[plan].nameHe})`, classifyHypFailure(params.CCode), params.CCode || null), ref: `first:${params.Id || `${user.id}:${ctx.now().getTime()}`}` }, { db: ctx.db });
-    return declined
-      ? { ok: false, reason: "declined", userId, message: "התשלום לא עבר. אפשר לנסות שוב, גם עם כרטיס אחר." }
-      : { ok: false, reason: "invalid_signature", userId, message: "אימות התשלום נכשל. אם חויבת - נבדוק ונחזור אלייך." };
+    await notify(ctx, user, copy["bill.payment_failed_initial"](payLink), { name: "trial_ended_payment", params: [templateParam((user.name ?? "").trim() || "לך", 60)], link: payLink });
+    await ctx.db.addAudit({ user_id: user.id, action: "payment.return", target: params.Id ?? "", result: `declined:${params.CCode ?? ""}` });
+    ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls: priceOf(plan, requestedCycle), reason: chargeReason(`תשלום ראשון בדף התשלום (${planNameHe(plan, requestedCycle)})`, classifyHypFailure(params.CCode ?? ""), params.CCode || null), ref: `first:${params.Id || `${user.id}:${ctx.now().getTime()}`}` }, { db: ctx.db });
+    return { ok: false, reason: "declined", userId, message: "התשלום לא עבר. אפשר לנסות שוב, גם עם כרטיס אחר." };
   }
 
   const transId = params.Id ?? "";
-  let token: { token: string; tokef: string };
+  // the amount HYP signed must pay for the plan and cycle of the Order — for every plan and cycle. HYP signs the amount
+  // into the page at SIGN, so a mismatch means a bug on our side: an annual Order paid at least the monthly price is
+  // activated monthly (as before); anything less activates nothing and goes to the owner.
+  const amountIls = Number(params.Amount);
+  const covers = (c: BillingCycle) => Number.isFinite(amountIls) && amountIls + 0.005 >= priceOf(plan, c);
+  const cycle: BillingCycle | null = covers(requestedCycle) ? requestedCycle : requestedCycle === "annual" && covers("monthly") ? "monthly" : null;
+  if (cycle !== requestedCycle) {
+    console.error(`[billing] payment ${transId} of ${user.id}: Order ${plan}:${requestedCycle} but the amount is ${params.Amount ?? "missing"} — ${cycle ? `activated ${cycle}` : "not activated"}; check it in the HYP portal`);
+    await ctx.db.addAudit({ user_id: user.id, action: "payment.amount_mismatch", target: transId, result: `${requestedCycle}:${Number.isFinite(amountIls) ? amountIls : "?"}` });
+  }
+  if (!cycle) {
+    // the money was taken: record it (once — hyp_trans_id is unique), activate nothing, tell the owner
+    await ctx.db.insertPayment({ user_id: user.id, hyp_trans_id: transId, amount_ils: Number.isFinite(amountIls) ? amountIls : 0, ccode: "0", acode: params.ACode ?? null, invoice_url: null, raw: params, billing_cycle: requestedCycle });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: priceOf(plan, requestedCycle), reason: `תשלום ראשון (${planNameHe(plan, requestedCycle)}) עבר בסכום נמוך מהמחיר, והמנוי לא הופעל. צריך לבדוק בפורטל HYP.`, ref: `first:${transId}` }, { db: ctx.db });
+    return { ok: false, reason: "amount_mismatch", userId, message: "התשלום התקבל אבל הסכום לא תואם למסלול. נבדוק ונחזור אלייך." };
+  }
+
+  // the card for the next charges: a failure does not take away the period that was paid — it is activated anyway,
+  // the owner is told (the renewal has no card until it is fixed), and a repeat of this redirect tries again
+  let token: { token: string; tokef: string } | null = null;
   try {
     token = await ctx.hyp.getToken(transId);
   } catch (e) {
     await ctx.db.addAudit({ user_id: user.id, action: "payment.token", target: transId, result: `failed: ${(e as Error).message}` });
-    return { ok: false, reason: "token_failed", userId, message: "התשלום התקבל אבל שמירת אמצעי התשלום לחיובים הבאים נכשלה. נטפל בזה ידנית." };
+    await reportError("billing.return", e, { userId: user.id, db: ctx.db, context: { transId, stage: "get_token" } });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: priceOf(plan, cycle), reason: `תשלום ראשון (${planNameHe(plan, cycle)}) עבר והמנוי הופעל, אבל שמירת הכרטיס לחיובים הבאים נכשלה. החיוב הבא לא יתבצע עד שהכרטיס יעודכן.`, ref: `first-token:${transId}` }, { db: ctx.db });
   }
   const invoiceUrl = await ctx.hyp.invoiceUrl(transId).catch(() => null);
-  const amountIls = Number(params.Amount ?? priceOf(plan, requestedCycle));
-  // the annual cycle only for (at least) the annual price — a safety net: HYP signs the amount into the page at SIGN
-  // and VERIFY checks the whole redirect, so a real mismatch means a bug on our side, never a year for a month's price
-  const cycle: BillingCycle = requestedCycle === "annual" && !(amountIls + 0.005 >= priceOf(plan, "annual")) ? "monthly" : requestedCycle;
-  if (cycle !== requestedCycle) {
-    console.error(`[billing] payment ${transId} of ${user.id}: Order asks for the annual cycle but ${amountIls} ₪ < ${priceOf(plan, "annual")} ₪ — activated monthly; check it in the HYP portal`);
-    await ctx.db.addAudit({ user_id: user.id, action: "payment.amount_mismatch", target: transId, result: `annual:${amountIls}` });
-  }
   const now = ctx.now();
-  const { firstTime, subscription, duplicate, paymentId } = await activateSubscription(ctx.db, user, { plan, cycle, transId, amountIls, acode: params.ACode ?? null, token: token.token, tokef: token.tokef, invoiceUrl, raw: params }, now);
-  if (duplicate) return { ok: true, userId, plan, cycle: cycleOf(subscription), transId, firstTime, mode: "payment" }; // already handled (and announced)
+  const { firstTime, subscription, duplicate, paymentId, overlapped } = await activateSubscription(ctx.db, user, { plan, cycle, transId, amountIls, acode: params.ACode ?? null, token: token?.token ?? null, tokef: token?.tokef ?? null, invoiceUrl, raw: params }, now);
+  if (duplicate) {
+    // already handled (and announced); a card that could not be saved the first time is saved now
+    if (token && !(await loadCardToken(ctx.db, user.id))) await saveCardToken(ctx.db, user.id, token.token, token.tokef);
+    return { ok: true, userId, plan, cycle: cycleOf(subscription), transId, firstTime, mode: "payment" };
+  }
+  if (overlapped) {
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: priceOf(plan, cycle), reason: `תשלום ראשון (${planNameHe(plan, cycle)}) עבר על מנוי שכבר היה משולם. התקופה הוארכה מסוף התקופה הקודמת; אם הלקוח לא התכוון - להחזיר בפורטל HYP.`, ref: `first-overlap:${transId}` }, { db: ctx.db });
+  }
 
   // "חבר מביא חבר": the friend's first real payment rewards both sides (once — referral_reward() is atomic), and the
   // payer's own free months waiting for a paid subscription go onto it now
@@ -155,25 +193,24 @@ export async function completePayment(ctx: BillingContext, redirectQuery: string
  * account_paused template with [ניסיון חוזר]) — the charge needs the press. A renewal that was waiting for a card
  * update (a "card" failure) goes back to automatic attempts on the next attempt day, with the new card.
  */
-async function completeCardUpdate(ctx: BillingContext, user: UserRow, redirectQuery: string, params: Record<string, string>): Promise<PaymentReturn> {
+async function completeCardUpdate(ctx: BillingContext, user: UserRow, params: Record<string, string>): Promise<PaymentReturn> {
+  // the redirect was verified by completePayment (an unsigned one never gets here)
   const sub = await ctx.db.getSubscription(user.id);
-  if (!sub || !isPaidPlan(sub.plan)) return { ok: false, reason: "no_subscription", userId: user.id, message: "אין מנוי פעיל לעדכון כרטיס.", mode: "card" };
-  const verified = await ctx.hyp.verifyRedirect(redirectQuery);
   const transId = params.Id ?? "";
-  if (verified.ok && params.CCode === "0") {
+  if (params.CCode === "0") {
     // The page is a J2 check (success = 600). CCode 0 is a real 1 ₪ charge: the terminal is not set up for J2. Nothing
     // is saved; the operator refunds it by hand (no payments row and no receipt exist for it).
     console.error(`[billing] card update ${transId} of user ${user.id} returned CCode 0 — a real 1 ₪ charge, not a J2 check. Refund it in the HYP portal and enable J2 on the terminal (docs/hyp-setup.md §1, §8)`);
     await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: "charged_not_checked" });
     await deliver(ctx, user, { text: billCopy["bill.card_update_charged"]() });
+    ownerAlert({ type: "charge_unknown", userId: user.id, email: user.email, name: user.name, amountIls: 1, reason: "עדכון כרטיס חויב ב-1 ₪ במקום בדיקת J2. צריך להחזיר בפורטל HYP ולהפעיל J2 במסוף.", ref: `card:${transId}` }, { db: ctx.db });
     return { ok: false, reason: "charged_not_checked", userId: user.id, message: "הכרטיס לא עודכן בגלל תקלה בהגדרות התשלום אצלנו. אם הופיע חיוב של 1 ₪ - הוא יבוטל.", mode: "card" };
   }
-  if (!verified.ok || params.CCode !== "600") {
-    await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: verified.ok ? `declined:${params.CCode}` : "invalid_signature" });
+  if (!sub || !isPaidPlan(sub.plan)) return { ok: false, reason: "no_subscription", userId: user.id, message: "אין מנוי פעיל לעדכון כרטיס.", mode: "card" };
+  if (params.CCode !== "600") {
+    await ctx.db.addAudit({ user_id: user.id, action: "billing.card_update", target: transId, result: `declined:${params.CCode ?? ""}` });
     await deliver(ctx, user, { text: billCopy["bill.card_update_failed"](cardLinkFor(ctx.appUrl, user.id)) });
-    return verified.ok
-      ? { ok: false, reason: "declined", userId: user.id, message: "הכרטיס לא אומת. אפשר לנסות שוב, גם עם כרטיס אחר.", mode: "card" }
-      : { ok: false, reason: "invalid_signature", userId: user.id, message: "אימות הכרטיס נכשל. הכרטיס הקודם נשאר.", mode: "card" };
+    return { ok: false, reason: "declined", userId: user.id, message: "הכרטיס לא אומת. אפשר לנסות שוב, גם עם כרטיס אחר.", mode: "card" };
   }
   let token: { token: string; tokef: string };
   try {

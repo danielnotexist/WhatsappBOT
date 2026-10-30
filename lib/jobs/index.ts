@@ -1,7 +1,7 @@
 import "server-only";
 import { getAiProvider } from "@/lib/ai";
 import { spendGuardFromEnv } from "@/lib/ai/budget";
-import { effectivePlan, providerGate } from "@/lib/billing/plans";
+import { providerGate, servicePlan } from "@/lib/billing/plans";
 import { getDb } from "@/lib/db";
 import type { ConnectionProvider, UserRow } from "@/lib/db/types";
 import { googleForUser } from "@/lib/google";
@@ -15,10 +15,14 @@ import type { JobDeps } from "./run";
 /** Production wiring for the scheduled jobs (process-wide db / WhatsApp sender / Graph and Google per user). */
 export function getJobDeps(): JobDeps {
   const db = getDb();
-  /** a second account on a one-account plan is paused: the morning summary leaves it out (lib/billing/plans.ts) */
+  /**
+   * a second account on a one-account plan is paused: the morning summary leaves it out (lib/billing/plans.ts); a
+   * paused account (past_due) has every connection paused for the scheduled jobs until it pays
+   */
   const paused = async (user: UserRow, provider: ConnectionProvider) => {
     const [sub, connections] = await Promise.all([db.getSubscription(user.id), db.listConnections(user.id)]);
-    return providerGate(connections, effectivePlan(sub, new Date())).paused.includes(provider);
+    if (sub?.status === "past_due") return true;
+    return providerGate(connections, servicePlan(sub, new Date())).paused.includes(provider);
   };
   // the proactive checks' cheap model calls (lib/proactive/classify.ts) pass the daily spend cap when one is configured
   // (AI_DAILY_BUDGET_USD — reserved before each call, settled after); no user turn behind them, so no per-user count

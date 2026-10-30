@@ -153,7 +153,7 @@ describe("[לשדרג עכשיו] (upgradeFromWeb)", () => {
     const other = await setup();
     expect(await upgradeFromWeb(ctx, user, (await other.offer()).offerToken)).toEqual({ kind: "expired" });
     const real = (await offer()).offerToken;
-    expect(await upgradeFromWeb(ctx, user, real.replace(/.$/, (c) => (c === "A" ? "B" : "A")))).toEqual({ kind: "expired" });
+    expect(await upgradeFromWeb(ctx, user, real.replace(/.(?=.{4}$)/, (c) => (c === "A" ? "B" : "A")))).toEqual({ kind: "expired" });
     expect(await upgradeFromWeb(ctx, user, "")).toEqual({ kind: "expired" });
     // a card link token is not an offer
     expect(await upgradeFromWeb(ctx, user, createCardLinkToken(user.id))).toEqual({ kind: "expired" });

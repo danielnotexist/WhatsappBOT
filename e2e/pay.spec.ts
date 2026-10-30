@@ -36,7 +36,9 @@ test.describe("payment pages — /pay/<token>, /pay/done, the card update", () =
     const page = await phone.newPage();
     await page.goto(href);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("בחירת מסלול");
-    await expect(page.getByRole("main").getByText(email)).toBeVisible();
+    // the link is a bearer: without the account's session the email is masked
+    await expect(page.getByRole("main").getByText(`${email[0]}•••${email.slice(email.lastIndexOf("@"))}`)).toBeVisible();
+    await expect(page.getByRole("main").getByText(email)).toHaveCount(0);
     const basic = page.getByRole("form", { name: "בסיסי", exact: true });
     const pro = page.getByRole("form", { name: "פרו", exact: true });
     await expect(basic.getByText("99", { exact: true })).toBeVisible();

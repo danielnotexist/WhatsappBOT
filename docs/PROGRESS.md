@@ -1242,3 +1242,20 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **בדיקות:** `supabase/tests/finish_job_guard.test.sql` (ועדכון קטן ב-`functions.test.sql`), `lib/queue/local.test.ts`, `lib/queue/qstash.test.ts`, `lib/queue/index.test.ts`, `app/api/jobs/jobs-routes.test.ts`, `app/api/wa/wa-routes.test.ts`, `lib/wa/webhook.test.ts`, `lib/bot/process-inbound.test.ts`, `app/api/auth/microsoft/ms-routes.test.ts`, `lib/db/memory.test.ts`.
 
 **דרוש מדניאל:** להריץ את `0022_finish_job_guard.sql` ב-Supabase **לפני** הפריסה (הקוד שולח `p_attempts`, שהפונקציה הישנה לא מכירה). מומלץ להגדיר QStash (`QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`) - בלעדיו אין ניסיונות חוזרים.
+
+### 2026-10-30 — אבטחה, אזור E: תשלומים וחיובים
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **`/api/pay/return`:** החתימה של HYP (VERIFY) נבדקת ראשונה - לפני חיפוש החשבון, ולפני כל הודעת וואטסאפ, שורת audit או התראה לבעלים. הפניה לא חתומה לא עושה כלום ומחזירה "אימות נכשל". דחייה חתומה שולחת את קישור התשלום, וההתראה לבעלים נושאת את המחיר שלנו, לעולם לא את ה-Amount מהכתובת. המוק (`/api/pay/mock`) חותם גם דחייה, כמו HYP.
+- **הסכום נבדק לכל מסלול ומחזור** (לא רק שנתי): תשלום שלא מכסה את המחיר של ה-Order לא מפעיל מנוי, נרשם ב-payments ומגיע לבעלים (`amount_mismatch`). Order שנתי ששולם במחיר החודשי - חודשי, כמו קודם.
+- **תשלום שעבר אבל שמירת הכרטיס נכשלה** (getToken): המנוי מופעל לתקופה ששולמה, התשלום נרשם, ו"חיוב בבדיקה" לבעלים + תקלה. הפניה חוזרת שומרת את הכרטיס פעם אחת. גם תשלום לחשבון שנמחק ועדכון כרטיס שחויב ב-1 ₪ מגיעים לבעלים.
+- **תשלום ראשון על תקופה ששולמה** לא מוחק אותה: התקופה החדשה מתחילה בסוף הקודמת, והבעלים מקבל התראה (להחזר אם צריך). בחירת מסלול לא פותחת דף HYP למנוי פעיל.
+- **ביטול, הורדה לבסיסי או מעבר לחודשי בזמן חיוב:** נשמרים - ההצלחה של החיוב לא דורסת אותם (`keptChanges`, גם בניסיון החוזר מהשיחה). רשת ביטחון: שורה `active` עם `cancelled_at` נחשבת מבוטלת (`paidPlanOf`, ומיגרציה `0023_user_plan_cancel_race.sql`).
+- **חשבון מושהה (past_due):** בלי התראות יזומות, סיכומי בוקר, סיכומי פגישות וקריאה מהחיבורים במשימות, עד התשלום (`servicePlan`). המסלול נשמר לתמחור ולאזור האישי.
+- **קישור התשלום `/pay/<token>`:** שדרוג בכרטיס השמור רק מדפדפן שמחובר לאותו חשבון; בלי זה - עדכון כרטיס והפניה לכניסה. בלי כניסה המייל מוסתר ואין ספרות כרטיס.
+- **`trial_ended_payment`:** השם עובר דרך `templateParam()` (שורה אחת, אף פעם לא ריק - "לך"), נגד שגיאת Meta 132018. התבנית `plan_limit_reached` מפנה עכשיו ל-`/pay/{{1}}` (לא היה נתיב `/upgrade`).
+- **לא תוקן:** חודש חינם בחבר מביא חבר על כל מסלול ובלי ביטול בהחזר - מתועד כהחלטה, החזרים ידניים, והבעלים מקבל התראה על כל תגמול. `reconnect_needed` מפנה ל-`/connect/{{1}}` שלא קיים - התבנית לא נשלחת מהקוד.
+
+**בדיקות:** `supabase/tests/user_plan_cancel_race.test.sql`, `lib/billing/service.test.ts`, `lib/billing/subscription.test.ts`, `app/api/pay/pay-routes.test.ts`, `app/pay/[token]/actions.test.ts`, `lib/jobs/morning-summary.test.ts`; e2e: `e2e/pay.spec.ts` (מייל מוסתר).
+
+**דרוש מדניאל:** להריץ את `0023_user_plan_cancel_race.sql` ב-Supabase (לא חוסם פריסה - רשת ביטחון). לבדוק מול HYP שהפניה של עסקה שנדחתה עוברת VERIFY; אם לא - דחייה תוצג כ"אימות נכשל" בלי הודעה בוואטסאפ.

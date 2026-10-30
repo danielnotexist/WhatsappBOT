@@ -5,7 +5,7 @@ import { MemoryDb } from "@/lib/db/memory";
 import { MockHypGateway } from "@/lib/hyp/client";
 import { createConnectLinkToken, verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { createPayLinkToken, verifyPayLinkToken } from "./pay-link";
-import { addOneMonth } from "./plans";
+import { addOneMonth, effectivePlan, servicePlan } from "./plans";
 import { activateSubscription, chargeSubscription, resumeAfterCardUpdate, saveCardToken, scheduleCharge } from "./subscription";
 
 describe("billing", () => {
@@ -206,5 +206,48 @@ describe("billing", () => {
     expect(await db.getSubscription(user.id)).toMatchObject({ plan: "basic", scheduled_plan: null });
     // the month's quota follows the plan down at once (an upgrade raises it at once)
     expect(db.usage.find((u) => u.user_id === user.id && u.period_start === "2026-11-01")).toMatchObject({ plan_limit: 750, free_remaining: 650 });
+  });
+  it("a cancel, a downgrade or a switch to monthly made while HYP is charging is kept, never overwritten by the success", async () => {
+    const t0 = new Date("2026-10-20T10:00:00Z");
+    const due = new Date("2026-11-20T10:00:00Z");
+    for (const change of ["cancel", "downgrade", "monthly"] as const) {
+      const db = new MemoryDb();
+      const user = await db.createUser(`race-${change}@example.com`);
+      const hyp = new MockHypGateway("https://app.example.co.il");
+      await activateSubscription(db, user, { plan: "pro", cycle: change === "monthly" ? "annual" : "monthly", transId: "T1", amountIls: change === "monthly" ? 2990 : 299, acode: null, token: "0505743578473060772", tokef: "3105", invoiceUrl: null, raw: {} }, t0);
+      const at = change === "monthly" ? new Date("2027-10-20T10:00:00Z") : due;
+      db.now = () => at;
+      // the user acts while the charge is in flight (after the lock was taken and the subscription read under it)
+      const charge = hyp.chargeToken.bind(hyp);
+      hyp.chargeToken = async (input) => {
+        if (change === "cancel") await db.cancelSubscription(user.id);
+        else if (change === "downgrade") await db.upsertSubscription(user.id, { scheduled_plan: "basic" });
+        else await db.upsertSubscription(user.id, { scheduled_cycle: "monthly" });
+        return charge(input);
+      };
+      expect(await chargeSubscription(db, hyp, user, at)).toMatchObject({ kind: "charged", plan: "pro" });
+      const sub = (await db.getSubscription(user.id))!;
+      if (change === "cancel") {
+        // the period just paid runs to its end, and nothing more is charged
+        expect(sub).toMatchObject({ status: "cancelled", plan: "pro" });
+        expect(sub.cancelled_at).not.toBeNull();
+        expect(db.jobs.filter((j) => j.kind === "charge" && j.status === "queued")).toHaveLength(0);
+      } else if (change === "downgrade") {
+        expect(sub).toMatchObject({ status: "active", plan: "pro", scheduled_plan: "basic" });
+      } else {
+        expect(sub).toMatchObject({ status: "active", billing_cycle: "annual", scheduled_cycle: "monthly" });
+      }
+    }
+  });
+
+  it("an 'active' row with a cancel on it is a cancelled plan (the backstop of the race); a paused account gets no scheduled service", () => {
+    const now = new Date("2026-11-01T00:00:00Z");
+    const base = { plan: "pro" as const, next_charge_at: "2026-11-20T10:00:00Z" };
+    expect(effectivePlan({ ...base, status: "active", cancelled_at: "2026-10-30T00:00:00Z" }, now)).toBe("pro");
+    expect(effectivePlan({ ...base, status: "active", cancelled_at: "2026-10-30T00:00:00Z" }, new Date("2026-12-01T00:00:00Z"))).toBe("trial");
+    expect(effectivePlan({ ...base, status: "active", cancelled_at: null }, new Date("2026-12-01T00:00:00Z"))).toBe("pro");
+    expect(effectivePlan({ ...base, status: "past_due" }, now)).toBe("pro"); // the account page and the retry price
+    expect(servicePlan({ ...base, status: "past_due" }, now)).toBe("trial");
+    expect(servicePlan({ ...base, status: "active" }, now)).toBe("pro");
   });
 });

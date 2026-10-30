@@ -5,9 +5,9 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { CYCLE_COOKIE } from "@/lib/billing/cycle-cookie";
 import { Mascot } from "@/components/brand/mascot";
-import { ensureDemoSessionUser } from "@/lib/auth/current-user";
+import { ensureDemoSessionUser, getSession } from "@/lib/auth/current-user";
 import { cardLinkFor } from "@/lib/billing/links";
-import { verifyPayLinkToken } from "@/lib/billing/pay-link";
+import { maskEmail, verifyPayLinkToken } from "@/lib/billing/pay-link";
 import { VAT_RATE, cycleOf, isBillingCycle, isPaidPlan, type BillingCycle, type PaidPlan } from "@/lib/billing/plans";
 import { cn } from "@/lib/utils";
 import { webUpgradeResult, webUpgradeView, type WebUpgradeOffer } from "@/lib/billing/web-upgrade";
@@ -87,13 +87,16 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
   const notice = isUpgradeNotice(sp.r) ? sp.r : null;
   const gate = isPlanGateReason(sp.why) ? sp.why : null;
   const sub = await db.getSubscription(user.id);
+  // the link is a bearer (7 days, it travels in chats): the browser signed in to this account sees the full face and
+  // may charge the saved card; anyone else holding the link sees the masked email, no card digits, and no upgrade
+  const owner = (await getSession())?.userId === user.id;
   const offerData = (o: WebUpgradeOffer): OfferFaceData => ({ ...o, periodEndDay: dayOf(o.periodEnd.toISOString(), user.timezone) });
   // the cycle of the plan choice: the switch on this page (?cycle=), else the one picked on the price list (the
   // alze_cycle cookie, components/brand/landing/plan-cycle.tsx), else monthly
   const shown = typeof sp.cycle === "string" && isBillingCycle(sp.cycle) ? sp.cycle : (await cookies()).get(CYCLE_COOKIE)?.value === "annual" ? "annual" : "monthly";
 
   // the result of [לשדרג עכשיו] (the action redirects here; a refresh shows the same result, never a second charge)
-  const upgradeId = typeof sp.upgrade === "string" ? sp.upgrade : null;
+  const upgradeId = owner && typeof sp.upgrade === "string" ? sp.upgrade : null;
   const result = upgradeId ? await webUpgradeResult({ db }, user.id, upgradeId) : null;
   if (result?.status === "succeeded") {
     return (
@@ -128,6 +131,22 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
 
   if (sub?.status === "active" && isPaidPlan(sub.plan)) {
     const view = sub.plan === "basic" ? await webUpgradeView(read, user, sub) : null;
+    if (!owner) {
+      // without the account's session: the card update only; the upgrade (a charge on the saved card) after signing in
+      return (
+        <CardUpdateFace
+          plan={sub.plan}
+          cycle={cycleOf(sub)}
+          nextDay={sub.next_charge_at ? dayOf(sub.next_charge_at, user.timezone) : null}
+          cardUpdateHref={cardUpdateHref}
+          upgradeHref={null}
+          signInHref={view?.kind === "offer" ? "/login" : null}
+          block={view?.kind === "blocked" ? { reason: view.reason } : null}
+          notice={view?.kind === "offer" || notice === "signin" ? "signin" : notice === "expired" ? "changed" : notice}
+          gate={gate}
+        />
+      );
+    }
     if (view?.kind === "offer" && sp.view !== "card") {
       return <UpgradeOfferFace name={firstName(user)} token={token} offer={offerData(view.offer)} cardHref={cardHref} action={upgradeAction} notice={notice} error={error} gate={gate} />;
     }
@@ -144,7 +163,7 @@ async function Pay({ params, searchParams }: { params: PageProps<"/pay/[token]">
       />
     );
   }
-  return <ChoosePlan user={user} sub={sub} token={token} error={error} gate={gate} now={now} cycle={shown} self={self} />;
+  return <ChoosePlan user={user} sub={sub} token={token} error={error} gate={gate} now={now} cycle={shown} self={self} owner={owner} />;
 }
 
 /** The way back to the chat (null when no public number is configured: the page still says what happened). */
@@ -174,6 +193,7 @@ function ChoosePlan({
   now,
   cycle,
   self,
+  owner,
 }: {
   user: UserRow;
   sub: SubscriptionRow | null;
@@ -183,6 +203,8 @@ function ChoosePlan({
   now: Date;
   cycle: BillingCycle;
   self: string;
+  /** the browser is signed in to this account (else the email is masked) */
+  owner: boolean;
 }) {
   const name = firstName(user);
   const annual = cycle === "annual";
@@ -207,7 +229,7 @@ function ChoosePlan({
         <p className="mt-3 text-[0.9375rem] text-cream-muted">
           החשבון:{" "}
           <bdi dir="ltr" className="text-cream">
-            {user.email}
+            {owner ? user.email : maskEmail(user.email)}
           </bdi>
         </p>
       </PayHeading>

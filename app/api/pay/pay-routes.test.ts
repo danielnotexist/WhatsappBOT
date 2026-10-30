@@ -54,8 +54,26 @@ describe("/api/pay/* and /api/jobs/run", () => {
     expect(acc.pathname).toBe("/account");
     expect(acc.searchParams.get("notice")).toContain("החשבון פעיל");
     expect((await db.getSubscription(user.id))).toMatchObject({ plan: "basic", status: "active" });
-    const declined = await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=2&CCode=6&Amount=99&Order=${user.id}%3Abasic&Sign=x`));
+    // a decline the (signing) mock page made: verified, so the page says the payment did not go through
+    setHypForTests(undefined);
+    const signedDecline = new URL((await mockGet(new Request(`https://app.example.co.il/api/pay/mock?Amount=99&Order=${user.id}%3Abasic&decline=1`))).headers.get("location")!);
+    const declined = await returnGet(new Request(signedDecline.toString()));
     expect(new URL(declined.headers.get("location")!).searchParams.get("error")).toContain("לא עבר");
+  });
+
+  it("an unsigned return with a decline code does nothing: no WhatsApp message, no audit row, no owner alert, never the query's amount", async () => {
+    setHypForTests(undefined); // the real wiring: the mock gateway checks the mock page's signature, like HYP's VERIFY
+    const user = await db.createUser("dana@example.com");
+    db.seedWaIdentity(user.id, "+972501234567");
+    for (const order of [`${user.id}:pro`, `${user.id}:card`, `${user.id}:basic:annual`]) {
+      const res = await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=${Math.random()}&CCode=33&Amount=99999&Order=${encodeURIComponent(order)}&Sign=x`));
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).not.toContain("99999");
+    }
+    expect(wa.sent).toEqual([]);
+    expect(db.audit.filter((a) => a.action.startsWith("payment.") || a.action.startsWith("billing."))).toEqual([]);
+    await new Promise((r) => setTimeout(r, 20)); // ownerAlert() runs after the response
+    expect(db.ownerAlerts).toEqual([]);
   });
 
   it("the app's mock gateway: only the mock page's own signature activates; a hand-made return (Sign=mock) does nothing", async () => {
@@ -88,7 +106,9 @@ describe("/api/pay/* and /api/jobs/run", () => {
     expect(paid.pathname).toBe("/pay/done");
     expect([...paid.searchParams.entries()]).toEqual([["r", "paid"]]);
     expect((await db.getSubscription(user.id))).toMatchObject({ plan: "basic", status: "active" });
-    const declined = new URL((await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=4&CCode=6&Amount=99&Order=${user.id}%3Abasic&Sign=x`))).headers.get("location")!);
+    setHypForTests(undefined); // the signing mock page: a verified decline
+    const signedDecline = new URL((await mockGet(new Request(`https://app.example.co.il/api/pay/mock?Amount=99&Order=${user.id}%3Abasic&decline=1`))).headers.get("location")!);
+    const declined = new URL((await returnGet(new Request(signedDecline.toString()))).headers.get("location")!);
     expect(declined.pathname + declined.search).toBe("/pay/done?r=declined");
   });
 

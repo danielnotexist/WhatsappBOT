@@ -210,7 +210,7 @@ export function templateDefinitions(appUrl: string, productName: string = PRODUC
     def(
       "plan_limit_reached",
       body("הגעת ל-750 ההודעות של המסלול הבסיסי החודש. המכסה מתחדשת ב-{{1}}.\nתזכורות וסיכום הבוקר ממשיכים כרגיל. כדי להמשיך כבר עכשיו — מסלול פרו (299 ₪, עד 3,000 הודעות).", ["1.11.2026"]),
-      urlButton("לשדרג לפרו", `${base}/upgrade/{{1}}`, `${base}/upgrade/u_7f3a9c`),
+      urlButton("לשדרג לפרו", `${base}/pay/{{1}}`, `${base}/pay/u_7f3a9c`),
     ),
     def("proactive_alert", body(`התראה: {{1}}\n\nאפשר לענות כאן, ו${productName} תטפל בזה.`, ["מייל דחוף מ-רו״ח ברק: חתימה על הדוח"]), quick("לטפל עכשיו", "בלי התראות")),
     def(

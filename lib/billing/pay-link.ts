@@ -3,7 +3,8 @@ import { derivedKey, hmac, signedTokenParts } from "@/lib/auth/keys";
 
 /**
  * Personal payment link sent in WhatsApp: /pay/<token> where token = base64url(userId.exp).sig.
- * No session needed on the phone; 7 days validity; the page shows the plan choice and starts HYP.
+ * No session needed on the phone; 7 days validity; the page shows the plan choice and starts HYP. A charge on the
+ * saved card (the upgrade) also needs the account's session — the link alone is a bearer that travels in chats.
  */
 export const PAY_LINK_TTL_SECONDS = 7 * 24 * 3600;
 
@@ -31,4 +32,11 @@ export function verifyPayLinkToken(token: string | undefined | null, opts: { key
 
 export function payLinkFor(appUrl: string, userId: string): string {
   return new URL(`/pay/${createPayLinkToken(userId)}`, appUrl).toString();
+}
+
+/** "d•••@gmail.com" — the account's email on a /pay face shown without the account's session (the link is a bearer). */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return "•••";
+  return `${email[0]}•••${email.slice(at)}`;
 }

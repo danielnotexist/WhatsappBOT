@@ -84,15 +84,27 @@ export function isPaidPlan(p: unknown): p is PaidPlan {
 }
 
 /** Whether the subscription currently grants a paid plan (cancelled plans run until the end of the paid period). */
-export function paidPlanOf(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> | null, now: Date): PaidPlan | null {
+export function paidPlanOf(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> & { cancelled_at?: string | null } | null, now: Date): PaidPlan | null {
   if (!sub || !isPaidPlan(sub.plan)) return null;
+  const runsToPeriodEnd = !!sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime();
+  // "active" with a cancel on it (a cancel that raced a charge) is a cancelled plan: it runs to the end of the period
+  if (sub.status === "active" && sub.cancelled_at) return runsToPeriodEnd ? sub.plan : null;
   if (sub.status === "active" || sub.status === "past_due") return sub.plan;
-  if (sub.status === "cancelled" && sub.next_charge_at && Date.parse(sub.next_charge_at) > now.getTime()) return sub.plan;
+  if (sub.status === "cancelled" && runsToPeriodEnd) return sub.plan;
   return null;
 }
 
+/**
+ * The plan the scheduled services run on (proactive alerts, morning summaries, meeting summaries, the connections the
+ * jobs read): a paused account (past_due, a renewal that failed through day 7) gets none of them until it pays — its
+ * plan is kept only for pricing the retry and for the account page.
+ */
+export function servicePlan(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> & { cancelled_at?: string | null } | null, now: Date): EffectivePlan {
+  return sub?.status === "past_due" ? "trial" : effectivePlan(sub, now);
+}
+
 /** The plan in force — the TypeScript twin of SQL `public.user_plan` (0003). */
-export function effectivePlan(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> | null, now: Date): EffectivePlan {
+export function effectivePlan(sub: Pick<SubscriptionRow, "plan" | "status" | "next_charge_at"> & { cancelled_at?: string | null } | null, now: Date): EffectivePlan {
   return paidPlanOf(sub, now) ?? "trial";
 }
 

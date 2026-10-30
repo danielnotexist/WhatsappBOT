@@ -36,25 +36,33 @@ export interface ActivationInput {
   transId: string;
   amountIls: number;
   acode: string | null;
-  token: string;
-  tokef: string;
+  /** null when getToken failed: the paid period is activated anyway, the renewal waits for a card (the owner is told) */
+  token: string | null;
+  tokef: string | null;
   invoiceUrl: string | null;
   raw: Record<string, unknown>;
 }
 
-/** After a verified first payment: store the encrypted token, activate, schedule the charge job of the next period. */
+/**
+ * After a verified first payment: store the encrypted token, activate, schedule the charge job of the next period.
+ * A payment on a subscription whose paid period is still running (an old payment page completed while active, or
+ * cancelled with time left) never takes that time away: the new period starts at the end of the paid one
+ * (`overlapped` — the caller tells the owner, who may refund).
+ */
 export async function activateSubscription(
   db: Db,
   user: UserRow,
   input: ActivationInput,
   now: Date = new Date(),
-): Promise<{ subscription: SubscriptionRow; firstTime: boolean; duplicate: boolean; paymentId: string | null }> {
+): Promise<{ subscription: SubscriptionRow; firstTime: boolean; duplicate: boolean; paymentId: string | null; overlapped: boolean }> {
   const cycle = input.cycle ?? "monthly";
   const payment = await db.insertPayment({ user_id: user.id, hyp_trans_id: input.transId, amount_ils: input.amountIls, ccode: "0", acode: input.acode, invoice_url: input.invoiceUrl, raw: input.raw, billing_cycle: cycle });
   const previous = await db.getSubscription(user.id);
   // the same redirect twice (a refresh / back button): already activated for this transaction — change nothing
-  if (!payment && previous && previous.status !== "trial") return { subscription: previous, firstTime: false, duplicate: true, paymentId: null };
-  const nextChargeAt = addCycle(now, cycle);
+  if (!payment && previous && previous.status !== "trial") return { subscription: previous, firstTime: false, duplicate: true, paymentId: null, overlapped: false };
+  const paidUntil = previous && isPaidPlan(previous.plan) && (previous.status === "active" || previous.status === "cancelled") && previous.charge_failures === 0 && previous.next_charge_at ? Date.parse(previous.next_charge_at) : 0;
+  const overlapped = paidUntil > now.getTime();
+  const nextChargeAt = addCycle(overlapped ? new Date(paidUntil) : now, cycle);
   const subscription = await db.upsertSubscription(user.id, {
     plan: input.plan,
     status: "active",
@@ -65,15 +73,14 @@ export async function activateSubscription(
     scheduled_plan: null,
     billing_cycle: cycle,
     scheduled_cycle: null,
-    hyp_tokef: input.tokef,
-    hyp_token_enc: encryptToken(input.token, { aad: cardAad(user.id) }),
+    ...(input.token && input.tokef ? { hyp_tokef: input.tokef, hyp_token_enc: encryptToken(input.token, { aad: cardAad(user.id) }) } : {}),
   });
   await scheduleCharge(db, user.id, nextChargeAt);
-  await db.addAudit({ user_id: user.id, action: "subscription.activate", target: cycle === "annual" ? `${input.plan}:annual` : input.plan, result: payment ? "ok" : "duplicate_payment" });
+  await db.addAudit({ user_id: user.id, action: "subscription.activate", target: cycle === "annual" ? `${input.plan}:annual` : input.plan, result: [payment ? "ok" : "duplicate_payment", overlapped ? "extended" : null, input.token ? null : "no_token"].filter(Boolean).join(":") });
   const firstTime = !previous || previous.status === "trial";
   // the signup funnel's last step: the first real payment (lib/analytics), once per transaction
   if (payment && firstTime) trackServerEvent(db, "paid", user.id, now);
-  return { subscription, firstTime, duplicate: !payment, paymentId: payment?.id ?? null };
+  return { subscription, firstTime, duplicate: !payment, paymentId: payment?.id ?? null, overlapped };
 }
 
 /**
@@ -288,11 +295,14 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   }
 
   if (result.ok && result.transId) {
-    // state first, lock last: a one-tap press that claims right after the release already sees the new cycle
-    await db.upsertSubscription(user.id, { status: "active", plan, scheduled_plan: null, billing_cycle: cycle, scheduled_cycle: null, next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
+    // state first, lock last: a one-tap press that claims right after the release already sees the new cycle. A cancel,
+    // downgrade or switch to monthly made while HYP was charging is kept (keptChanges), never overwritten.
+    const kept = keptChanges(sub, await db.getSubscription(user.id));
+    await db.upsertSubscription(user.id, { status: kept.cancelled ? "cancelled" : "active", plan, scheduled_plan: kept.scheduledPlan, billing_cycle: cycle, scheduled_cycle: kept.scheduledCycle, next_charge_at: nextChargeAt.toISOString(), charge_failures: 0 });
     // a downgrade that takes effect now also lowers this calendar month's quota (an upgrade raises it at once)
     if (PLANS[plan].messages < (isPaidPlan(sub.plan) ? PLANS[sub.plan].messages : 0)) await db.lowerUsageLimit(user.id, PLANS[plan].messages);
-    await scheduleCharge(db, user.id, nextChargeAt);
+    if (kept.cancelled) await db.cancelJobs(user.id, "charge");
+    else await scheduleCharge(db, user.id, nextChargeAt);
     await release({ status: "succeeded", hyp_trans_id: result.transId, ccode: "0" });
     const changed = [plan !== sub.plan ? `plan=${plan}` : null, cycle !== (sub.billing_cycle ?? "monthly") ? `cycle=${cycle}` : null].filter(Boolean).join(",");
     await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId, result: changed ? `ok:${changed}` : "ok" });
@@ -308,6 +318,24 @@ export async function chargeSubscription(db: Db, hyp: HypGateway, user: UserRow,
   await db.addAudit({ user_id: user.id, action: "subscription.charge", target: result.transId ?? lock.id, result: `failed:${ccode}:${failureKind}` });
   ownerAlert({ type: "payment_failed", userId: user.id, email: user.email, name: user.name, amountIls, reason: chargeReason(stage, failureKind, ccode, renewalNext(outcome)), ref: lock.id }, { db });
   return outcome;
+}
+
+/**
+ * What the post-charge write must keep: the subscription as read under the charge lock (`before`) against the one now
+ * (`after`). A cancel made while HYP was charging stays a cancel (the period just paid runs to its end, no further
+ * charge); a downgrade or a switch to monthly scheduled meanwhile stays scheduled for the next renewal.
+ */
+export function keptChanges(
+  before: Pick<SubscriptionRow, "cancelled_at" | "scheduled_plan" | "scheduled_cycle">,
+  after: Pick<SubscriptionRow, "cancelled_at" | "scheduled_plan" | "scheduled_cycle"> | null,
+): { cancelled: boolean; scheduledPlan: SubscriptionRow["scheduled_plan"] | null; scheduledCycle: SubscriptionRow["scheduled_cycle"] | null } {
+  const cancelled = !!after?.cancelled_at && after.cancelled_at !== before.cancelled_at;
+  if (!after || cancelled) return { cancelled, scheduledPlan: null, scheduledCycle: null };
+  return {
+    cancelled: false,
+    scheduledPlan: (after.scheduled_plan ?? null) !== (before.scheduled_plan ?? null) ? (after.scheduled_plan ?? null) : null,
+    scheduledCycle: (after.scheduled_cycle ?? null) !== (before.scheduled_cycle ?? null) ? (after.scheduled_cycle ?? null) : null,
+  };
 }
 
 /** The subscription after a declined monthly charge (runs while the charge lock is still held). */
