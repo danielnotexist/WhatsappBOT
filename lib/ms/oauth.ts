@@ -189,9 +189,56 @@ async function tokenRequest(cfg: MsOAuthConfig, body: Record<string, string>): P
   };
 }
 
-/** `scopes`: the ones the authorize request asked for (msScopesFor — a pro connect adds the meeting pair). */
-export function exchangeCode(cfg: MsOAuthConfig, code: string, codeVerifier: string, scopes: readonly string[] = MS_SCOPES): Promise<MsTokens> {
-  return tokenRequest(cfg, { grant_type: "authorization_code", code, redirect_uri: cfg.redirectUri, code_verifier: codeVerifier, scope: scopes.join(" ") });
+/**
+ * `scopes`: the ones the authorize request asked for (msScopesFor — a pro connect adds the meeting pair).
+ * The id_token that comes back is checked before anyone reads it (checkMsIdToken): issued by Microsoft for its tenant,
+ * to this app, not expired — otherwise MsOAuthError `invalid_id_token`.
+ */
+export async function exchangeCode(cfg: MsOAuthConfig, code: string, codeVerifier: string, scopes: readonly string[] = MS_SCOPES): Promise<MsTokens> {
+  const tokens = await tokenRequest(cfg, { grant_type: "authorization_code", code, redirect_uri: cfg.redirectUri, code_verifier: codeVerifier, scope: scopes.join(" ") });
+  const problem = checkMsIdToken(tokens.idToken, cfg.clientId);
+  if (problem) throw new MsOAuthError(`Microsoft id_token rejected: ${problem}`, "invalid_id_token", null);
+  return tokens;
+}
+
+/** Allowed clock skew for `exp` / `nbf` / `iat`. */
+const ID_TOKEN_SKEW_S = 5 * 60;
+
+/**
+ * The id_token's claims Microsoft binds it with (v2.0 endpoint): `iss` is https://login.microsoftonline.com/{tid}/v2.0
+ * for the token's own `tid`, `aud` is this app's client id, and `exp` (and `nbf`, when present) hold now. The token
+ * comes straight from the token endpoint over TLS in exchange for our code and PKCE verifier, so the signature is not
+ * checked; these checks keep a token minted for another app, another issuer or another time from counting.
+ * No id_token at all → null (the callers fall back as before). Returns the reason, or null when it passes.
+ */
+export function checkMsIdToken(idToken: string | null, clientId: string, now: Date = new Date()): string | null {
+  if (!idToken) return null;
+  const p = jwtPayload(idToken);
+  if (!p) return "malformed";
+  const tid = typeof p.tid === "string" ? p.tid : null;
+  if (!tid || p.iss !== `https://login.microsoftonline.com/${tid}/v2.0`) return "iss";
+  if (!(p.aud === clientId || (Array.isArray(p.aud) && p.aud.includes(clientId)))) return "aud";
+  return timeClaimsProblem(p, now);
+}
+
+function jwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const p = JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as unknown;
+    return p && typeof p === "object" && !Array.isArray(p) ? (p as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `exp` must be there and in the future; `nbf` / `iat`, when there, not in the future (both with ID_TOKEN_SKEW_S). */
+function timeClaimsProblem(p: Record<string, unknown>, now: Date): string | null {
+  const t = Math.floor(now.getTime() / 1000);
+  if (typeof p.exp !== "number" || p.exp + ID_TOKEN_SKEW_S <= t) return "exp";
+  if (typeof p.nbf === "number" && p.nbf - ID_TOKEN_SKEW_S > t) return "nbf";
+  if (typeof p.iat === "number" && p.iat - ID_TOKEN_SKEW_S > t) return "iat";
+  return null;
 }
 
 /** `scopes`: what to ask for — msRefreshScopes(connection.scopes) from the token store (default: the full set). */

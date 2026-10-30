@@ -26,7 +26,10 @@ export const MS_FIXTURE_CLAIMS: Readonly<Record<string, unknown>> = { tid: "memo
 function memoryTokenFetch(): typeof fetch {
   return (async () => {
     const claims = globalSingleton<Record<string, unknown>>("ms-fixture-claims", () => ({ ...MS_FIXTURE_CLAIMS }));
-    return new Response(JSON.stringify({ access_token: "memory-access", refresh_token: "memory-refresh", expires_in: 3600, scope: MS_SCOPES.filter((s) => s !== "offline_access").join(" "), id_token: "e30." + Buffer.from(JSON.stringify(claims)).toString("base64url") + ".x" }), { status: 200 });
+    // the binding claims a real v2.0 id_token has (checkMsIdToken): this app, Microsoft's issuer for the tenant, valid now
+    const now = Math.floor(Date.now() / 1000);
+    const bound = { aud: "memory-client", iss: `https://login.microsoftonline.com/${String(claims.tid)}/v2.0`, iat: now, nbf: now, exp: now + 3600, ...claims };
+    return new Response(JSON.stringify({ access_token: "memory-access", refresh_token: "memory-refresh", expires_in: 3600, scope: MS_SCOPES.filter((s) => s !== "offline_access").join(" "), id_token: "e30." + Buffer.from(JSON.stringify(bound)).toString("base64url") + ".x" }), { status: 200 });
   }) as typeof fetch;
 }
 

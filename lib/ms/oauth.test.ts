@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryDb } from "@/lib/db/memory";
-import { MS_ADMIN_SCOPES, MS_MEETING_SCOPES, MS_SCOPES, MS_SCOPES_V1, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, msAdminScopesFor, msHasScope, msRefreshScopes, msScopesFor, normalizeMsScopes, parseIdToken, pkcePair, refreshTokens } from "./oauth";
+import { MS_ADMIN_SCOPES, MS_MEETING_SCOPES, MS_SCOPES, MS_SCOPES_V1, MsOAuthError, buildAdminConsentUrl, buildAuthorizeUrl, exchangeCode, msAdminScopesFor, msHasScope, msRefreshScopes, msScopesFor, normalizeMsScopes, parseIdToken, pkcePair, refreshTokens, checkMsIdToken } from "./oauth";
 import { getAccessToken, sealTokens } from "./token-store";
 
 const cfg = { clientId: "cid", clientSecret: "sec", tenant: "common", redirectUri: "https://app.example.co.il/api/auth/microsoft/callback" };
@@ -29,7 +29,7 @@ describe("Microsoft OAuth", () => {
       expect(body.get("grant_type")).toBe("authorization_code");
       expect(body.get("code_verifier")).toBe("ver");
       expect(body.get("client_secret")).toBe("sec");
-      return new Response(JSON.stringify({ access_token: "at", refresh_token: "rt", expires_in: 3600, scope: "Mail.ReadWrite Mail.Send", id_token: "h." + Buffer.from(JSON.stringify({ tid: "t1", oid: "o1", preferred_username: "dana@x.co", name: "דנה" })).toString("base64url") + ".s" }), { status: 200 });
+      return new Response(JSON.stringify({ access_token: "at", refresh_token: "rt", expires_in: 3600, scope: "Mail.ReadWrite Mail.Send", id_token: "h." + Buffer.from(JSON.stringify({ iss: "https://login.microsoftonline.com/t1/v2.0", aud: "cid", exp: Math.floor(Date.now() / 1000) + 3600, tid: "t1", oid: "o1", preferred_username: "dana@x.co", name: "דנה" })).toString("base64url") + ".s" }), { status: 200 });
     });
     const t = await exchangeCode({ ...cfg, fetchImpl: fetchImpl as unknown as typeof fetch }, "code1", "ver");
     expect(t.accessToken).toBe("at");
@@ -37,6 +37,27 @@ describe("Microsoft OAuth", () => {
     expect(t.scope).toEqual(["Mail.ReadWrite", "Mail.Send"]);
     expect(parseIdToken(t.idToken)).toEqual({ tid: "t1", oid: "o1", preferred_username: "dana@x.co", name: "דנה", email: "dana@x.co" });
     expect(parseIdToken("garbage")).toMatchObject({ tid: null });
+  });
+
+  it("checks the id_token's binding claims: Microsoft's issuer for its tenant, this app, not expired", async () => {
+    const now = new Date("2026-10-30T12:00:00Z");
+    const t = Math.floor(now.getTime() / 1000);
+    const jwt = (p: Record<string, unknown>) => "h." + Buffer.from(JSON.stringify(p)).toString("base64url") + ".s";
+    const good = { iss: "https://login.microsoftonline.com/t1/v2.0", aud: "cid", tid: "t1", exp: t + 600, nbf: t - 10, iat: t - 10 };
+    expect(checkMsIdToken(jwt(good), "cid", now)).toBeNull();
+    expect(checkMsIdToken(null, "cid", now)).toBeNull(); // no id_token: callers fall back as before
+    expect(checkMsIdToken("garbage", "cid", now)).toBe("malformed");
+    expect(checkMsIdToken(jwt({ ...good, aud: "other-app" }), "cid", now)).toBe("aud");
+    expect(checkMsIdToken(jwt({ ...good, iss: "https://login.microsoftonline.com/t2/v2.0" }), "cid", now)).toBe("iss"); // another tenant's issuer
+    expect(checkMsIdToken(jwt({ ...good, iss: "https://evil.example/t1/v2.0" }), "cid", now)).toBe("iss");
+    expect(checkMsIdToken(jwt({ ...good, exp: t - 3600 }), "cid", now)).toBe("exp");
+    expect(checkMsIdToken(jwt({ ...good, exp: undefined }), "cid", now)).toBe("exp");
+    expect(checkMsIdToken(jwt({ ...good, nbf: t + 3600 }), "cid", now)).toBe("nbf");
+    // the exchange refuses such a token
+    const bad = (async () => new Response(JSON.stringify({ access_token: "at", id_token: jwt({ ...good, aud: "other-app", exp: Math.floor(Date.now() / 1000) + 600 }) }), { status: 200 })) as unknown as typeof fetch;
+    const err = (await exchangeCode({ ...cfg, fetchImpl: bad }, "code1", "ver").catch((e: unknown) => e)) as MsOAuthError;
+    expect(err).toBeInstanceOf(MsOAuthError);
+    expect(err.code).toBe("invalid_id_token");
   });
 
   it("classifies AADSTS errors: admin consent vs reconnect", async () => {

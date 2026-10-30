@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { newContext, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
+import { linkWhatsapp, newContext, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone } from "./helpers";
 
 /**
  * Round plan §6 step 4 (and the polish round) — every signup / sign-in screen and the personal area at 375×812,
@@ -115,8 +115,7 @@ for (const vp of VIEWPORTS) {
       await page.goto("/start/ready");
       const message = new URL((await page.getByRole("link", { name: "חיבור לוואטסאפ" }).getAttribute("href"))!).searchParams.get("text")!;
       const phone = uniquePhone();
-      await sendWhatsapp(ctx.request, phone, message);
-      await waitForWaText(ctx.request, phone, /החשבון מקושר/);
+      await linkWhatsapp(ctx.request, phone, message);
       for (const text of ["מה יש לי מחר?", "דנה לוי", "משרד עורכי דין"]) await sendWhatsapp(ctx.request, phone, text);
       await ctx.route("**/api/auth/microsoft/start**", async (route) => {
         // Playwright does not route the target of a server redirect: answer our start route and approve at once

@@ -7,6 +7,7 @@ async function linked(h: ReturnType<typeof makeHarness>) {
   const user = await h.db.createUser("dana@example.com");
   const { token } = await issueLinkToken(h.db, user.id, h.ctx.now());
   await processInbound(h.ctx, h.inbound(token));
+  await processInbound(h.ctx, h.button(`lk:yes:${token}`, "כן, לקשר")); // the confirm card (lib/bot/linking.ts)
   h.wa.sent.length = 0;
   return user;
 }

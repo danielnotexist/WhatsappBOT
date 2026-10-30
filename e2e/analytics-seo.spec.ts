@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { randomInt } from "node:crypto";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { BRAND } from "../lib/brand";
-import { enterCode, readCode, sendWhatsapp, submitEmail, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
+import { enterCode, linkWhatsapp, readCode, submitEmail, uniqueEmail, uniquePhone } from "./helpers";
 
 /**
  * Round 2 of the plan ("אנליטיקה ו-SEO"), memory mode:
@@ -92,8 +92,7 @@ test("a campaign visit and a signup show up in the owner's traffic tab: the sour
   await expect(page).toHaveURL(/\/start\/ready$/);
   const href = (await page.getByRole("link", { name: "חיבור לוואטסאפ" }).getAttribute("href"))!;
   const phone = uniquePhone();
-  await sendWhatsapp(ctx.request, phone, new URL(href).searchParams.get("text")!);
-  await waitForWaText(ctx.request, phone, /החשבון מקושר/);
+  await linkWhatsapp(ctx.request, phone, new URL(href).searchParams.get("text")!);
   // a payment link (an excluded path: a token in the address) sends nothing
   const silent = beacons.length;
   await page.goto("/pay/not-a-token");

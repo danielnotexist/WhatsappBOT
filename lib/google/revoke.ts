@@ -30,10 +30,22 @@ export async function revokeGoogleConnection(db: Db, connection: Pick<Connection
 
 /**
  * Default provider revoker for the personal area (lib/account/service.ts). Google → token revocation;
- * Microsoft has no per-app revoke for delegated tokens (the user removes the app at myapps.microsoft.com),
- * so its local tokens are simply deleted. In DATA_MODE=memory the revoke goes to the fixture.
+ * Microsoft has no per-app revoke for delegated tokens (the user removes the app at myapps.microsoft.com), so its
+ * inbox subscriptions are deleted at Graph (best effort — Graph would otherwise keep notifying for up to 6 days) and
+ * its local tokens are deleted by the caller. In DATA_MODE=memory the calls go to the fixtures.
  */
 export async function revokeAtProvider(db: Db, connection: ConnectionRow): Promise<unknown> {
+  if (connection.provider === "microsoft") {
+    if ((await db.listGraphSubscriptionsForConnection(connection.id)).length === 0) return "no_token";
+    const [{ graphForConnection }, { removeSubscriptions }] = await Promise.all([import("@/lib/ms/index"), import("@/lib/ms/subscriptions")]);
+    try {
+      await removeSubscriptions(db, graphForConnection(db, connection), connection.id);
+      return "subscriptions_removed";
+    } catch (e) {
+      console.warn("[ms:disconnect] subscription cleanup failed:", (e as Error).message);
+      return "failed";
+    }
+  }
   if (connection.provider !== "google") return "no_token";
   const { getGoogleFetch } = await import("./index");
   return revokeGoogleConnection(db, connection, getGoogleFetch());

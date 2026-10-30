@@ -7,6 +7,7 @@ import {
   GOOGLE_SCOPES,
   GoogleOAuthError,
   buildGoogleAuthorizeUrl,
+  checkGoogleIdToken,
   driveReadActive,
   driveReadEnabled,
   exchangeGoogleCode,
@@ -66,6 +67,25 @@ describe("Google OAuth", () => {
     expect(t.refreshTokenExpiresAt).toBeNull();
     expect(parseGoogleIdToken(t.idToken)).toEqual({ sub: "109876543210", email: "dana.levi@gmail.com", emailVerified: true, name: "דנה לוי", hd: null });
     expect(parseGoogleIdToken("not-a-jwt").email).toBeNull();
+  });
+
+  it("checks the id_token's binding claims (iss, aud, exp) and the exchange refuses a token that fails them", async () => {
+    const now = new Date("2026-10-30T12:00:00Z");
+    const t = Math.floor(now.getTime() / 1000);
+    const jwt = (p: Record<string, unknown>) => "h." + Buffer.from(JSON.stringify(p)).toString("base64url") + ".s";
+    const good = { iss: "https://accounts.google.com", aud: cfg.clientId, exp: t + 600, iat: t - 5 };
+    expect(checkGoogleIdToken(jwt(good), cfg.clientId, now)).toBeNull();
+    expect(checkGoogleIdToken(jwt({ ...good, iss: "accounts.google.com" }), cfg.clientId, now)).toBeNull();
+    expect(checkGoogleIdToken(null, cfg.clientId, now)).toBeNull();
+    expect(checkGoogleIdToken(jwt({ ...good, iss: "https://evil.example" }), cfg.clientId, now)).toBe("iss");
+    expect(checkGoogleIdToken(jwt({ ...good, aud: "another.apps.googleusercontent.com" }), cfg.clientId, now)).toBe("aud");
+    expect(checkGoogleIdToken(jwt({ ...good, exp: t - 3600 }), cfg.clientId, now)).toBe("exp");
+    expect(checkGoogleIdToken("x", cfg.clientId, now)).toBe("malformed");
+    const f = createGoogleFixture();
+    f.state.idClaims = { aud: "another.apps.googleusercontent.com" };
+    const err = (await exchangeGoogleCode({ ...cfg, fetchImpl: f.fetchImpl }, "4/0Afix", "ver").catch((e: unknown) => e)) as GoogleOAuthError;
+    expect(err).toBeInstanceOf(GoogleOAuthError);
+    expect(err.code).toBe("invalid_id_token");
   });
 
   it("refreshes (no new refresh token) and reports time-limited access", async () => {

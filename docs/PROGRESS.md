@@ -1211,3 +1211,19 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **בדיקות:** `supabase/tests/auth_atomic.test.sql` + 3 מבחני מקביליות ב-`run-local.sh`, `lib/auth/otp.test.ts`, `app/api/auth/otp/otp-routes.test.ts`, `lib/bot/linking.test.ts`, `lib/auth/link-token.test.ts`, `lib/rate-limit.test.ts`, `lib/google/user-cap.test.ts`, `lib/admin/alerts.test.ts`, `lib/billing/subscription.test.ts`, `app/api/jobs/jobs-routes.test.ts`.
 
 **דרוש מדניאל:** להריץ את `0020_auth_atomic.sql` ב-Supabase **לפני** הפריסה (הקוד החדש קורא לפונקציות; קודי קישור פתוחים נמחקים - תוקפם 15 דקות). לוודא ש-`CRON_SECRET` ב-Vercel וב-Vault (`cron_secret`) באורך 32 תווים לפחות, אחרת המתזמן נעצר.
+
+### 2026-10-30 — אבטחה, אזור C: חיבור Google / Microsoft, כניסה עם ספק וקישור וואטסאפ
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **חיבור קשור לדפדפן:** נתיבי ה-start מצפינים את {ספק, משתמש, state} לעוגייה `wb_connect_<provider>` (httpOnly, Lax, `/api/auth`, 30 דק׳ - `lib/auth/connect-cookie.ts`). ה-callback משלים רק כשהעוגייה תואמת, ואם הדפדפן מחובר - רק לאותו חשבון. קישור הרשאה שנלקח מחשבון אחד ונמסר לאחר לא מחבר דבר.
+- **Microsoft:** state ישן מ-30 דקות נדחה (גם באישור המנהל), כמו ב-Google.
+- **קישורי `t=` מהשיחה:** נושאים nonce וייעוד חתום. קישור `user` עובד פעם אחת (מיגרציה `0021_connect_link_uses.sql`, `connect_link_consume`) ונדחה בדפדפן שמחובר לחשבון אחר. קישור `admin` (3 ימים) פותח רק את אישור המנהל - וגם הקישור שנשלח בוואטסאפ למנהל ה-IT נושא אותו עכשיו (קודם הוא הוביל ל-/start). סירוב חבילה דרך קישור מהשיחה בלבד הוא הודעה, לא קישור תשלום.
+- **חיבור מקישור בשיחה בלי כניסה לחשבון** מוסיף רק את התיבה שבכתובת החשבון, כשהספק מאשר אותה (Google `email_verified`; Microsoft חשבון אישי או `xms_edov`). תיבה אחרת - דרך האזור האישי (`lib/copy/connect-guard.ts`); ההרשאה של Google מבוטלת מיד.
+- **כניסה עם Microsoft בלי מייל מאומת** לא יוצרת חשבון חדש (pre-hijack): קוד במייל, כמו בחשבון קיים.
+- **id_token** של Google ו-Microsoft נבדק בהחלפת הקוד: `iss`, `aud`, `exp` (`checkGoogleIdToken`, `checkMsIdToken`).
+- **קישור וואטסאפ בקוד:** הקוד לא מקשר מיד. עלזה מציגה למי שייך הקוד (מייל מוסתר) ושואלת "כן, לקשר / לא לקשר"; הקוד נשרף רק באישור (`link.confirm`, `link.declined`).
+- **ניתוק Microsoft 365** מוחק את מנוי ה-Graph גם ב-Graph וגם ב-Supabase, והתראות לחיבור לא פעיל נזרקות (`/api/graph/notify`, השוואת clientState בזמן קבוע).
+
+**בדיקות:** `supabase/tests/connect_link_uses.test.sql`, `app/api/auth/google/google-routes.test.ts`, `app/api/auth/microsoft/ms-routes.test.ts`, `app/api/auth/sso-routes.test.ts`, `lib/auth/connect-cookie.test.ts`, `lib/ms/connect-link.test.ts`, `lib/ms/oauth.test.ts`, `lib/google/oauth.test.ts`, `lib/db/supabase-connect.test.ts`, `lib/bot/linking.test.ts`; e2e: `linkWhatsapp` ב-`e2e/helpers.ts` לוחץ על "כן, לקשר".
+
+**דרוש מדניאל:** להריץ את `0021_connect_link_uses.sql` ב-Supabase **לפני** הפריסה. קישורי חיבור ישנים מהשיחה (30 דק׳) מפסיקים לעבוד עם הפריסה.

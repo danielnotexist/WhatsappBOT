@@ -4,6 +4,11 @@ import { LINK } from "./context";
 import { handleUnlinkedPhone as handleUnlinked } from "./linking";
 import { processInbound } from "./process-inbound";
 import { makeHarness } from "./test-harness";
+import type { InboundMessage } from "@/lib/wa/types";
+
+/** "כן, לקשר" on the confirm card: the button's id carries the code. */
+const yes = (h: { inbound: (text: string, o?: Partial<InboundMessage>) => InboundMessage }, token: string, o: Partial<InboundMessage> = {}) =>
+  h.inbound("כן, לקשר", { type: "button", reply: { id: `lk:yes:${token}`, title: "כן, לקשר" }, ...o });
 
 describe("account linking", () => {
   it("points an unknown number to the site, then blocks after 3 bad tokens", async () => {
@@ -47,13 +52,21 @@ describe("account linking", () => {
     expect(wa.texts.at(-1)).toContain("לא מצאתי קוד כזה");
   });
 
-  it("links a valid token once, welcomes with the trust line and starts onboarding", async () => {
-    const { ctx, wa, inbound, db } = makeHarness();
+  it("a code from a phone first names the account and asks; it links only on 'כן, לקשר', then welcomes and starts onboarding", async () => {
+    const h = makeHarness();
+    const { ctx, wa, inbound, db } = h;
     const user = await db.createUser("dana@example.com");
     await db.updateUserProfile(user.id, { name: "דנה" });
     const { token } = await issueLinkToken(db, user.id, ctx.now());
     expect(db.linkTokens.some((t) => JSON.stringify(t).includes(token))).toBe(false); // only its HMAC is stored
-    const r = await processInbound(ctx, inbound(`היי! לקשר את החשבון שלי: ${token}`));
+    const ask = await processInbound(ctx, inbound(`היי! לקשר את החשבון שלי: ${token}`));
+    expect(ask.note).toBe("link confirm");
+    expect(wa.sent[0]!.body).toContain("הקוד הזה שייך לחשבון d***@example.com");
+    expect(wa.sent[0]!.buttons!.map((b) => b.id)).toEqual([`lk:yes:${token}`, "lk:no"]);
+    expect(await db.findWaIdentityByPhone("+972501234567")).toBeNull(); // nothing linked, nothing consumed yet
+    expect(db.linkTokens[0]!.used_at).toBeNull();
+    wa.sent.length = 0;
+    const r = await processInbound(ctx, yes(h, token));
     expect(r.note).toBe("linked");
     expect(wa.texts[0]).toBe("החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.");
     expect(wa.texts[1]).toContain("שלום דנה");
@@ -67,8 +80,25 @@ describe("account linking", () => {
     expect(wa.texts.filter((t) => t.includes("החשבון מקושר"))).toHaveLength(1);
   });
 
+  it("'לא לקשר' links nothing and keeps the code unused (someone else's wa.me link)", async () => {
+    const h = makeHarness();
+    const attacker = await h.db.createUser("attacker@example.com");
+    const { token } = await issueLinkToken(h.db, attacker.id, h.ctx.now());
+    await processInbound(h.ctx, h.inbound(`היי עלזה! אפשר לקשר את החשבון שלי (${token})`));
+    expect(h.wa.sent[0]!.body).toContain("a***@example.com");
+    const r = await processInbound(h.ctx, h.inbound("לא לקשר", { type: "button", reply: { id: "lk:no", title: "לא לקשר" } }));
+    expect(r.note).toBe("link declined");
+    expect(h.wa.texts.at(-1)).toContain("המספר לא קושר");
+    expect(await h.db.findWaIdentityByPhone("+972501234567")).toBeNull();
+    expect(await h.db.listWaIdentities(attacker.id)).toEqual([]);
+    // a forged confirm id with a wrong code is a strike like any bad code
+    await processInbound(h.ctx, yes(h, "ZZZZ-9999"));
+    expect(h.wa.texts.at(-1)).toContain("לא מצאתי קוד כזה");
+  });
+
   it("rejects expired tokens and a second phone for the same account", async () => {
-    const { ctx, wa, inbound, db, advance } = makeHarness();
+    const h = makeHarness();
+    const { ctx, wa, inbound, db, advance } = h;
     const user = await db.createUser("dana@example.com");
     const first = await issueLinkToken(db, user.id, ctx.now());
     advance(16 * 60_000);
@@ -78,30 +108,39 @@ describe("account linking", () => {
     db.seedWaIdentity(user.id, "+972509999999");
     const second = await issueLinkToken(db, user.id, ctx.now());
     await processInbound(ctx, inbound(second.token));
-    expect(wa.texts[1]).toContain("כבר מקושר למספר אחר (972-***-9999)");
+    await processInbound(ctx, yes(h, second.token));
+    expect(wa.texts.at(-1)).toContain("כבר מקושר למספר אחר (972-***-9999)");
+    // a code that expires between the card and the press
+    const third = await issueLinkToken(db, (await db.createUser("x@example.com")).id, ctx.now());
+    await processInbound(ctx, inbound(third.token, { from: "972503333333", fromE164: "+972503333333" }));
+    advance(16 * 60_000);
+    await processInbound(ctx, yes(h, third.token, { from: "972503333333", fromE164: "+972503333333" }));
+    expect(wa.texts.at(-1)).toContain("כבר לא בתוקף");
   });
 
   it("one token sent from two phones at once links one phone only", async () => {
-    const { ctx, inbound, db } = makeHarness();
+    const h = makeHarness();
+    const { ctx, db } = h;
     const user = await db.createUser("dana@example.com");
     const { token } = await issueLinkToken(db, user.id, ctx.now());
-    const a = inbound(token, { from: "972501111111", fromE164: "+972501111111" });
-    const b = inbound(token, { from: "972502222222", fromE164: "+972502222222" });
+    const a = yes(h, token, { from: "972501111111", fromE164: "+972501111111" });
+    const b = yes(h, token, { from: "972502222222", fromE164: "+972502222222" });
     const [ra, rb] = await Promise.all([handleUnlinked(ctx, a), handleUnlinked(ctx, b)]);
     expect([ra.note, rb.note].filter((n) => n.startsWith("linked"))).toHaveLength(1);
     expect((await db.listWaIdentities(user.id)).filter((w) => w.status !== "unlinked")).toHaveLength(1);
   });
 
   it("a phone that already had a trial on another account gives a new account no second trial", async () => {
-    const { ctx, inbound, db } = makeHarness();
+    const h = makeHarness();
+    const { ctx, db } = h;
     const first = await db.createUser("me+1@example.com");
-    await processInbound(ctx, inbound((await issueLinkToken(db, first.id, ctx.now())).token));
+    await processInbound(ctx, yes(h, (await issueLinkToken(db, first.id, ctx.now())).token));
     expect(db.trialPhones.get(trialPhoneHash("+972501234567"))).toBe(first.id);
     const mine = (await db.listWaIdentities(first.id))[0]!;
     await db.unlinkWaIdentity(first.id, mine.id);
 
     const second = await db.createUser("me+2@example.com");
-    const r = await processInbound(ctx, inbound((await issueLinkToken(db, second.id, ctx.now())).token));
+    const r = await processInbound(ctx, yes(h, (await issueLinkToken(db, second.id, ctx.now())).token));
     expect(r.note).toBe("linked (trial already used on this phone)");
     expect(await db.countTrialMessage(second.id)).toBe(-1);
     expect(await db.countTrialMessage(first.id)).toBeGreaterThanOrEqual(0);

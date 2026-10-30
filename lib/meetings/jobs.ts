@@ -247,7 +247,7 @@ async function explain(deps: MeetingDeps, user: UserRow, phone: string, m: Meeti
     case "consent": {
       if (outcome.provider === "microsoft") {
         if (user.profile.ms_meetings_consent === "admin_required") {
-          const adminLink = new URL("/api/auth/microsoft/start?admin=1", deps.appUrl).toString();
+          const adminLink = new URL(`/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft", { now, purpose: "admin" }))}`, deps.appUrl).toString();
           return say(deps, user, phone, mcopy["mt.consent.teams_admin"](adminLink));
         }
         const link = new URL(`/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft", { now }))}`, deps.appUrl).toString();

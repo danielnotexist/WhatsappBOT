@@ -202,8 +202,37 @@ async function tokenRequest(cfg: GoogleOAuthConfig, body: Record<string, string>
   };
 }
 
-export function exchangeGoogleCode(cfg: GoogleOAuthConfig, code: string, codeVerifier: string): Promise<GoogleTokens> {
-  return tokenRequest(cfg, { grant_type: "authorization_code", code, redirect_uri: cfg.redirectUri, code_verifier: codeVerifier });
+/** The id_token that comes back is checked before anyone reads it (checkGoogleIdToken) — else GoogleOAuthError `invalid_id_token`. */
+export async function exchangeGoogleCode(cfg: GoogleOAuthConfig, code: string, codeVerifier: string): Promise<GoogleTokens> {
+  const tokens = await tokenRequest(cfg, { grant_type: "authorization_code", code, redirect_uri: cfg.redirectUri, code_verifier: codeVerifier });
+  const problem = checkGoogleIdToken(tokens.idToken, cfg.clientId);
+  if (problem) throw new GoogleOAuthError(`Google id_token rejected: ${problem}`, "invalid_id_token");
+  return tokens;
+}
+
+/**
+ * Google's id_token binding (openid.net / developers.google.com "Validate an ID token"): `iss` is accounts.google.com
+ * (with or without https://), `aud` is this app's client id, `exp` holds now. It comes straight from the token endpoint
+ * over TLS for our code and PKCE verifier, so the signature is not checked. No id_token → null (userinfo is the
+ * fallback). Returns the reason, or null when it passes.
+ */
+export function checkGoogleIdToken(idToken: string | null, clientId: string, now: Date = new Date()): string | null {
+  if (!idToken) return null;
+  const parts = idToken.split(".");
+  let p: Record<string, unknown> | null = null;
+  try {
+    const v = parts.length >= 2 ? (JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")) as unknown) : null;
+    p = v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    p = null;
+  }
+  if (!p) return "malformed";
+  if (p.iss !== "https://accounts.google.com" && p.iss !== "accounts.google.com") return "iss";
+  if (!(p.aud === clientId || (Array.isArray(p.aud) && p.aud.includes(clientId)))) return "aud";
+  const t = Math.floor(now.getTime() / 1000);
+  if (typeof p.exp !== "number" || p.exp + 300 <= t) return "exp";
+  if (typeof p.iat === "number" && p.iat - 300 > t) return "iat";
+  return null;
 }
 
 /** The response usually has no new refresh_token — callers keep the old one. */

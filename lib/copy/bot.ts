@@ -26,6 +26,9 @@ export interface OnlineNotDone {
 export const copy = {
   // ---- 1. account linking ----
   "link.success": () => "החשבון מקושר. מעכשיו אפשר לכתוב לי כאן.",
+  "link.confirm": (maskedEmail: string) =>
+    `לפני שמקשרים: הקוד הזה שייך לחשבון ${maskedEmail}.\nאחרי הקישור, מי שמחזיק בחשבון הזה יוכל לראות את מה שנכתב לי כאן ואת המייל, היומן והקבצים שיחוברו דרכו.\nלקשר את המספר הזה לחשבון?`,
+  "link.declined": () => "בסדר, המספר לא קושר. אם הקוד הגיע ממישהו אחר, כדאי לא להשתמש בו. לחשבון משלך אפשר להירשם באתר.",
   "link.token_expired": (siteLink: string) => `הקישור הזה כבר לא בתוקף (הוא עובד 15 דקות ופעם אחת).\nאפשר להפיק קישור חדש באזור האישי:\n${siteLink}`,
   "link.token_invalid": (siteLink: string) => `לא מצאתי קוד כזה. כדאי לבדוק שההודעה נשלחה בדיוק כמו שהופיעה באתר, או להפיק קישור חדש:\n${siteLink}`,
   "link.unknown_number": (siteLink: string) => `היי, כאן ${P} — עוזרת למייל, ליומן ולקבצים של העסק.\nהמספר הזה עדיין לא מקושר לחשבון. ההרשמה לוקחת כדקה:\n${siteLink}`,
@@ -179,6 +182,11 @@ export const buttons = {
     { id: "onb:connect:google", title: "Google" },
     { id: "onb:connect:later", title: "אחר כך" },
   ] satisfies ReplyButton[],
+  /** the confirm card of a link code (lib/bot/linking.ts): the code rides in the yes button's id */
+  linkConfirm: (token: string): ReplyButton[] => [
+    { id: `lk:yes:${token}`, title: "כן, לקשר" },
+    { id: "lk:no", title: "לא לקשר" },
+  ],
   cancelSubscription: [
     { id: "bill:cancel:yes", title: "בטל מנוי" },
     { id: "bill:cancel:no", title: "השאר פעיל" },

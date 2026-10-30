@@ -49,6 +49,13 @@ export function siteLink(ctx: BotContext, path: string): string {
   return new URL(path, ctx.appUrl).toString();
 }
 
+/** "dana.levi@gmail.com" → "d***@gmail.com": enough for the owner to recognise, not a full address for a stranger. */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return "***";
+  return `${email[0]}***${email.slice(at)}`;
+}
+
 export function maskPhone(e164: string): string {
   const d = e164.replace(/\D/g, "");
   return d.length < 7 ? "***" : `${d.slice(0, 3)}-***-${d.slice(-4)}`;

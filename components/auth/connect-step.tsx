@@ -133,7 +133,7 @@ function Assurance({ icon: Icon, children }: { icon: () => ReactNode; children: 
   );
 }
 
-/** The text an IT admin gets by mail, with the tenant-wide consent link (30 minutes, from this signed-in user). */
+/** The text an IT admin gets by mail, with the tenant-wide consent link (admin consent only, 3 days, from this signed-in user). */
 export function adminMailto(adminLink: string): string {
   const subject = `בקשה לאישור חיבור ${BRAND.name} ל-Microsoft 365`;
   const body = [
@@ -141,7 +141,7 @@ export function adminMailto(adminLink: string): string {
     `אני רוצה לחבר את ${BRAND.name} - עוזרת למייל וליומן בוואטסאפ - לחשבון ה-Microsoft 365 שלי.`,
     "הארגון דורש אישור מנהל חד-פעמי להרשאות מייל, יומן וקבצים (קריאה ושליחה בשמי בלבד, בלי גישה לחשבונות אחרים).",
     "",
-    "הקישור לאישור (תקף 30 דקות):",
+    "הקישור לאישור (תקף 3 ימים):",
     adminLink,
     "",
     "תודה!",

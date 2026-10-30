@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { enterCode, newContext, readCode, sendWhatsapp, submitEmail, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
+import { enterCode, linkWhatsapp, newContext, readCode, sendWhatsapp, submitEmail, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
 
 /** Signs a new user up through the API (same endpoints the cards call); the context keeps the session cookie. */
 async function apiSignup(ctx: BrowserContext): Promise<string> {
@@ -96,8 +96,7 @@ test.describe("signup — the screen sequence of round plan §3", () => {
 
     // the token really links a WhatsApp number to this account
     const phone = uniquePhone();
-    await sendWhatsapp(ctx.request, phone, message);
-    await waitForWaText(ctx.request, phone, /החשבון מקושר/);
+    await linkWhatsapp(ctx.request, phone, message);
     await ctx.close();
   });
 
@@ -200,8 +199,7 @@ test.describe("signup — the screen sequence of round plan §3", () => {
     const email = await apiSignup(owner);
     const { message } = await readyLink(owner);
     const phone = uniquePhone();
-    await sendWhatsapp(owner.request, phone, message);
-    await waitForWaText(owner.request, phone, /החשבון מקושר/);
+    await linkWhatsapp(owner.request, phone, message);
     await sendWhatsapp(owner.request, phone, "כניסה");
     const reply = await waitForWaText(owner.request, phone, /קישור כניסה לאזור האישי/);
     const loginUrl = /(https?:\/\/\S+\/login\/w\/\S+)/.exec(reply)![1]!;

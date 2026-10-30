@@ -387,6 +387,19 @@ export class SupabaseDb implements Db {
     return { result: r.result };
   }
 
+  async findLinkToken(tokenHash: string): Promise<LinkTokenRow | null> {
+    const { data, error } = await this.client.from("link_tokens").select("*").eq("token_hash", tokenHash).maybeSingle();
+    if (error) this.fail("findLinkToken", error);
+    return (data as unknown as LinkTokenRow | null) ?? null;
+  }
+
+  async consumeConnectLink(nonceHash: string, userId: string, expiresAt: Date): Promise<boolean> {
+    if (!UUID_RE.test(userId)) return false;
+    const { data, error } = await this.client.rpc("connect_link_consume", { p_nonce_hash: nonceHash, p_user_id: userId, p_expires_at: expiresAt.toISOString() });
+    if (error) this.fail("consumeConnectLink", error);
+    return data === true;
+  }
+
   async consumeLoginToken(userId: string, nonceHash: string): Promise<boolean> {
     if (!UUID_RE.test(userId)) return false;
     const { data, error } = await this.client.rpc("login_token_consume", { p_user_id: userId, p_nonce_hash: nonceHash });
@@ -433,6 +446,12 @@ export class SupabaseDb implements Db {
       .select(SupabaseDb.CONN_COLS)
       .maybeSingle();
     if (error) this.fail("revokeConnection", error);
+    // as MemoryDb: a revoked connection keeps no Graph subscription (the FK cascade fires only on delete), so a late
+    // notification for it matches nothing (app/api/graph/notify)
+    if (data) {
+      const del = await this.client.from("graph_subscriptions").delete().eq("connection_id", id);
+      if (del.error) this.fail("revokeConnection", del.error);
+    }
     return (data as unknown as ConnectionRow | null) ?? null;
   }
 

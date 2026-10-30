@@ -48,10 +48,10 @@ async function WithSession({ searchParams }: { searchParams: PageProps<"/start/c
     return connected && entitlements(effectivePlan(sub, new Date())).maxProviders < 2 ? <OneAccountNote connected={connected} /> : null;
   }
   const appUrl = process.env.APP_URL || "http://localhost:3000";
-  // the IT admin opens this without our session: a one-time 30-minute start link for the tenant-wide consent
+  // the IT admin opens this without our session: an admin-consent-only start link (3 days, lib/ms/connect-link.ts)
   const adminLink =
     sp.admin === "1"
-      ? new URL(`/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(session.userId, "microsoft"))}`, appUrl).toString()
+      ? new URL(`/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(session.userId, "microsoft", { purpose: "admin" }))}`, appUrl).toString()
       : null;
   return <ConnectError error={error} adminLink={adminLink} />;
 }

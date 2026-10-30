@@ -3,21 +3,37 @@ import { extractLinkToken, linkTokenHash, trialPhoneHash } from "@/lib/auth/link
 import { copy, buttons } from "@/lib/copy/bot";
 import type { UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
-import { LINK, maskPhone, siteLink, type BotContext } from "./context";
+import { LINK, maskEmail, maskPhone, siteLink, type BotContext } from "./context";
 import { startOnboarding } from "./onboarding";
 
 /**
  * A message from a number that is not linked to any account (PLAN §1 "קישור לוואטסאפ"):
- * token in the text → link (one phone per account, one account per phone) → welcome + onboarding.
+ * token in the text → a confirm card naming the account (masked email) → "כן, לקשר" → link (one phone per account,
+ * one account per phone) → welcome + onboarding. The confirm step (security round, area C): a wa.me link with someone
+ * else's code would otherwise bind this phone to their account in one tap, and whatever mailbox the phone's owner then
+ * connected in onboarding would land in that account. The code is consumed only on "כן, לקשר" (its id carries it).
  * No token → a pointer to the site (at most once an hour; never a strike). 3 bad tokens → silent block for 24h, then
  * the count starts over (0020 wa_link_attempt).
  */
 export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage): Promise<{ handled: boolean; note: string }> {
   const phone = msg.fromE164;
   if (await ctx.db.isPhoneBlocked(phone)) return { handled: true, note: "blocked" };
-  const token = msg.text ? extractLinkToken(msg.text) : null;
   const attempt = (strike: boolean) =>
     ctx.db.recordLinkAttempt(phone, { strike, waMessageId: msg.waMessageId ?? null, maxAttempts: LINK.maxTokenAttempts, blockMs: LINK.blockMs, pointerEveryMs: LINK.pointerEveryMs });
+  const invalid = async (note: string) => {
+    const { reply } = await attempt(true);
+    if (reply) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/ready")));
+    return { handled: true, note };
+  };
+
+  const replyId = msg.reply?.id ?? "";
+  if (replyId === "lk:no") {
+    await ctx.wa.sendText(phone, copy["link.declined"]());
+    return { handled: true, note: "link declined" };
+  }
+  const confirmed = replyId.startsWith("lk:yes:") ? extractLinkToken(replyId.slice("lk:yes:".length)) : null;
+  if (replyId.startsWith("lk:yes:") && !confirmed) return invalid("invalid token");
+  const token = confirmed ?? (msg.text ? extractLinkToken(msg.text) : null);
 
   if (!token) {
     // a plain message is never a strike: the pointer to the site, at most once an hour (and once per delivery)
@@ -26,14 +42,28 @@ export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage):
     return { handled: true, note: "unknown number" };
   }
 
+  if (!confirmed) {
+    // the code in a message: name the account it belongs to and ask first (nothing consumed, nothing linked)
+    const row = await ctx.db.findLinkToken(linkTokenHash(token));
+    if (!row) return invalid("invalid token");
+    if (row.used_at || Date.parse(row.expires_at) <= ctx.now().getTime()) {
+      await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/ready")));
+      return { handled: true, note: "expired token" };
+    }
+    const owner = await ctx.db.getUser(row.user_id);
+    if (!owner) {
+      await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start")));
+      return { handled: true, note: "token without user" };
+    }
+    await ctx.wa.sendButtons(phone, copy["link.confirm"](maskEmail(owner.email)), buttons.linkConfirm(token));
+    return { handled: true, note: "link confirm" };
+  }
+
   // 0020 link_token_consume: the code (by its HMAC), one phone per account and the link itself — one locked step
   const res = await ctx.db.consumeLinkToken({ tokenHash: linkTokenHash(token), phoneE164: phone, waName: msg.profileName, phoneHash: trialPhoneHash(phone) });
   switch (res.result) {
-    case "invalid": {
-      const { reply } = await attempt(true);
-      if (reply) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/ready")));
-      return { handled: true, note: "invalid token" };
-    }
+    case "invalid":
+      return invalid("invalid token");
     case "expired":
     case "phone_taken":
       await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/ready")));

@@ -17,8 +17,8 @@ import { normalizeEmail } from "./otp";
  *  - Google: the email counts only with `email_verified === true` (id_token, else userinfo); without it, no sign-in.
  *  - Microsoft: the email counts only for a personal account (the consumer tenant MSA_TENANT_ID) or with
  *    `xms_edov === true` (the domain owner verified it — an optional claim, docs/microsoft-setup.md). Otherwise the
- *    `preferred_username` may only create a NEW account: when an account with that email exists, the browser goes to
- *    the email code instead (the account's owner proves the address), and nothing from the provider is kept.
+ *    `preferred_username` neither opens nor creates an account: the browser goes to the email code instead (the
+ *    address's owner proves it, then signs in or up as with the email flow), and nothing from the provider is kept.
  *  - The state and the PKCE verifier live in an encrypted, httpOnly, 15-minute cookie on /api/auth (`wb_sso`): bound to
  *    this browser (no login CSRF: a code and state from someone else's consent do not match this cookie), single use
  *    (the callback clears it), checked in constant time.
@@ -148,7 +148,7 @@ export function googleIdentity(claims: { sub: string | null; email: string | nul
 
 /**
  * Microsoft: a personal account's email (Microsoft verifies it), or a work account's `email` with `xms_edov` — both
- * trusted. Anything else: `preferred_username`, untrusted (it may create a new account, never open an existing one).
+ * trusted. Anything else: `preferred_username`, untrusted (only the email code may open or create an account for it).
  * Null when there is no usable address.
  */
 export function microsoftIdentity(claims: MsSignInClaims): SsoIdentity | null {
@@ -163,15 +163,17 @@ export function microsoftIdentity(claims: MsSignInClaims): SsoIdentity | null {
   return username ? { ...base, email: username, trusted: false, basis: "unverified" } : null;
 }
 
-export type SsoDecision = { kind: "signup" } | { kind: "login"; user: UserRow } | { kind: "verify_by_code"; user: UserRow };
+export type SsoDecision = { kind: "signup" } | { kind: "login"; user: UserRow } | { kind: "verify_by_code"; user: UserRow | null };
 
 /**
- * No account with this email → a new one (any identity the provider gave us). An account exists → it opens only for a
- * trusted email; otherwise its owner proves the address with the email code.
+ * A trusted email signs in (an account exists) or signs up (none does). An email the provider does not vouch for
+ * never opens an account and never creates one: the person proves the address with the email code, which signs up or
+ * signs in exactly like the email flow. (Creating the account from an unverified address would let someone register
+ * another person's address first — an SSO pre-hijack — and keep a mailbox connection on it.)
  */
 export function decideSso(identity: Pick<SsoIdentity, "trusted">, existing: UserRow | null): SsoDecision {
-  if (!existing) return { kind: "signup" };
-  return identity.trusted ? { kind: "login", user: existing } : { kind: "verify_by_code", user: existing };
+  if (!identity.trusted) return { kind: "verify_by_code", user: existing };
+  return existing ? { kind: "login", user: existing } : { kind: "signup" };
 }
 
 /** The audit target: provider, tenant (Microsoft) and subject — who signed in, not only which address. */

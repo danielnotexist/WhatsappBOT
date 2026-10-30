@@ -804,10 +804,14 @@ export interface Db {
   /** `id` is chosen by the caller: the shown code is derived from it (lib/auth/link-token.ts). */
   createLinkToken(userId: string, token: { id: string; tokenHash: string }, expiresAt: Date): Promise<LinkTokenRow>;
   latestLinkToken(userId: string): Promise<LinkTokenRow | null>;
+  /** The code's row by its HMAC, read only (nothing consumed): the WhatsApp confirm card names the account first. */
+  findLinkToken(tokenHash: string): Promise<LinkTokenRow | null>;
   /** The code → the phone linked, atomically (single use, one phone per account, an active phone never taken over). */
   consumeLinkToken(input: { tokenHash: string; phoneE164: string; waName: string | null; phoneHash: string | null }): Promise<LinkConsumeResult>;
   /** The WhatsApp sign-in link (lib/auth/login-token.ts): true for the one call that removed the matching nonce hash. */
   consumeLoginToken(userId: string, nonceHash: string): Promise<boolean>;
+  /** A chat connect link (lib/ms/connect-link.ts): true only for the first use of this nonce (0021 connect_link_consume). */
+  consumeConnectLink(nonceHash: string, userId: string, expiresAt: Date): Promise<boolean>;
 
   /** user whose profile.oauth_pending.<provider>.state equals `state` (OAuth callback lookup) */
   findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null>;

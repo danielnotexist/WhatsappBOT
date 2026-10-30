@@ -48,7 +48,8 @@ export function fixtureTaskLists(): FixtureTaskList[] {
 }
 
 export function fixtureIdToken(claims: Record<string, unknown> = {}): string {
-  const payload = { iss: "https://accounts.google.com", aud: "fixture-client", sub: FIXTURE_GOOGLE_ACCOUNT.sub, email: FIXTURE_GOOGLE_ACCOUNT.email, email_verified: true, name: FIXTURE_GOOGLE_ACCOUNT.name, ...claims };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = { iss: "https://accounts.google.com", aud: "fixture-client", iat: now, exp: now + 3600, sub: FIXTURE_GOOGLE_ACCOUNT.sub, email: FIXTURE_GOOGLE_ACCOUNT.email, email_verified: true, name: FIXTURE_GOOGLE_ACCOUNT.name, ...claims };
   return `${Buffer.from(JSON.stringify({ alg: "RS256", kid: "fixture" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.sig`;
 }
 
@@ -444,7 +445,7 @@ export function createGoogleFixture(): { fetchImpl: typeof fetch; state: GoogleF
       if (url.pathname === "/token") {
         if (state.tokenMode === "invalid_grant" || form.code === "bad-code") return json({ error: "invalid_grant", error_description: "Token has been expired or revoked." }, 400);
         const fresh = { access_token: `ya29.fixture-${++n}`, expires_in: 3599, scope: state.grantedScope, token_type: "Bearer" };
-        if (form.grant_type === "authorization_code") return json({ ...fresh, refresh_token: `1//fixture-refresh-${n}`, id_token: fixtureIdToken(state.idClaims) });
+        if (form.grant_type === "authorization_code") return json({ ...fresh, refresh_token: `1//fixture-refresh-${n}`, id_token: fixtureIdToken({ aud: form.client_id ?? "fixture-client", ...state.idClaims }) });
         return json(fresh);
       }
       if (url.pathname === "/revoke") {

@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { derivedKey } from "../lib/auth/keys";
 import { flashQuery } from "../lib/flash";
-import { newContext, openArea, payWithMock, readCode, sendWhatsapp, uniqueEmail, uniquePhone, waitForWaText } from "./helpers";
+import { linkWhatsapp, newContext, openArea, payWithMock, readCode, uniqueEmail, uniquePhone } from "./helpers";
 
 /** Signs a new user up through the API; the context keeps the session cookie. */
 async function signup(ctx: BrowserContext): Promise<string> {
@@ -86,8 +86,7 @@ test.describe("personal area — same server actions, new design", () => {
     await page.goto("/start/ready");
     const message = new URL((await page.getByRole("link", { name: "חיבור לוואטסאפ" }).getAttribute("href"))!).searchParams.get("text")!;
     const phone = uniquePhone();
-    await sendWhatsapp(ctx.request, phone, message);
-    await waitForWaText(ctx.request, phone, /החשבון מקושר/);
+    await linkWhatsapp(ctx.request, phone, message);
 
     // Microsoft from the personal area → back here with a notice
     await approveMicrosoft(ctx);

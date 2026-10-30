@@ -31,10 +31,11 @@ describe("the server-side funnel steps (lib/analytics/track.ts)", () => {
   });
 
   it("the WhatsApp link records wa_linked for the account", async () => {
-    const { ctx, inbound, db } = makeHarness();
+    const { ctx, inbound, button, db } = makeHarness();
     const user = await db.createUser("dana@example.com");
     const { token } = await issueLinkToken(db, user.id, ctx.now());
-    expect((await processInbound(ctx, inbound(`היי! לקשר את החשבון שלי: ${token}`))).note).toBe("linked");
+    expect((await processInbound(ctx, inbound(`היי! לקשר את החשבון שלי: ${token}`))).note).toBe("link confirm");
+    expect((await processInbound(ctx, button(`lk:yes:${token}`, "כן, לקשר"))).note).toBe("linked");
     await flushServerEvents();
     expect(db.pageEvents).toEqual([expect.objectContaining({ event: "wa_linked", user_id: user.id, path: null })]);
   });

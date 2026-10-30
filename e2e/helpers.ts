@@ -55,6 +55,28 @@ export async function waitForWaText(request: APIRequestContext, phone: string, m
 let msgSeq = 0;
 /** Sends a signed WhatsApp Cloud API webhook (a text from `phone`) to our own endpoint, the way Meta would. */
 export async function sendWhatsapp(request: APIRequestContext, phone: string, text: string): Promise<void> {
+  await postWhatsapp(request, phone, { type: "text", text: { body: text } });
+}
+
+/** A reply button pressed on a message from the bot (`interactive.button_reply`). */
+export async function pressWhatsappButton(request: APIRequestContext, phone: string, id: string, title: string): Promise<void> {
+  await postWhatsapp(request, phone, { type: "interactive", interactive: { type: "button_reply", button_reply: { id, title } } });
+}
+
+/**
+ * Links `phone` with the site's wa.me message: the code goes in, the bot names the account and asks, "כן, לקשר" is
+ * pressed (its id carries the code — lib/bot/linking.ts), and the number is linked.
+ */
+export async function linkWhatsapp(request: APIRequestContext, phone: string, message: string): Promise<void> {
+  const token = /\(([A-Z0-9]{4}-[A-Z0-9]{4})\)/.exec(message)?.[1];
+  expect(token, message).toBeTruthy();
+  await sendWhatsapp(request, phone, message);
+  await waitForWaText(request, phone, /הקוד הזה שייך לחשבון/);
+  await pressWhatsappButton(request, phone, `lk:yes:${token}`, "כן, לקשר");
+  await waitForWaText(request, phone, /החשבון מקושר/);
+}
+
+async function postWhatsapp(request: APIRequestContext, phone: string, message: Record<string, unknown>): Promise<void> {
   const body = JSON.stringify({
     object: "whatsapp_business_account",
     entry: [
@@ -67,7 +89,7 @@ export async function sendWhatsapp(request: APIRequestContext, phone: string, te
               messaging_product: "whatsapp",
               metadata: { phone_number_id: "PNID", display_phone_number: "972500000000" },
               contacts: [{ profile: { name: "דנה" }, wa_id: phone }],
-              messages: [{ from: phone, id: `wamid.e2e.${Date.now()}.${++msgSeq}`, timestamp: String(Math.floor(Date.now() / 1000)), type: "text", text: { body: text } }],
+              messages: [{ from: phone, id: `wamid.e2e.${Date.now()}.${++msgSeq}`, timestamp: String(Math.floor(Date.now() / 1000)), ...message }],
             },
           },
         ],

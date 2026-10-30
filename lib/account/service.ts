@@ -6,7 +6,7 @@ import { setAlertsEnabled } from "@/lib/proactive/actions";
 /** Business logic of the personal area — framework-free so it is unit-testable with MemoryDb. */
 export type AccountActionResult = { ok: true; message: string } | { ok: false; message: string };
 
-/** Provider-side revoke before the local tokens are wiped (Google: oauth2 revoke; Microsoft: none per-app). */
+/** Provider-side cleanup before the local tokens are wiped (Google: oauth2 revoke; Microsoft: the Graph inbox subscriptions). */
 export type ProviderRevoker = (db: Db, connection: ConnectionRow) => Promise<unknown>;
 
 export const DELETE_CONFIRM_WORD = "מחיקה";

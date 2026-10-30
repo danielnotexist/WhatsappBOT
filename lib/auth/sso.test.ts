@@ -96,8 +96,9 @@ describe("Microsoft: personal accounts and xms_edov are trusted, anything else m
 });
 
 describe("the decision", () => {
-  it("no account → signup; an account → login only for a trusted email, else the email code", () => {
-    expect(decideSso({ trusted: false }, null)).toEqual({ kind: "signup" });
+  it("a trusted email → signup or login; an untrusted one → the email code, never a new account (SSO pre-hijack)", () => {
+    expect(decideSso({ trusted: true }, null)).toEqual({ kind: "signup" });
+    expect(decideSso({ trusted: false }, null)).toEqual({ kind: "verify_by_code", user: null });
     expect(decideSso({ trusted: true }, user)).toEqual({ kind: "login", user });
     expect(decideSso({ trusted: false }, user)).toEqual({ kind: "verify_by_code", user });
   });

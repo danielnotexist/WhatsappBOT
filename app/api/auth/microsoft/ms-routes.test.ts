@@ -5,13 +5,33 @@ import { setDbForTests } from "@/lib/db";
 import { RecordingWaSender } from "@/lib/wa/sender";
 import { setWaSenderForTests } from "@/lib/wa";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
-import { setGlobalSingleton } from "@/lib/global-singleton";
+import { globalSingleton, setGlobalSingleton } from "@/lib/global-singleton";
 import { POST as notifyPost } from "../../graph/notify/route";
-import { GET as callbackGet } from "./callback/route";
-import { GET as startGet } from "./start/route";
+import { GET as rawCallbackGet } from "./callback/route";
+import { GET as rawStartGet } from "./start/route";
 import { flushServerEvents } from "@/lib/analytics/track";
+import { createSessionToken } from "@/lib/auth/session";
 
-vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }) }));
+const jar = vi.hoisted(() => ({ session: undefined as string | undefined }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "wb_session" && jar.session ? { name, value: jar.session } : undefined) }) }));
+
+/** One browser: the cookies the routes set (the connect binding, lib/auth/connect-cookie.ts) go back with each request. */
+const browser = new Map<string, string>();
+const withBrowser = (handler: (r: Request) => Promise<Response>) => async (req: Request) => {
+  const headers = new Headers(req.headers);
+  if (browser.size && !headers.has("cookie")) headers.set("cookie", [...browser].map(([k, v]) => `${k}=${v}`).join("; "));
+  const res = await handler(new Request(req.url, { headers }));
+  for (const line of res.headers.getSetCookie()) {
+    const [pair, ...attrs] = line.split(";");
+    const i = pair!.indexOf("=");
+    const name = pair!.slice(0, i).trim();
+    if (attrs.some((a) => a.trim() === "Max-Age=0")) browser.delete(name);
+    else browser.set(name, pair!.slice(i + 1));
+  }
+  return res;
+};
+const startGet = withBrowser(rawStartGet);
+const callbackGet = withBrowser(rawCallbackGet);
 
 describe("Microsoft connect routes (memory mode)", () => {
   let db: MemoryDb;
@@ -25,6 +45,9 @@ describe("Microsoft connect routes (memory mode)", () => {
     setDbForTests(db);
     setWaSenderForTests(wa);
     setGlobalSingleton("graph-fixture", undefined);
+    setGlobalSingleton("ms-fixture-claims", undefined);
+    jar.session = undefined;
+    browser.clear();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -33,7 +56,8 @@ describe("Microsoft connect routes (memory mode)", () => {
   });
 
   it("start (chat link) → Microsoft authorize with PKCE; callback stores the connection, subscribes and tells the user", async () => {
-    const user = await db.createUser("dana@example.com");
+    // a chat link alone: the account's own address, vouched for by Microsoft (xms_edov in the fixture)
+    const user = await db.createUser("dana@levi-law.co.il");
     db.seedWaIdentity(user.id, "+972501234567");
     const t = createConnectLinkToken(user.id, "microsoft");
     const start = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?t=${encodeURIComponent(t)}`));
@@ -65,7 +89,7 @@ describe("Microsoft connect routes (memory mode)", () => {
   });
 
   it("return=onboarding: success lands on /start/ready, failure goes back to /start/connect (admin flag when needed)", async () => {
-    const user = await db.createUser("dana@example.com");
+    const user = await db.createUser("dana@levi-law.co.il");
     const start = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?returnTo=onboarding&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
     const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
     const ok = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?code=abc&state=${state}`));
@@ -98,14 +122,19 @@ describe("Microsoft connect routes (memory mode)", () => {
     const cb = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?error=consent_required&error_description=AADSTS65001%3A+admin+consent+needed&state=${state}`));
     expect(new URL(cb.headers.get("location")!).searchParams.get("error")).toContain("אישור מנהל");
     expect(wa.texts.at(-1)).toContain("משרד לוי");
-    expect(wa.texts.at(-1)).toContain("/api/auth/microsoft/start?admin=1");
+    expect(wa.texts.at(-1)).toContain("/api/auth/microsoft/start?admin=1&t=");
 
-    const adminStart = await startGet(new Request(`https://app.example.co.il/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    // the IT admin opens the forwarded link in their own browser, without any session: the admin consent only
+    const adminLink = wa.texts.at(-1)!.match(/https:\/\/\S+admin=1&t=[^\s"]+/)![0];
+    browser.clear();
+    const adminStart = await startGet(new Request(adminLink));
     const adminUrl = new URL(adminStart.headers.get("location")!);
     expect(adminUrl.pathname).toBe("/organizations/v2.0/adminconsent");
     const st2 = adminUrl.searchParams.get("state")!;
     const granted = await callbackGet(new Request(`https://app.example.co.il/api/auth/microsoft/callback?admin_consent=True&tenant=t1&state=${st2}`));
     expect(new URL(granted.headers.get("location")!).searchParams.get("notice")).toContain("אישור המנהל התקבל");
+    // an admin link is admin-only: without admin=1 it is refused
+    expect((await startGet(new Request(adminLink.replace("admin=1&", "")))).status).toBe(410);
   });
 
   it("graph notify answers the validation handshake and accepts only matching clientState", async () => {
@@ -125,6 +154,7 @@ describe("Microsoft connect routes (memory mode)", () => {
     const APP = "https://app.example.co.il";
     const user = await db.createUser("dana@example.com");
     db.seedConnection(user.id, "google", "dana.levi@gmail.com");
+    jar.session = createSessionToken(user.id); // signed in: the refusal may land on the personal pay page
     const start = () => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
     const refused = await start();
     expect(refused.status).toBe(303);
@@ -135,8 +165,14 @@ describe("Microsoft connect routes (memory mode)", () => {
     await db.upsertSubscription(user.id, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
     expect(new URL((await start()).headers.get("location")!).searchParams.get("why")).toBe("second_account");
     // the IT admin's tenant-wide consent connects nothing: not gated
-    const admin = await startGet(new Request(`${APP}/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+    const admin = await startGet(new Request(`${APP}/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft", { purpose: "admin" }))}`));
     expect(new URL(admin.headers.get("location")!).pathname).toContain("adminconsent");
+    // a chat link alone never mints a pay link: a plain notice
+    jar.session = undefined;
+    const alone = await start();
+    expect(alone.status).toBe(403);
+    expect(await alone.text()).toContain("בחבילה הנוכחית אפשר לחבר חשבון אחד");
+    jar.session = createSessionToken(user.id);
     await db.upsertSubscription(user.id, { plan: "pro" });
     expect(new URL((await start()).headers.get("location")!).hostname).toBe("login.microsoftonline.com");
   });
@@ -145,7 +181,8 @@ describe("Microsoft connect routes (memory mode)", () => {
     const APP = "https://app.example.co.il";
     const user = await db.createUser("dana@example.com");
     db.seedWaIdentity(user.id, "+972501234567");
-    const start = (q = "") => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}${q}`));
+    jar.session = createSessionToken(user.id); // signed in: another mailbox than the account's address may connect
+    const start = (q = "") => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft", { purpose: q.includes("admin=1") ? "admin" : "user" }))}${q}`));
     const scopesOf = (r: Response) => new URL(r.headers.get("location")!).searchParams.get("scope")!.split(" ");
     // the trial (and basic): the base set only
     expect(scopesOf(await start())).not.toContain("OnlineMeetingTranscript.Read.All");
@@ -173,5 +210,106 @@ describe("Microsoft connect routes (memory mode)", () => {
     await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { ...((await db.getUser(user.id))!.profile.oauth_pending as { microsoft: Record<string, unknown> }).microsoft, meetings: false } } });
     const plain = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?error=access_denied&state=${s2}`));
     expect(new URL(plain.headers.get("location")!).hostname).toBe("app.example.co.il");
+  });
+
+  describe("connect security (security round, area C)", () => {
+    const APP = "https://app.example.co.il";
+    const startWith = async (userId: string, q = "") => startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(createConnectLinkToken(userId, "microsoft", { purpose: q.includes("admin=1") ? "admin" : "user" }))}${q}`));
+    const stateOf = (r: Response) => new URL(r.headers.get("location")!).searchParams.get("state")!;
+
+    it("a pending state older than 30 minutes is refused without exchanging the code (also the admin consent)", async () => {
+      const user = await db.createUser("dana@levi-law.co.il");
+      db.seedWaIdentity(user.id, "+972501234567");
+      for (const q of ["", "&admin=1"]) {
+        const state = stateOf(await startWith(user.id, q));
+        const pending = ((await db.getUser(user.id))!.profile.oauth_pending as { microsoft: Record<string, unknown> }).microsoft;
+        await db.mergeUserProfile(user.id, { oauth_pending: { microsoft: { ...pending, started_at: new Date(Date.now() - 31 * 60_000).toISOString() } } });
+        const cb = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?${q ? "admin_consent=True&tenant=t1" : "code=abc"}&state=${state}`));
+        expect(new URL(cb.headers.get("location")!).searchParams.get("error"), q).toContain("לא זוהה");
+        expect(db.audit.at(-1), q).toMatchObject({ result: "error:state_expired" });
+      }
+      expect(await db.listConnections(user.id)).toEqual([]);
+      expect(wa.texts).toEqual([]); // no "the admin approved" either
+    });
+
+    it("the callback finishes only in the browser that started it: a captured authorize URL attaches nothing", async () => {
+      const attacker = await db.createUser("attacker@example.com");
+      db.seedWaIdentity(attacker.id, "+972501234567");
+      jar.session = createSessionToken(attacker.id);
+      const start = await startGet(new Request(`${APP}/api/auth/microsoft/start`));
+      expect(start.headers.getSetCookie().some((c) => c.startsWith("wb_connect_microsoft=") && c.includes("HttpOnly"))).toBe(true);
+      jar.session = undefined; // the victim's browser
+      const cb = await rawCallbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(start)}`));
+      expect(new URL(cb.headers.get("location")!).searchParams.get("error")).toContain("התחיל בדפדפן אחר");
+      expect(await db.listConnections(attacker.id)).toEqual([]);
+      expect(wa.texts).toEqual([]);
+      expect(db.audit.at(-1)).toMatchObject({ action: "ms.connect", result: "error:unbound" });
+    });
+
+    it("a chat link alone adds only the account's own address, and only when Microsoft vouches for it", async () => {
+      // another mailbox (the fixture's dana@levi-law.co.il) for the account dana@example.com
+      const user = await db.createUser("dana@example.com");
+      const cb = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(await startWith(user.id))}`));
+      expect(new URL(cb.headers.get("location")!).searchParams.get("error")).toContain("קישור מהשיחה מחבר רק");
+      expect(await db.listConnections(user.id)).toEqual([]);
+      expect(db.audit.at(-1)).toMatchObject({ action: "ms.connect", result: "error:chat_other_mailbox" });
+      // the same address, but a work account without xms_edov (Microsoft does not vouch for the email claim)
+      const own = await db.createUser("dana@levi-law.co.il");
+      setGlobalSingleton("ms-fixture-claims", { tid: "org-tenant", oid: "attacker-oid", preferred_username: "dana@levi-law.co.il", email: "dana@levi-law.co.il" });
+      const cb2 = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(await startWith(own.id))}`));
+      expect(new URL(cb2.headers.get("location")!).searchParams.get("error")).toContain("קישור מהשיחה מחבר רק");
+      expect(await db.listConnections(own.id)).toEqual([]);
+      // signed in to the account, the same consent connects
+      jar.session = createSessionToken(own.id);
+      const cb3 = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(await startWith(own.id))}`));
+      expect(new URL(cb3.headers.get("location")!).searchParams.get("notice")).toContain("הושלם");
+    });
+
+    it("a chat link works once; a user link cannot open the admin consent", async () => {
+      const user = await db.createUser("dana@levi-law.co.il");
+      const t = createConnectLinkToken(user.id, "microsoft");
+      expect((await startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(t)}`))).status).toBe(303);
+      const again = await startGet(new Request(`${APP}/api/auth/microsoft/start?t=${encodeURIComponent(t)}`));
+      expect(again.status).toBe(410);
+      expect(await again.text()).toContain("פעם אחת");
+      const asAdmin = await startGet(new Request(`${APP}/api/auth/microsoft/start?admin=1&t=${encodeURIComponent(createConnectLinkToken(user.id, "microsoft"))}`));
+      expect(asAdmin.status).toBe(410);
+    });
+
+    it("an id_token for another app, from another issuer or expired is refused before anything is stored", async () => {
+      const user = await db.createUser("dana@levi-law.co.il");
+      jar.session = createSessionToken(user.id);
+      const now = Math.floor(Date.now() / 1000);
+      for (const extra of [{ aud: "another-app" }, { iss: "https://login.microsoftonline.com/other-tenant/v2.0" }, { exp: now - 3600 }]) {
+        setGlobalSingleton("ms-fixture-claims", { tid: "memory-tenant", oid: "u1", preferred_username: "dana@levi-law.co.il", email: "dana@levi-law.co.il", xms_edov: true, ...extra });
+        const cb = await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(await startGet(new Request(`${APP}/api/auth/microsoft/start`)))}`));
+        expect(new URL(cb.headers.get("location")!).searchParams.get("error"), JSON.stringify(extra)).toBe("החיבור נכשל (invalid_id_token). אפשר לנסות שוב.");
+      }
+      expect(await db.listConnections(user.id)).toEqual([]);
+    });
+
+    it("graph notify drops notifications of a disconnected mailbox; disconnecting removes the subscription", async () => {
+      const user = await db.createUser("dana@levi-law.co.il");
+      const conn = db.seedConnection(user.id, "microsoft", "dana@levi-law.co.il");
+      await db.upsertGraphSubscription({ connection_id: conn.id, subscription_id: "sub-9", resource: "me/mailFolders('inbox')/messages", expires_at: new Date().toISOString(), client_state: "secret" });
+      // a revoked connection whose subscription row is still there (SupabaseDb before this fix)
+      conn.status = "revoked";
+      const n = await notifyPost(new Request(`${APP}/api/graph/notify`, { method: "POST", body: JSON.stringify({ value: [{ subscriptionId: "sub-9", clientState: "secret", changeType: "created", resource: "x" }] }) }));
+      expect(await n.json()).toEqual({ accepted: 0 });
+      expect(db.audit.filter((a) => a.action === "graph.notification")).toHaveLength(0);
+      // a real connection (its inbox subscription made at Graph), then "ניתוק"
+      jar.session = createSessionToken(user.id);
+      await callbackGet(new Request(`${APP}/api/auth/microsoft/callback?code=abc&state=${stateOf(await startGet(new Request(`${APP}/api/auth/microsoft/start`)))}`));
+      const live = (await db.listConnections(user.id)).find((c) => c.status === "active")!;
+      const [sub] = await db.listGraphSubscriptionsForConnection(live.id);
+      expect(sub).toBeTruthy();
+      const { disconnectConnectionFor } = await import("@/lib/account/service");
+      expect((await disconnectConnectionFor(db, user.id, live.id)).ok).toBe(true);
+      expect(await db.findGraphSubscription(sub!.subscription_id)).toBeNull();
+      // …and at Graph too, so Microsoft stops notifying for it
+      const graph = globalSingleton<{ state: { calls: { method: string; url: string }[]; subscriptions: unknown[] } }>("graph-fixture", () => { throw new Error("no graph fixture"); });
+      expect(graph.state.calls.some((c) => c.method === "DELETE" && c.url.endsWith(`/subscriptions/${sub!.subscription_id}`))).toBe(true);
+      expect(graph.state.subscriptions).toEqual([]);
+    });
   });
 });

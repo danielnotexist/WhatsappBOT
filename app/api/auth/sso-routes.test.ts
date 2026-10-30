@@ -199,16 +199,18 @@ describe("Sign in with Microsoft / Google (memory mode)", () => {
     expect(db.audit.some((a) => a.action === "login")).toBe(false);
   });
 
-  it("Microsoft without xms_edov may still create a NEW account (by preferred_username)", async () => {
+  it("Microsoft without xms_edov never creates an account (SSO pre-hijack): the email code for the new address instead", async () => {
     setGlobalSingleton("ms-fixture-claims", { tid: "org-tenant", oid: "o9", preferred_username: "avi@levi-law.co.il", name: "אבי" });
     const { state, cookie } = await startSignIn("microsoft", "start");
     const cb = await callback("microsoft", `state=${state}&code=abc`, cookie);
-    expect(location(cb).pathname).toBe("/start/ready");
-    expect(location(cb).searchParams.get("connected")).toBe("microsoft");
-    const user = (await db.findUserByEmail("avi@levi-law.co.il"))!;
-    expect(sessionOf(cb)?.userId).toBe(user.id);
-    expect(await db.listConnections(user.id)).toMatchObject([{ provider: "microsoft", account_email: "avi@levi-law.co.il", tenant_id: "org-tenant", status: "active" }]);
-    expect(db.audit.find((a) => a.action === "auth.sso")).toMatchObject({ result: "ok:signup", reason: "unverified" });
+    const dest = location(cb);
+    expect(dest.pathname).toBe("/login/code");
+    expect(dest.searchParams.get("email")).toBe("avi@levi-law.co.il");
+    expect(dest.searchParams.get("sso")).toBe("microsoft");
+    expect(cookieValue(cb, "wb_session")).toBeUndefined();
+    expect(await db.findUserByEmail("avi@levi-law.co.il")).toBeNull(); // no account until the address is proven
+    expect(mailer.sent.map((m) => m.to)).toEqual(["avi@levi-law.co.il"]);
+    expect(db.audit.find((a) => a.action === "auth.sso")).toMatchObject({ user_id: null, result: "verify_by_code:new", reason: "unverified" });
   });
 
   it("Microsoft, a trusted email (xms_edov or a personal account) opens the existing account → /account", async () => {
@@ -257,7 +259,8 @@ describe("Sign in with Microsoft / Google (memory mode)", () => {
     expect(cookieValue(res, SSO_COOKIE)).toBeUndefined();
     const state = location(res).searchParams.get("state")!;
     expect(((await db.getUser(dana.id))!.profile.oauth_pending as { google: { state: string; returnTo: string } }).google).toMatchObject({ state, returnTo: "onboarding" });
-    const cb = await callback("google", `state=${state}&code=abc`);
+    expect(cookieValue(res, "wb_connect_google")).toBeTruthy(); // the connect is bound to this browser
+    const cb = await callback("google", `state=${state}&code=abc`, `wb_connect_google=${cookieValue(res, "wb_connect_google")}`);
     expect(location(cb).pathname).toBe("/start/ready");
     expect(cookieValue(cb, "wb_session")).toBeUndefined(); // the session was already there; the connect flow sets none
     expect(await db.listConnections(dana.id)).toMatchObject([{ provider: "google", account_email: "dana.levi@gmail.com" }]);

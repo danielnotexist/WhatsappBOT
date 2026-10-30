@@ -13,11 +13,29 @@ import { countCapUsers, googleAccountHash } from "@/lib/google/user-cap";
 import { createConnectLinkToken } from "@/lib/ms/connect-link";
 import { setWaSenderForTests } from "@/lib/wa";
 import { RecordingWaSender } from "@/lib/wa/sender";
-import { GET as callbackGet } from "./callback/route";
-import { GET as startGet } from "./start/route";
+import { GET as rawCallbackGet } from "./callback/route";
+import { GET as rawStartGet } from "./start/route";
 
 const jar = vi.hoisted(() => ({ session: undefined as string | undefined }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "wb_session" && jar.session ? { name, value: jar.session } : undefined) }) }));
+
+/** One browser: the cookies the routes set (the connect binding, lib/auth/connect-cookie.ts) go back with each request. */
+const browser = new Map<string, string>();
+const withBrowser = (handler: (r: Request) => Promise<Response>) => async (req: Request) => {
+  const headers = new Headers(req.headers);
+  if (browser.size && !headers.has("cookie")) headers.set("cookie", [...browser].map(([k, v]) => `${k}=${v}`).join("; "));
+  const res = await handler(new Request(req.url, { headers }));
+  for (const line of res.headers.getSetCookie()) {
+    const [pair, ...attrs] = line.split(";");
+    const i = pair!.indexOf("=");
+    const name = pair!.slice(0, i).trim();
+    if (attrs.some((a) => a.trim() === "Max-Age=0")) browser.delete(name);
+    else browser.set(name, pair!.slice(i + 1));
+  }
+  return res;
+};
+const startGet = withBrowser(rawStartGet);
+const callbackGet = withBrowser(rawCallbackGet);
 
 const APP = "https://app.example.co.il";
 const fixture = () => globalSingleton("google-fixture", () => createGoogleFixture()).state;
@@ -36,6 +54,7 @@ describe("Google connect routes (memory mode)", () => {
     setWaSenderForTests(wa);
     setGlobalSingleton("google-fixture", undefined);
     jar.session = undefined;
+    browser.clear();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -43,7 +62,16 @@ describe("Google connect routes (memory mode)", () => {
     setWaSenderForTests(undefined);
   });
 
-  const startFromChat = async (userId: string, extra = "") => startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(userId, "google"))}${extra}`));
+  /**
+   * A chat link opened in a browser signed in to that same account (the session lifts the chat-only limits: another
+   * mailbox than the account's address, the pay link on a plan refusal). A chat link alone is covered in "chat link
+   * security" below.
+   */
+  const startFromChat = async (userId: string, extra = "") => {
+    jar.session = createSessionToken(userId);
+    return startChatLinkAlone(userId, extra);
+  };
+  const startChatLinkAlone = async (userId: string, extra = "") => startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(createConnectLinkToken(userId, "google"))}${extra}`));
   /** the pro-only Google consents (drive.readonly, Tasks) need pro since the split of 23.10.2026 (lib/billing/plans.ts) */
   const asPro = (userId: string) => db.upsertSubscription(userId, { plan: "pro", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
   const asBasic = (userId: string) => db.upsertSubscription(userId, { plan: "basic", status: "active", next_charge_at: "2099-01-01T00:00:00.000Z" });
@@ -497,6 +525,113 @@ describe("Google connect routes (memory mode)", () => {
       // Gmail read is basic too (mail is in every plan): still the incremental consent
       vi.stubEnv("GOOGLE_GMAIL_READ_ENABLED", "true");
       expect(location(await startFromChat(user.id, "&feature=gmail_read")).searchParams.get("scope")).toBe(`openid email ${GOOGLE_SCOPES.gmailReadonly}`);
+    });
+  });
+
+  describe("chat link security (security round, area C)", () => {
+    it("the callback finishes only in the browser that started it: an authorize URL handed to someone else attaches nothing", async () => {
+      const attacker = await db.createUser("attacker@example.com");
+      jar.session = createSessionToken(attacker.id);
+      const start = await startGet(new Request(`${APP}/api/auth/google/start`));
+      const state = location(start).searchParams.get("state")!;
+      expect(start.headers.getSetCookie().some((c) => c.startsWith("wb_connect_google=") && c.includes("HttpOnly") && c.includes("Path=/api/auth"))).toBe(true);
+      // the victim's browser: no session, no connect cookie
+      jar.session = undefined;
+      const cb = await rawCallbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`));
+      expect(location(cb).searchParams.get("error")).toBe("החיבור לא הושלם: הוא התחיל בדפדפן אחר או שעבר זמן רב מדי. אפשר להתחיל שוב מאותו דפדפן.");
+      expect(await db.listConnections(attacker.id)).toEqual([]);
+      expect(fixture().calls.some((c) => c.url === "https://oauth2.googleapis.com/token")).toBe(false); // the code is never exchanged
+      expect(db.audit.at(-1)).toMatchObject({ action: "google.connect", result: "error:unbound" });
+      // the state is spent: even the right browser cannot use it afterwards
+      jar.session = createSessionToken(attacker.id);
+      expect(location(await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`))).searchParams.get("error")).toContain("לא זוהתה");
+    });
+
+    it("the callback refuses a browser signed in to another account, even with the cookie", async () => {
+      const dana = await db.createUser("dana.levi@gmail.com");
+      const other = await db.createUser("other@example.com");
+      jar.session = createSessionToken(dana.id);
+      const state = location(await startGet(new Request(`${APP}/api/auth/google/start`))).searchParams.get("state")!;
+      jar.session = createSessionToken(other.id);
+      const cb = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`));
+      expect(location(cb).searchParams.get("error")).toContain("התחיל בדפדפן אחר");
+      expect(await db.listConnections(dana.id)).toEqual([]);
+    });
+
+    it("a chat link works once; a second open is refused", async () => {
+      const user = await db.createUser("dana.levi@gmail.com");
+      const t = createConnectLinkToken(user.id, "google");
+      expect((await startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(t)}`))).status).toBe(303);
+      const again = await startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(t)}`));
+      expect(again.status).toBe(410);
+      expect(await again.text()).toBe("הקישור לא בתוקף (הוא עובד 30 דקות ופעם אחת). אפשר לבקש קישור חדש בשיחה.");
+    });
+
+    it("a chat link in a browser signed in to another account is refused (and not burned)", async () => {
+      const user = await db.createUser("dana.levi@gmail.com");
+      const other = await db.createUser("other@example.com");
+      jar.session = createSessionToken(other.id);
+      const t = createConnectLinkToken(user.id, "google");
+      const res = await startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(t)}`));
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain("מחובר לחשבון אחר");
+      jar.session = undefined;
+      expect((await startGet(new Request(`${APP}/api/auth/google/start?t=${encodeURIComponent(t)}`))).status).toBe(303);
+    });
+
+    it("a chat link alone attaches the account's own verified address", async () => {
+      const user = await db.createUser("dana.levi@gmail.com");
+      const state = location(await startChatLinkAlone(user.id)).searchParams.get("state")!;
+      const cb = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`));
+      expect(location(cb).searchParams.get("notice")).toBe("החיבור ל-Google הושלם (dana.levi@gmail.com).");
+      expect(await db.listConnections(user.id)).toMatchObject([{ provider: "google", account_email: "dana.levi@gmail.com", status: "active" }]);
+    });
+
+    it("a chat link alone with another mailbox (or an unverified address) attaches nothing and revokes the grant", async () => {
+      const user = await db.createUser("dana@example.com");
+      db.seedWaIdentity(user.id, "+972501234567");
+      const state = location(await startChatLinkAlone(user.id)).searchParams.get("state")!;
+      const cb = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`));
+      expect(location(cb).searchParams.get("error")).toBe("קישור מהשיחה מחבר רק את תיבת המייל שבכתובת של החשבון. כדי לחבר תיבה בכתובת אחרת, יש להיכנס לאזור האישי באתר ולחבר אותה משם.");
+      expect(await db.listConnections(user.id)).toEqual([]);
+      expect(fixture().calls.some((c) => c.url.startsWith("https://oauth2.googleapis.com/revoke"))).toBe(true);
+      expect(db.audit.at(-1)).toMatchObject({ action: "google.connect", result: "error:chat_other_mailbox" });
+      expect(wa.texts).toEqual([]);
+
+      // the same address, but Google does not vouch for it
+      const own = await db.createUser("dana.levi@gmail.com");
+      fixture().idClaims = { email_verified: false };
+      const s2 = location(await startChatLinkAlone(own.id)).searchParams.get("state")!;
+      const cb2 = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${s2}&code=abc`));
+      expect(location(cb2).searchParams.get("error")).toContain("קישור מהשיחה מחבר רק");
+      expect(await db.listConnections(own.id)).toEqual([]);
+    });
+
+    it("a plan refusal through a chat link alone is a notice, never a pay link", async () => {
+      const user = await db.createUser("dana@example.com");
+      db.seedConnection(user.id, "microsoft", "dana@contoso.co.il");
+      await asBasic(user.id);
+      const res = await startChatLinkAlone(user.id);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("location")).toBeNull();
+      expect(await res.text()).toBe("בחבילה הנוכחית אפשר לחבר חשבון אחד - Google או Microsoft 365. לשדרוג החבילה אפשר להיכנס לאזור האישי באתר.");
+      vi.stubEnv("GOOGLE_DRIVE_READ_ENABLED", "true");
+      db.connections = db.connections.filter((c) => c.provider !== "microsoft");
+      const pro = await startChatLinkAlone(user.id, "&feature=drive_read");
+      expect(pro.status).toBe(403);
+      expect(await pro.text()).toBe("האפשרות הזו כלולה בחבילת Pro. לשדרוג החבילה אפשר להיכנס לאזור האישי באתר.");
+    });
+
+    it("an id_token for another app (aud) or past its expiry is refused before anything is stored", async () => {
+      const user = await db.createUser("dana.levi@gmail.com");
+      jar.session = createSessionToken(user.id);
+      for (const claims of [{ aud: "someone-elses-client" }, { exp: Math.floor(Date.now() / 1000) - 3600 }, { iss: "https://evil.example" }]) {
+        fixture().idClaims = claims;
+        const state = location(await startGet(new Request(`${APP}/api/auth/google/start`))).searchParams.get("state")!;
+        const cb = await callbackGet(new Request(`${APP}/api/auth/google/callback?state=${state}&code=abc`));
+        expect(location(cb).searchParams.get("error"), JSON.stringify(claims)).toBe("החיבור ל-Google לא הושלם (invalid_id_token). אפשר לנסות שוב.");
+      }
+      expect(await db.listConnections(user.id)).toEqual([]);
     });
   });
 });

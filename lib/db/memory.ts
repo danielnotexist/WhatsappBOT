@@ -90,6 +90,8 @@ export class MemoryDb implements Db {
   users = new Map<string, UserRow>();
   otps: OtpRow[] = [];
   linkTokens: LinkTokenRow[] = [];
+  /** 0021 connect_link_uses: nonce hash → the link's expiry (ms) */
+  connectLinkUses = new Map<string, { userId: string; expiresAt: number }>();
   waIdentities: WaIdentityRow[] = [];
   connections: ConnectionRow[] = [];
   subscriptions = new Map<string, SubscriptionRow>();
@@ -200,6 +202,7 @@ export class MemoryDb implements Db {
   async deleteUser(id: string): Promise<void> {
     this.users.delete(id);
     this.linkTokens = this.linkTokens.filter((t) => t.user_id !== id);
+    for (const [k, v] of this.connectLinkUses) if (v.userId === id) this.connectLinkUses.delete(k);
     for (const [k, v] of this.trialPhones) if (v === id) this.trialPhones.set(k, null); // 0020: on delete set null (the phone stays counted)
     this.waIdentities = this.waIdentities.filter((w) => w.user_id !== id);
     this.connections = this.connections.filter((c) => c.user_id !== id);
@@ -299,6 +302,19 @@ export class MemoryDb implements Db {
   async latestLinkToken(userId: string): Promise<LinkTokenRow | null> {
     const rows = this.linkTokens.filter((t) => t.user_id === userId);
     return rows.length ? rows[rows.length - 1]! : null;
+  }
+
+  async findLinkToken(tokenHash: string): Promise<LinkTokenRow | null> {
+    return this.linkTokens.find((t) => t.token_hash === tokenHash) ?? null;
+  }
+
+  /** Mirrors public.connect_link_consume() (0021). */
+  async consumeConnectLink(nonceHash: string, userId: string, expiresAt: Date): Promise<boolean> {
+    const now = this.now().getTime();
+    for (const [k, v] of this.connectLinkUses) if (v.expiresAt < now - 86_400_000) this.connectLinkUses.delete(k);
+    if (this.connectLinkUses.has(nonceHash)) return false;
+    this.connectLinkUses.set(nonceHash, { userId, expiresAt: expiresAt.getTime() });
+    return true;
   }
 
   /** Mirrors public.link_token_consume() (0020). */

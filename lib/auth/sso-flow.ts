@@ -128,9 +128,9 @@ export async function finishSsoSignIn(
   const decision = decideSso(identity, existing);
 
   if (decision.kind === "verify_by_code") {
-    // an account with this email exists and the provider does not vouch for the address: its owner proves it by the
-    // email code; nothing from the provider is kept, no session
-    await db.addAudit({ user_id: decision.user.id, action: "auth.sso", target, result: "verify_by_code", reason: identity.basis });
+    // the provider does not vouch for the address: whoever owns it proves it by the email code (which signs in, or up
+    // for a new address, like the email flow); nothing from the provider is kept, no account is created, no session
+    await db.addAudit({ user_id: decision.user?.id ?? null, action: "auth.sso", target, result: decision.user ? "verify_by_code" : "verify_by_code:new", reason: identity.basis });
     const sent = await sendOtpForRequest(identity.email, request.headers).catch((e: unknown) => {
       console.warn("[sso] code not sent:", (e as Error).message);
       return null;

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { connectCookieHeader, redirectSettingCookies, sealConnectPending } from "@/lib/auth/connect-cookie";
 import { getSession } from "@/lib/auth/current-user";
 import { entitlements } from "@/lib/billing/plans";
 import { planGateFor, planGateUrl } from "@/lib/connections/plan-gate";
@@ -6,6 +7,7 @@ import { demoConnect } from "@/lib/auth/demo-connect";
 import { oauthReturnUrl, parseReturnTo } from "@/lib/auth/oauth-return";
 import { parseSsoFrom } from "@/lib/auth/sso";
 import { gcopy } from "@/lib/copy/bot-google";
+import { CONNECT_GUARD } from "@/lib/copy/connect-guard";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { EnvError, googleMocked, unavailable } from "@/lib/env";
@@ -13,14 +15,17 @@ import { getGoogleConfig } from "@/lib/google";
 import { buildGoogleAuthorizeUrl, isGoogleFeature, pkcePair, scopesForRequest, type GoogleFeature, type RestrictedRead } from "@/lib/google/oauth";
 import { startGoogleSignIn } from "@/lib/google/sso";
 import { googleAccountOf, googleCapConfig, restrictedReadAccess, type GoogleCapConfig, type RestrictedReadAccess } from "@/lib/google/user-cap";
-import { verifyConnectLinkToken } from "@/lib/ms/connect-link";
+import { consumeConnectLink, verifyConnectLinkToken } from "@/lib/ms/connect-link";
 
 const text = (body: string, status: number) => new Response(body, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 /**
  * GET /api/auth/google/start[?t=<one-time chat token>][&returnTo=onboarding|account][&feature=gmail_read|drive_read|tasks]
  *     /api/auth/google/start?intent=signin&from=start|login[&returnTo=…]
- * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat (same as Microsoft).
+ * Who: a signed-in user (session cookie) or a one-time 30-minute link from the chat (same as Microsoft). The chat link
+ * is burned here (lib/ms/connect-link.ts) and refused in a browser signed in to another account; the flow is bound to
+ * this browser by a sealed cookie (lib/auth/connect-cookie.ts) that the callback requires. A plan refusal reached
+ * through a chat link alone is a plain notice, never a pay link (the chat link is not a billing credential).
  * `intent=signin` without a session ("המשך עם Google" on /start and /login): Sign in with Google — the state and PKCE
  * verifier go into this browser's sealed cookie instead of a profile (lib/google/sso.ts, rules in lib/auth/sso.ts).
  * With a session the intent changes nothing: the signed-in user connects, exactly as below.
@@ -45,13 +50,16 @@ export async function GET(request: Request) {
   const appUrl = process.env.APP_URL || url.origin;
   const db = getDb();
   let userId: string | null = null;
+  const sessionUserId = (await getSession())?.userId ?? null;
   const t = url.searchParams.get("t");
   if (t) {
     const link = verifyConnectLinkToken(t);
-    if (!link || link.provider !== "google") return text(gcopy["g.web.link_expired"](), 410);
+    if (!link || link.provider !== "google" || link.purpose !== "user") return text(gcopy["g.web.link_expired"](), 410);
+    if (sessionUserId && sessionUserId !== link.userId && (await db.getUser(sessionUserId))) return text(CONNECT_GUARD.other_account, 409);
+    if (!(await consumeConnectLink(db, link))) return text(CONNECT_GUARD.link_used, 410);
     userId = link.userId;
   } else {
-    userId = (await getSession())?.userId ?? null;
+    userId = sessionUserId;
     // "המשך עם Google" without a session: sign in / sign up and connect in one consent (lib/google/sso.ts)
     // (a session whose account is gone counts as none)
     if (url.searchParams.get("intent") === "signin" && !(userId && (await db.getUser(userId)))) return startGoogleSignIn(request, parseSsoFrom(url.searchParams.get("from")));
@@ -63,7 +71,11 @@ export async function GET(request: Request) {
   const featureParam = url.searchParams.get("feature");
   const feature = isGoogleFeature(featureParam) ? featureParam : null;
   const gate = await planGateFor(db, user.id, "google", feature);
-  if (gate.reason) return Response.redirect(planGateUrl(appUrl, user.id, gate.reason), 303);
+  if (gate.reason) {
+    // only a signed-in browser gets the personal pay link; a chat link alone gets the notice
+    if (sessionUserId !== user.id) return text(gate.reason === "pro_feature" ? CONNECT_GUARD.plan_pro_feature : CONNECT_GUARD.plan_second_account, 403);
+    return Response.redirect(planGateUrl(appUrl, user.id, gate.reason), 303);
+  }
   const connections = await db.listConnections(user.id);
   const account = googleAccountOf(connections);
   let cfg;
@@ -95,7 +107,7 @@ export async function GET(request: Request) {
   await db.mergeUserProfile(user.id, {
     oauth_pending: { ...pendingOauth, google: { state, verifier, returnTo: parseReturnTo(url.searchParams.get("returnTo")), feature, scopes, gmail_read: gmail.reason, drive_read: drive.reason, via: t ? "chat" : "web", started_at: new Date().toISOString() } },
   });
-  return Response.redirect(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: account }), 303);
+  return redirectSettingCookies(buildGoogleAuthorizeUrl(cfg, { state, codeChallenge: challenge, scopes, loginHint: account }), [connectCookieHeader("google", sealConnectPending({ provider: "google", userId: user.id, state }))]);
 }
 
 /**

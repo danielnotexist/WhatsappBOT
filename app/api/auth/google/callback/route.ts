@@ -1,4 +1,8 @@
 import { reportError } from "@/lib/errors/report";
+import { connectCookieMatches, withConnectCookieCleared } from "@/lib/auth/connect-cookie";
+import { getSession } from "@/lib/auth/current-user";
+import { normalizeEmail } from "@/lib/auth/otp";
+import { CONNECT_GUARD } from "@/lib/copy/connect-guard";
 import { oauthReturnUrl, parseReturnTo, type OAuthReturnTo } from "@/lib/auth/oauth-return";
 import { refuseSso, ssoCallbackState } from "@/lib/auth/sso-flow";
 import { gcopy } from "@/lib/copy/bot-google";
@@ -7,7 +11,7 @@ import { EnvError, unavailable } from "@/lib/env";
 import { getGoogleConfig, getGoogleFetch } from "@/lib/google";
 import { GoogleClient } from "@/lib/google/client";
 import { storeGoogleConnection, uncountedGoogleConsent as uncounted, type GooglePendingAsk } from "@/lib/google/connect-store";
-import { GoogleOAuthError, exchangeGoogleCode, parseGoogleIdToken } from "@/lib/google/oauth";
+import { GoogleOAuthError, exchangeGoogleCode, parseGoogleIdToken, revokeGoogleToken, type GoogleTokens } from "@/lib/google/oauth";
 import { finishGoogleSignIn } from "@/lib/google/sso";
 import { getWaSender } from "@/lib/wa";
 
@@ -30,13 +34,21 @@ interface PendingGoogle extends GooglePendingAsk {
  * encrypted tokens, the granted scopes, the user-cap ledger), tells the user in WhatsApp, and redirects per `returnTo`
  * (onboarding → /start/ready, else /account). A state no one knows, in a browser that started a sign-in, is a failed
  * sign-in — never a connect.
+ * Security (area C): the connect finishes only in the browser that started it (its `wb_connect_google` cookie names
+ * this user and this state — lib/auth/connect-cookie.ts) and, when the browser is signed in, for that same account.
+ * A connect started from a chat link in a browser that is not signed in to the account adds only the account's own
+ * address (verified by Google); another mailbox needs the personal area. Every outcome clears the cookie.
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const appUrl = process.env.APP_URL || url.origin;
   const state = url.searchParams.get("state") ?? "";
   const sso = ssoCallbackState(request, "google", state);
   if (sso.pending) return finishGoogleSignIn(request, sso.pending);
+  return withConnectCookieCleared(await connectCallback(request, url, state, sso), "google");
+}
+
+async function connectCallback(request: Request, url: URL, state: string, sso: ReturnType<typeof ssoCallbackState>): Promise<Response> {
+  const appUrl = process.env.APP_URL || url.origin;
   const db = getDb();
   const user = state ? await db.findUserByOauthState("google", state) : null;
   if (!user) {
@@ -50,6 +62,13 @@ export async function GET(request: Request) {
   await db.mergeUserProfile(user.id, { oauth_pending: { ...allPending, google: null } });
   const returnTo: OAuthReturnTo = parseReturnTo(pending.returnTo);
   const back = (outcome: { ok: true; notice: string } | { ok: false; error: string }) => Response.redirect(oauthReturnUrl(appUrl, returnTo, "google", outcome), 303);
+  // bound to the browser that started it, and to the signed-in account when there is one
+  const sessionUserId = (await getSession())?.userId ?? null;
+  if (!connectCookieMatches(request, "google", state, user.id) || (sessionUserId && sessionUserId !== user.id)) {
+    if (url.searchParams.get("code")) uncounted("connect not started in this browser", user.id);
+    await db.addAudit({ user_id: user.id, action: "google.connect", result: "error:unbound" });
+    return back({ ok: false, error: CONNECT_GUARD.unbound });
+  }
   if (!pending.started_at || Date.now() - Date.parse(pending.started_at) > STATE_TTL_MS) {
     if (url.searchParams.get("code")) {
       uncounted("state expired", user.id);
@@ -91,11 +110,23 @@ export async function GET(request: Request) {
     const tokens = await exchangeGoogleCode(cfg, code, pending.verifier ?? "");
     const claims = parseGoogleIdToken(tokens.idToken);
     let email = claims.email;
-    if (!email) email = (await new GoogleClient({ getAccessToken: async () => tokens.accessToken, fetchImpl: getGoogleFetch() }).userInfo().catch(() => null))?.email ?? null;
+    let emailVerified = claims.emailVerified;
+    if (!email) {
+      const info = await new GoogleClient({ getAccessToken: async () => tokens.accessToken, fetchImpl: getGoogleFetch() }).userInfo().catch(() => null);
+      email = info?.email ?? null;
+      emailVerified = info?.emailVerified ?? false;
+    }
     if (!email) {
       uncounted("no account email", user.id);
       await db.addAudit({ user_id: user.id, action: "google.connect", result: "error:no_email" });
       return back({ ok: false, error: gcopy["g.web.no_email"]() });
+    }
+    // a chat link alone (no session of this account in the browser) adds only the account's own, verified address
+    if (pending.via === "chat" && sessionUserId !== user.id && !(emailVerified && normalizeEmail(email) === normalizeEmail(user.email))) {
+      uncounted("chat link with another mailbox", user.id);
+      await revokeUnused(cfg, tokens);
+      await db.addAudit({ user_id: user.id, action: "google.connect", result: "error:chat_other_mailbox" });
+      return back({ ok: false, error: CONNECT_GUARD.chat_other_mailbox });
     }
     return back(await storeGoogleConnection(db, user, tokens, { email, name: claims.name, pending, appUrl, tell }));
   } catch (e) {
@@ -108,4 +139,9 @@ export async function GET(request: Request) {
     }
     throw e;
   }
+}
+
+/** Tokens that will not be kept: revoked at Google right away (best effort — they are dropped either way). */
+async function revokeUnused(cfg: ReturnType<typeof getGoogleConfig>, tokens: GoogleTokens): Promise<void> {
+  await revokeGoogleToken(tokens.refreshToken ?? tokens.accessToken, cfg.fetchImpl).catch(() => undefined);
 }
