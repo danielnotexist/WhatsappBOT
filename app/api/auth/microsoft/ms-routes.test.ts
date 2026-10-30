@@ -150,6 +150,29 @@ describe("Microsoft connect routes (memory mode)", () => {
     expect(await n.json()).toEqual({ accepted: 1 });
     expect(db.audit.filter((a) => a.action === "graph.notification")).toHaveLength(1);
   });
+
+  it("graph notify bounds the echo and refuses odd or oversized bodies before any lookup", async () => {
+    const APP = "https://app.example.co.il/api/graph/notify";
+    const real = "Validation: Testing client application reachability for subscription Request-Id: 3e33d2a4-1c4b-4e5f-9a1b-0c2d3e4f5a6b";
+    const ok = await notifyPost(new Request(`${APP}?validationToken=${encodeURIComponent(real)}`, { method: "POST" }));
+    expect(await ok.text()).toBe(real);
+    expect(ok.headers.get("content-disposition")).toBe("attachment");
+    expect(ok.headers.get("x-content-type-options")).toBe("nosniff");
+    expect((await notifyPost(new Request(`${APP}?validationToken=${encodeURIComponent("<b>שירות לקוחות: להתקשר</b>")}`, { method: "POST" }))).status).toBe(400);
+    expect((await notifyPost(new Request(`${APP}?validationToken=${"a".repeat(513)}`, { method: "POST" }))).status).toBe(400);
+    expect((await notifyPost(new Request(`${APP}?validationToken=`, { method: "POST" }))).status).toBe(400);
+
+    const lookups = vi.spyOn(db, "findGraphSubscription");
+    for (const body of ["null", '{"value":{}}', '{"value":[null]}', "not json", JSON.stringify({ value: Array.from({ length: 101 }, (_, i) => ({ subscriptionId: `s${i}`, clientState: "x" })) })]) {
+      expect((await notifyPost(new Request(APP, { method: "POST", body }))).status).toBe(400);
+    }
+    expect(lookups).not.toHaveBeenCalled();
+    // many notifications for one subscription: one lookup
+    const same = JSON.stringify({ value: Array.from({ length: 50 }, () => ({ subscriptionId: "sub-x", clientState: "x" })) });
+    expect((await notifyPost(new Request(APP, { method: "POST", body: same }))).status).toBe(202);
+    expect(lookups).toHaveBeenCalledTimes(1);
+    lookups.mockRestore();
+  });
   it("the plan's gate: on the trial and basic Microsoft 365 cannot join an active Google account (the pay page, why=second_account); pro connects both; the admin consent is not gated", async () => {
     const APP = "https://app.example.co.il";
     const user = await db.createUser("dana@example.com");

@@ -47,7 +47,8 @@ export async function POST(request: Request) {
     console.warn("[wa:webhook] body is not JSON");
     return new Response("ok", { status: 200 });
   }
-  const parsed = parseWebhook(body);
+  // only events for our own number (WA_PHONE_NUMBER_ID); another number on the same Meta app is not ours to answer
+  const parsed = parseWebhook(body, { phoneNumberId: process.env.WA_PHONE_NUMBER_ID?.trim() || undefined });
   const receivedAt = new Date().toISOString();
   const workerUrl = new URL("/api/wa/worker", process.env.APP_URL || request.url).toString();
   const jobs: WorkerJob[] = [

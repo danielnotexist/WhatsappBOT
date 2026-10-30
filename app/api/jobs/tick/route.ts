@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto";
 import { connection } from "next/server";
 import { scheduleOwnerAlertsJob } from "@/lib/admin/alerts";
 import { CRON_SECRET_MIN_LENGTH, cronSecret, hasCronBearer } from "@/lib/cron-secret";
@@ -7,17 +6,11 @@ import { isDemo } from "@/lib/demo";
 import { dataMode } from "@/lib/env";
 import { dispatchDueJobs } from "@/lib/jobs/run";
 import { getQueue } from "@/lib/queue";
-import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
-
-function safeEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
+import { INTERNAL_SIGNATURE_HEADER, verifyInternal } from "@/lib/queue/local";
 
 /**
  * POST: claims due jobs (claim_due_jobs) and publishes each to /api/jobs/run — the fallback for a database
- * without pg_net (call it every minute from any cron with the internal secret) and the DATA_MODE=memory
+ * without pg_net (call it every minute with the signed internal header, lib/queue/local.ts internalHeaders) and the DATA_MODE=memory
  * dev loop (no secret needed there; memory mode is refused in production by lib/env). First it makes sure the owner
  * alerts' job of this quarter-hour exists (lib/admin/alerts.ts; SQL schedule_owner_alerts() is the same with pg_cron).
  */
@@ -25,8 +18,10 @@ export async function POST(request: Request) {
   // the demo runs in production on a public URL: it keeps the secret check like the real thing
   const devMemory = dataMode() === "memory" && !isDemo();
   if (!devMemory) {
-    const given = request.headers.get(INTERNAL_SECRET_HEADER) ?? "";
-    if (!given || !safeEqual(given, internalSecret())) return new Response("invalid internal secret", { status: 401 });
+    const raw = await request.text();
+    if (!verifyInternal(request.headers.get(INTERNAL_SIGNATURE_HEADER), new URL(request.url).pathname, raw)) {
+      return new Response("invalid internal signature", { status: 401 });
+    }
   }
   return tick(request);
 }

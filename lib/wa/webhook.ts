@@ -41,10 +41,19 @@ export function toE164(digits: string): string {
 }
 
 /**
+ * Message types that are not something the user asked us: a reaction (👍 on one of our messages, or removing one),
+ * and WhatsApp's own notices (disappearing-messages setting, number change). They are dropped, not answered.
+ * `unsupported` (a poll, a view-once photo…) stays: the user did send something, and gets the "not supported" reply.
+ */
+const IGNORED_TYPES = new Set(["reaction", "ephemeral", "system"]);
+
+/**
  * Normalises a webhook body into inbound messages and statuses. Never throws on odd shapes —
  * a malformed body yields empty lists so the route can still answer 200 (Meta retries otherwise).
+ * With `phoneNumberId` (WA_PHONE_NUMBER_ID), changes addressed to another number of the same WhatsApp app are skipped
+ * (listed in `other` as "messages:foreign_number").
  */
-export function parseWebhook(body: unknown): ParsedWebhook {
+export function parseWebhook(body: unknown, opts: { phoneNumberId?: string } = {}): ParsedWebhook {
   const out: ParsedWebhook = { messages: [], statuses: [], other: [] };
   const raw = body as RawWebhook | null;
   if (!raw || raw.object !== "whatsapp_business_account" || !Array.isArray(raw.entry)) return out;
@@ -57,6 +66,10 @@ export function parseWebhook(body: unknown): ParsedWebhook {
       }
       const value = change.value ?? {};
       const phoneNumberId = value.metadata?.phone_number_id ?? "";
+      if (opts.phoneNumberId && phoneNumberId !== opts.phoneNumberId) {
+        out.other.push("messages:foreign_number");
+        continue;
+      }
       const names = new Map<string, string>();
       for (const c of value.contacts ?? []) if (c.wa_id && c.profile?.name) names.set(c.wa_id, c.profile.name);
 
@@ -86,6 +99,7 @@ function tsToDate(ts: string | undefined): Date {
 
 function parseMessage(m: RawMessage, phoneNumberId: string, names: Map<string, string>): InboundMessage | null {
   if (!m.id || !m.from) return null;
+  if (m.type && IGNORED_TYPES.has(m.type)) return null;
   let type: InboundMessageType = "other";
   let text: string | null = null;
   let mediaId: string | null = null;

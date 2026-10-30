@@ -1227,3 +1227,18 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **בדיקות:** `supabase/tests/connect_link_uses.test.sql`, `app/api/auth/google/google-routes.test.ts`, `app/api/auth/microsoft/ms-routes.test.ts`, `app/api/auth/sso-routes.test.ts`, `lib/auth/connect-cookie.test.ts`, `lib/ms/connect-link.test.ts`, `lib/ms/oauth.test.ts`, `lib/google/oauth.test.ts`, `lib/db/supabase-connect.test.ts`, `lib/bot/linking.test.ts`; e2e: `linkWhatsapp` ב-`e2e/helpers.ts` לוחץ על "כן, לקשר".
 
 **דרוש מדניאל:** להריץ את `0021_connect_link_uses.sql` ב-Supabase **לפני** הפריסה. קישורי חיבור ישנים מהשיחה (30 דק׳) מפסיקים לעבוד עם הפריסה.
+
+### 2026-10-30 — אבטחה, אזור D: webhooks ותור המשימות
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **וואטסאפ:** אירועים שנשלחו למספר אחר באותה אפליקציה של Meta (`phone_number_id` שונה מ-`WA_PHONE_NUMBER_ID`) לא נכנסים לתור. תגובת אימוג'י (reaction) והודעות מערכת (ephemeral, system) לא נענות יותר ב"סוג ההודעה הזה…"; הודעה `unsupported` (סקר, צפייה חד-פעמית) עדיין מקבלת את התשובה.
+- **תקלה אחרי שההודעה נשמרה** (מנוי, כפתור, הצטרפות, חיוב): נרשמת ב"תקלות", המשתמש מקבל "לא הצלחתי להשלים את זה…" וה-👀 מוסר - בלי ✅. קודם המשלוח החוזר נבלע כ-duplicate והמשתמש ראה ✅ בלי תשובה.
+- **התור המקומי (בלי QStash):** במקום כותרת סודית קבועה - `x-internal-signature` עם HMAC על הזמן, הנתיב והתוכן, בתוקף 5 דקות (`lib/queue/local.ts`, `lib/queue/verify.ts`). חל על `/api/wa/worker`, `/api/jobs/run` ו-POST של `/api/jobs/tick`.
+- **`/api/jobs/run`** קורא מחדש את שורת המשימה מהמסד ומריץ לפי ה-kind, המשתמש וה-payload שבה (מהגוף נלקחים רק job_id ו-attempts). משימה שלא במצב running, או משלוח של ניסיון קודם, נענים 200 ומדולגים.
+- **`finish_job()`** (מיגרציה `0022_finish_job_guard.sql`) מעדכן רק משימה שרצה, ועם `p_attempts` רק את הניסיון הזה; סיום מאוחר או כפול לא מחזיר משימה שהסתיימה או בוטלה לתור. הסיום המוצלח יצא מה-try, כך ששגיאה אחריו לא הופכת הצלחה לניסיון חוזר.
+- **QStash:** JWT בלי `exp` נדחה. בייצור בלי `QSTASH_TOKEN` נרשמת אזהרה מפורשת בלוג (התור המקומי, בלי ניסיונות חוזרים).
+- **`/api/graph/notify`:** ה-validationToken מוחזר רק אם הוא בצורה של Graph (עד 512 תווים, ASCII מצומצם), כהורדה (`Content-Disposition: attachment`, nosniff). גוף ההתראות מוגבל ל-256KB ול-100 פריטים ונבדק (zod) לפני כל שאילתה; מנוי נשלף פעם אחת לכל בקשה.
+
+**בדיקות:** `supabase/tests/finish_job_guard.test.sql` (ועדכון קטן ב-`functions.test.sql`), `lib/queue/local.test.ts`, `lib/queue/qstash.test.ts`, `lib/queue/index.test.ts`, `app/api/jobs/jobs-routes.test.ts`, `app/api/wa/wa-routes.test.ts`, `lib/wa/webhook.test.ts`, `lib/bot/process-inbound.test.ts`, `app/api/auth/microsoft/ms-routes.test.ts`, `lib/db/memory.test.ts`.
+
+**דרוש מדניאל:** להריץ את `0022_finish_job_guard.sql` ב-Supabase **לפני** הפריסה (הקוד שולח `p_attempts`, שהפונקציה הישנה לא מכירה). מומלץ להגדיר QStash (`QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`) - בלעדיו אין ניסיונות חוזרים.

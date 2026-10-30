@@ -33,7 +33,7 @@ const b64url = (buf: Buffer | string) => Buffer.from(buf).toString("base64url");
 
 /**
  * Verifies the `Upstash-Signature` JWT (HS256) that QStash sends with every delivery:
- * iss = "Upstash", sub = our URL, exp/nbf, and `body` = base64url(sha256(raw body)).
+ * iss = "Upstash", sub = our URL, a required `exp` (and `nbf` when present), and `body` = base64url(sha256(raw body)).
  * Accepts either the current or the next signing key (key rotation).
  */
 export function verifyQStashSignature(
@@ -68,7 +68,9 @@ export function verifyQStashSignature(
 
   if (payload.iss !== "Upstash") return { ok: false, reason: "bad issuer" };
   if (payload.sub !== url) return { ok: false, reason: "url mismatch" };
-  if (typeof payload.exp === "number" && payload.exp < now) return { ok: false, reason: "expired" };
+  // QStash always sets exp; a token without one would never expire
+  if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return { ok: false, reason: "missing exp" };
+  if (payload.exp < now) return { ok: false, reason: "expired" };
   if (typeof payload.nbf === "number" && payload.nbf > now) return { ok: false, reason: "not yet valid" };
   const bodyHash = b64url(createHash("sha256").update(rawBody).digest());
   // QStash may encode the body hash with or without padding
@@ -78,14 +80,14 @@ export function verifyQStashSignature(
 }
 
 /** Test helper / local tooling: builds a QStash-style JWT for a body. */
-export function signQStashJwt(rawBody: string, url: string, key: string, opts: { exp?: number; nbf?: number; iss?: string } = {}): string {
+export function signQStashJwt(rawBody: string, url: string, key: string, opts: { exp?: number | null; nbf?: number; iss?: string } = {}): string {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const payload = b64url(
     JSON.stringify({
       iss: opts.iss ?? "Upstash",
       sub: url,
-      exp: opts.exp ?? now + 300,
+      exp: opts.exp === null ? undefined : (opts.exp ?? now + 300),
       nbf: opts.nbf ?? now - 5,
       iat: now,
       jti: "test",

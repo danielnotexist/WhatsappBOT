@@ -76,4 +76,18 @@ describe("MemoryDb", () => {
     expect(await db.lowerUsageLimit(u.id, 750)).toBeNull(); // already there
     expect(db.usage[0]).toMatchObject({ plan_limit: 750, free_remaining: 0 });
   });
+
+  it("finishJob mirrors finish_job() (0022): only a running job, and only the attempt that runs now", async () => {
+    const db = new MemoryDb();
+    const j = (await db.createJob({ kind: "reminder", user_id: null, run_at: new Date(Date.now() - 1000) }))!;
+    expect((await db.finishJob(j.id, "too early"))!.status).toBe("queued"); // not claimed yet: unchanged
+    expect(db.jobs[0]!.last_error).toBeNull();
+    await db.claimDueJobs(5); // running, attempt 1
+    expect((await db.finishJob(j.id, null, null, 2))!.status).toBe("running"); // another attempt: unchanged
+    expect((await db.finishJob(j.id, null, null, 1))!.status).toBe("done");
+    expect((await db.finishJob(j.id, "error after success", null, 1))!.status).toBe("done");
+    expect(db.jobs[0]!.last_error).toBeNull();
+    expect(await db.getJob(j.id)).toMatchObject({ id: j.id, status: "done", attempts: 1 });
+    expect(await db.getJob("nope")).toBeNull();
+  });
 });

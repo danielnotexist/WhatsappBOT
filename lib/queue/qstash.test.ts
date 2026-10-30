@@ -34,6 +34,8 @@ describe("verifyQStashSignature", () => {
     expect(verifyQStashSignature(signQStashJwt(body, "https://evil", "cur"), body, url, { current: "cur" })).toMatchObject({ ok: false, reason: "url mismatch" });
     expect(verifyQStashSignature(signQStashJwt(body, url, "cur"), body + " ", url, { current: "cur" })).toMatchObject({ ok: false, reason: "body hash mismatch" });
     expect(verifyQStashSignature(signQStashJwt(body, url, "cur", { exp: 1 }), body, url, { current: "cur" })).toMatchObject({ ok: false, reason: "expired" });
+    // a validly signed token without exp would never expire: refused
+    expect(verifyQStashSignature(signQStashJwt(body, url, "cur", { exp: null }), body, url, { current: "cur" })).toMatchObject({ ok: false, reason: "missing exp" });
     expect(verifyQStashSignature(signQStashJwt(body, url, "cur", { iss: "Nope" }), body, url, { current: "cur" })).toMatchObject({ ok: false, reason: "bad issuer" });
     expect(verifyQStashSignature(undefined, body, url, { current: "cur" })).toMatchObject({ ok: false });
     expect(verifyQStashSignature("a.b", body, url, { current: "cur" })).toMatchObject({ ok: false, reason: "malformed jwt" });

@@ -57,6 +57,30 @@ describe("parseWebhook", () => {
     expect(parseWebhook(base([{ type: "text", text: { body: "no id" } }])).messages).toEqual([]);
   });
 
+  it("drops reactions and WhatsApp's own notices; keeps an unsupported message so it gets the 'not supported' reply", () => {
+    const parsed = parseWebhook(
+      base([
+        { from: "972501234567", id: "wamid.r1", timestamp: "1760954400", type: "reaction", reaction: { message_id: "wamid.out1", emoji: "👍" } },
+        { from: "972501234567", id: "wamid.r2", timestamp: "1760954401", type: "reaction", reaction: { message_id: "wamid.out1" } },
+        { from: "972501234567", id: "wamid.e1", timestamp: "1760954402", type: "ephemeral" },
+        { from: "972501234567", id: "wamid.s1", timestamp: "1760954403", type: "system", system: { body: "changed number" } },
+        { from: "972501234567", id: "wamid.u1", timestamp: "1760954404", type: "unsupported" },
+      ]),
+    );
+    expect(parsed.messages.map((m) => m.waMessageId)).toEqual(["wamid.u1"]);
+    expect(parsed.messages[0]).toMatchObject({ type: "other" });
+  });
+
+  it("with phoneNumberId skips changes addressed to another number", () => {
+    const body = base([{ from: "972501234567", id: "wamid.1", timestamp: "1760954400", type: "text", text: { body: "היי" } }], [{ id: "wamid.out2", status: "failed" }]);
+    expect(parseWebhook(body, { phoneNumberId: "PNID" }).messages).toHaveLength(1);
+    const foreign = parseWebhook(body, { phoneNumberId: "OTHER" });
+    expect(foreign.messages).toEqual([]);
+    expect(foreign.statuses).toEqual([]);
+    expect(foreign.other).toEqual(["messages:foreign_number"]);
+    expect(parseWebhook(body).messages).toHaveLength(1);
+  });
+
   it("normalises phone numbers to E.164", () => {
     expect(toE164("972501234567")).toBe("+972501234567");
     expect(toE164("+972-50-123-4567")).toBe("+972501234567");

@@ -19,8 +19,14 @@ export function getQueue(): Queue {
     if (isDemo()) return new LocalQueue();
     const token = process.env.QSTASH_TOKEN?.trim();
     if (token) return new QStashQueue(token);
-    const level = process.env.NODE_ENV === "production" ? "error" : "warn";
-    console[level]("[queue] QSTASH_TOKEN חסר — משתמש בתור מקומי בתוך התהליך (בלי ניסיונות חוזרים). להגדיר QSTASH_TOKEN, QSTASH_CURRENT_SIGNING_KEY, QSTASH_NEXT_SIGNING_KEY.");
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[queue] אזהרה: QSTASH_TOKEN חסר בייצור — ההודעות והמשימות עוברות בתור מקומי בתוך התהליך: בלי ניסיונות חוזרים, ומשימה שנכשלה באמצע לא תישלח שוב. " +
+          "המסירה הפנימית חתומה (HMAC על הזמן והתוכן, 5 דקות). להגדיר ב-Vercel: QSTASH_TOKEN, QSTASH_CURRENT_SIGNING_KEY, QSTASH_NEXT_SIGNING_KEY.",
+      );
+    } else {
+      console.warn("[queue] QSTASH_TOKEN חסר — משתמש בתור מקומי בתוך התהליך (בלי ניסיונות חוזרים). להגדיר QSTASH_TOKEN, QSTASH_CURRENT_SIGNING_KEY, QSTASH_NEXT_SIGNING_KEY.");
+    }
     return new LocalQueue();
   });
 }

@@ -46,6 +46,18 @@ describe("processInbound", () => {
     }
   });
 
+  it("a failure after the message was stored is reported and answered, without ✅ (a redelivery would only be a duplicate)", async () => {
+    const h = makeHarness();
+    const user = await readyUser(h);
+    vi.spyOn(h.db, "getSubscription").mockRejectedValue(new Error("db down"));
+    const m = h.inbound("מה יש לי מחר?");
+    expect(await processInbound(h.ctx, m)).toEqual({ handled: true, note: "failed" });
+    expect(h.wa.texts.at(-1)).toContain("לא הצלחתי להשלים את זה");
+    const reactions = h.wa.sent.filter((s) => s.kind === "reaction").map((s) => s.emoji);
+    expect(reactions).toEqual(["👀", ""]);
+    expect(h.db.appErrors.some((e) => e.source === "bot.inbound" && e.message.includes("db down") && e.user_id === user.id)).toBe(true);
+  });
+
   it("dedupes redeliveries, reacts 👀 then ✅, marks read with typing and stores both directions", async () => {
     const h = makeHarness();
     const user = await readyUser(h);

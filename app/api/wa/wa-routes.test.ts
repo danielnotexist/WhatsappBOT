@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeMetaSignature } from "@/lib/wa/signature";
 import { setQueueForTests, type Queue, type QueueJob } from "@/lib/queue";
-import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
+import { internalHeaders } from "@/lib/queue/local";
 import { signQStashJwt } from "@/lib/queue/qstash";
 import { GET as webhookGet, POST as webhookPost } from "./webhook/route";
 import { POST as workerPost } from "./worker/route";
@@ -69,6 +69,17 @@ describe("/api/wa/webhook", () => {
     expect((queue.jobs[0]!.body as { kind: string; message: { text: string } }).message.text).toBe("היי");
   });
 
+  it("POST ignores events addressed to another phone number of the same app (WA_PHONE_NUMBER_ID)", async () => {
+    const raw = JSON.stringify(sample);
+    const signed = { "x-hub-signature-256": computeMetaSignature(raw, "app-secret") };
+    vi.stubEnv("WA_PHONE_NUMBER_ID", "OTHER");
+    const foreign = await webhookPost(new Request("https://x/api/wa/webhook", { method: "POST", body: raw, headers: signed }));
+    expect(await foreign.json()).toEqual({ ok: true, queued: 0 });
+    vi.stubEnv("WA_PHONE_NUMBER_ID", "PNID");
+    const ours = await webhookPost(new Request("https://x/api/wa/webhook", { method: "POST", body: raw, headers: signed }));
+    expect(await ours.json()).toEqual({ ok: true, queued: 1 });
+  });
+
   it("POST answers 503 with a generic Hebrew message when META_APP_SECRET is missing (the names go to the log only)", async () => {
     vi.stubEnv("META_APP_SECRET", "");
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -93,22 +104,22 @@ describe("/api/wa/worker", () => {
   });
   afterEach(() => vi.unstubAllEnvs());
 
-  it("without QStash keys requires the internal secret, then runs the job", async () => {
+  it("without QStash keys requires the signed internal header, then runs the job", async () => {
     vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", "");
     const bad = await workerPost(new Request("https://x/api/wa/worker", { method: "POST", body: raw }));
     expect(bad.status).toBe(401);
-    const ok = await workerPost(new Request("https://x/api/wa/worker", { method: "POST", body: raw, headers: { [INTERNAL_SECRET_HEADER]: internalSecret() } }));
+    const ok = await workerPost(new Request("https://x/api/wa/worker", { method: "POST", body: raw, headers: internalHeaders("https://x/api/wa/worker", raw) }));
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ handled: true });
     expect(handled).toHaveLength(1);
     expect((handled[0] as { timestamp: Date }).timestamp).toBeInstanceOf(Date);
   });
 
-  it("with QStash keys verifies the Upstash-Signature JWT and ignores the internal secret", async () => {
+  it("with QStash keys verifies the Upstash-Signature JWT and ignores the internal signature", async () => {
     vi.stubEnv("QSTASH_CURRENT_SIGNING_KEY", "sig-current");
     vi.stubEnv("QSTASH_NEXT_SIGNING_KEY", "sig-next");
     const url = "https://app.example.co.il/api/wa/worker";
-    const spoof = await workerPost(new Request(url, { method: "POST", body: raw, headers: { [INTERNAL_SECRET_HEADER]: internalSecret() } }));
+    const spoof = await workerPost(new Request(url, { method: "POST", body: raw, headers: internalHeaders("https://x/api/wa/worker", raw) }));
     expect(spoof.status).toBe(401);
     const ok = await workerPost(new Request(url, { method: "POST", body: raw, headers: { "upstash-signature": signQStashJwt(raw, url, "sig-next") } }));
     expect(ok.status).toBe(200);

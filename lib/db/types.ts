@@ -917,7 +917,13 @@ export interface Db {
 
   // jobs (pg_cron claims and dispatches; the worker finishes)
   createJob(job: { kind: JobKind; user_id: string | null; run_at: Date; payload?: Record<string, unknown>; dedupe_key?: string | null; max_attempts?: number }): Promise<JobRow | null>;
-  finishJob(id: string, error?: string | null, retryAt?: Date | null): Promise<JobRow | null>;
+  /** one job by id (null when unknown or not a uuid) — /api/jobs/run re-reads what it runs */
+  getJob(id: string): Promise<JobRow | null>;
+  /**
+   * SQL finish_job(): only a `running` job (and, with `attempts`, only that attempt) moves on — done, back to queued
+   * with backoff, or failed. A late or duplicate finish returns the row unchanged.
+   */
+  finishJob(id: string, error?: string | null, retryAt?: Date | null, attempts?: number | null): Promise<JobRow | null>;
   cancelJobs(userId: string, kind: JobKind): Promise<number>;
   /** one queued job → cancelled (e.g. the old job of a snoozed reminder) */
   cancelJob(id: string): Promise<void>;

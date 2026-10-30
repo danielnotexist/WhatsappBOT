@@ -6,7 +6,7 @@ import { MockHypGateway } from "@/lib/hyp/client";
 import { setHypForTests } from "@/lib/hyp";
 import { RecordingWaSender } from "@/lib/wa/sender";
 import { setWaSenderForTests } from "@/lib/wa";
-import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
+import { internalHeaders } from "@/lib/queue/local";
 import { GET as mockGet } from "./mock/route";
 import { GET as returnGet } from "./return/route";
 import { POST as jobsPost } from "../jobs/run/route";
@@ -97,14 +97,15 @@ describe("/api/pay/* and /api/jobs/run", () => {
     await returnGet(new Request(`https://app.example.co.il/api/pay/return?Id=1&CCode=0&Amount=299&Order=${user.id}%3Apro&Sign=x`));
     const job = db.jobs.find((j) => j.kind === "charge")!;
     db.now = () => new Date(Date.parse(job.run_at) + 1000);
+    await db.claimDueJobs(10);
     const body = JSON.stringify({ job_id: job.id, kind: "charge", user_id: user.id, attempts: 1, run_at: job.run_at, payload: {} });
     expect((await jobsPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body }))).status).toBe(401);
-    const res = await jobsPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body, headers: { [INTERNAL_SECRET_HEADER]: internalSecret() } }));
+    const res = await jobsPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body, headers: internalHeaders("https://app.example.co.il/api/jobs/run", body) }));
     expect(res.status).toBe(200);
     // chargeSubscription reads `now` from the billing context (real clock) → not due yet → skipped, but the job is finished
     expect((await res.json()) as { ok: boolean }).toMatchObject({ ok: true });
     expect(db.jobs.find((j) => j.id === job.id)!.status).toBe("done");
-    const bad = await jobsPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body: "{}", headers: { [INTERNAL_SECRET_HEADER]: internalSecret() } }));
+    const bad = await jobsPost(new Request("https://app.example.co.il/api/jobs/run", { method: "POST", body: "{}", headers: internalHeaders("https://app.example.co.il/api/jobs/run", "{}") }));
     expect(bad.status).toBe(400);
   });
 });

@@ -50,7 +50,7 @@ export async function dispatchDueJobs(db: Db, queue: Queue, workerUrl: string, l
       dispatched++;
     } catch (e) {
       failed++;
-      await db.finishJob(j.id, `dispatch failed: ${(e as Error).message}`).catch(() => undefined);
+      await db.finishJob(j.id, `dispatch failed: ${(e as Error).message}`, null, j.attempts).catch(() => undefined);
     }
   }
   return { dispatched, failed };

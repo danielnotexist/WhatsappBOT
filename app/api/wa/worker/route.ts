@@ -1,35 +1,20 @@
 import { reportError } from "@/lib/errors/report";
-import { timingSafeEqual } from "node:crypto";
 import { runWorkerJob, type WorkerJob } from "@/lib/bot/pipeline";
-import { INTERNAL_SECRET_HEADER, internalSecret } from "@/lib/queue/local";
-import { QSTASH_SIGNATURE_HEADER, verifyQStashSignature } from "@/lib/queue/qstash";
+import { rejectUnverifiedDelivery } from "@/lib/queue/verify";
 
 /** Vercel: allow long AI/tool loops (Pro plan, PLAN §2). */
 export const maxDuration = 300;
 
-function safeEqual(a: string, b: string): boolean {
-  const x = Buffer.from(a);
-  const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual(x, y);
-}
-
 /**
  * POST: executes one queued job. Trust model:
  *   - QStash configured (QSTASH_CURRENT_SIGNING_KEY) → the Upstash-Signature JWT must verify for this URL + body;
- *   - otherwise (local dev queue) → the x-internal-secret header derived from TOKEN_ENC_KEY must match.
+ *   - otherwise (local queue) → the x-internal-signature HMAC (key derived from TOKEN_ENC_KEY) over time + path + body.
  * Returns 200 when handled (QStash stops retrying), 5xx to ask for a retry.
  */
 export async function POST(request: Request) {
   const raw = await request.text();
-  const currentKey = process.env.QSTASH_CURRENT_SIGNING_KEY?.trim();
-  if (currentKey) {
-    const url = new URL("/api/wa/worker", process.env.APP_URL || request.url).toString();
-    const v = verifyQStashSignature(request.headers.get(QSTASH_SIGNATURE_HEADER), raw, url, { current: currentKey, next: process.env.QSTASH_NEXT_SIGNING_KEY?.trim() });
-    if (!v.ok) return new Response(`invalid signature: ${v.reason}`, { status: 401 });
-  } else {
-    const given = request.headers.get(INTERNAL_SECRET_HEADER) ?? "";
-    if (!given || !safeEqual(given, internalSecret())) return new Response("invalid internal secret", { status: 401 });
-  }
+  const rejected = rejectUnverifiedDelivery(request, raw, "/api/wa/worker");
+  if (rejected) return rejected;
 
   let job: WorkerJob;
   try {

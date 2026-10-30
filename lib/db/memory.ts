@@ -809,10 +809,20 @@ export class MemoryDb implements Db {
     return row;
   }
 
-  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null): Promise<JobRow | null> {
+  async getJob(id: string): Promise<JobRow | null> {
+    const job = this.jobs.find((j) => j.id === id);
+    return job ? { ...job, payload: { ...job.payload } } : null;
+  }
+
+  /** Mirrors public.finish_job() (0022): only a running job, and only the given attempt. */
+  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null, attempts: number | null = null): Promise<JobRow | null> {
     const job = this.jobs.find((j) => j.id === id);
     if (!job) return null;
-    if (!error) job.status = "done";
+    if (job.status !== "running" || (attempts != null && job.attempts !== attempts)) return { ...job };
+    if (!error) {
+      job.status = "done";
+      job.last_error = null;
+    }
     else if (job.attempts < job.max_attempts) {
       job.status = "queued";
       job.last_error = error;

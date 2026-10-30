@@ -730,8 +730,15 @@ export class SupabaseDb implements Db {
     return data as unknown as JobRow;
   }
 
-  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null): Promise<JobRow | null> {
-    const { data, error: rpcError } = await this.client.rpc("finish_job", { p_job_id: id, p_error: error, p_retry_at: retryAt ? retryAt.toISOString() : null });
+  async getJob(id: string): Promise<JobRow | null> {
+    if (!UUID_RE.test(id)) return null;
+    const { data, error } = await this.client.from("jobs").select(SupabaseDb.JOB_COLS).eq("id", id).maybeSingle();
+    if (error) this.fail("getJob", error);
+    return (data as unknown as JobRow | null) ?? null;
+  }
+
+  async finishJob(id: string, error: string | null = null, retryAt: Date | null = null, attempts: number | null = null): Promise<JobRow | null> {
+    const { data, error: rpcError } = await this.client.rpc("finish_job", { p_job_id: id, p_error: error, p_retry_at: retryAt ? retryAt.toISOString() : null, p_attempts: attempts });
     if (rpcError) this.fail("finishJob", rpcError);
     return (data as unknown as JobRow | null) ?? null;
   }

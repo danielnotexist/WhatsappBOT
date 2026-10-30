@@ -124,7 +124,7 @@ select pg_temp.check('finish_job(error) with attempts<max → queued with backof
 select pg_temp.check('finish_job(error, explicit retry_at) → queued at that time',
   (select status = 'queued' and run_at between now() + interval '2 days' - interval '1 minute' and now() + interval '2 days' + interval '1 minute'
      from public.finish_job('66666666-0000-4000-8000-000000000003', 'hyp declined', now() + interval '2 days')));
-update public.jobs set attempts = 3 where id = '66666666-0000-4000-8000-000000000003';
+update public.jobs set attempts = 3, status = 'running' where id = '66666666-0000-4000-8000-000000000003';
 select pg_temp.check('finish_job(error) with attempts>=max → failed',
   (select status from public.finish_job('66666666-0000-4000-8000-000000000003', 'boom again')) = 'failed');
 

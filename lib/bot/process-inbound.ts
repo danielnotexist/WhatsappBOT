@@ -64,10 +64,18 @@ export async function processInbound(ctx: BotContext, msg: InboundMessage): Prom
   await ctx.wa.markRead(msg.waMessageId, { typing: true }).catch(() => undefined);
   // 👀 on the message while it is handled, "עלזה על זה…" if nothing was sent after a few seconds, ✅ once done
   const progress = startProgress(ctx, to, msg.waMessageId, isButton);
+  let failed = false;
   try {
     return await afterStored(progress.ctx, msg, { user, to, stored, isButton, spendTurn });
+  } catch (e) {
+    // The inbound row is already stored, so a redelivery would only hit "duplicate": answering here is the only chance.
+    // The error is recorded, the user is told it did not work (best effort) and gets no ✅.
+    failed = true;
+    await reportError("bot.inbound", e, { userId: user.id, db: ctx.db, context: { type: msg.type } });
+    await progress.ctx.wa.sendText(to, copy["err.generic"]()).catch(() => undefined);
+    return { handled: true, note: "failed" };
   } finally {
-    await progress.done();
+    await progress.done(failed);
   }
 }
 
@@ -79,7 +87,8 @@ export const TYPING_REFRESH_MS = 20_000;
 /**
  * The progress marks on an inbound message: the typing dots (markRead with typing, by the caller), a 👀 reaction right away (not on button presses, which have no bubble of
  * their own to react to in a useful way), a short "עלזה על זה…" when no reply went out within PROGRESS_NOTE_AFTER_MS
- * (not stored: it is not part of the conversation), and ✅ replacing the 👀 when the message is handled. The returned
+ * (not stored: it is not part of the conversation), and ✅ replacing the 👀 when the message is handled (the 👀 is removed
+ * when handling failed). The returned
  * ctx notices every send, so a fast answer never gets the note.
  */
 function startProgress(ctx: BotContext, to: string, waMessageId: string, isButton: boolean) {
@@ -116,10 +125,11 @@ function startProgress(ctx: BotContext, to: string, waMessageId: string, isButto
   }, TYPING_REFRESH_MS);
   return {
     ctx: { ...ctx, wa: tracked },
-    async done() {
+    /** ✅ when handled; after a failure the 👀 is removed instead (an empty reaction), so nothing claims it worked. */
+    async done(failed = false) {
       clearTimeout(timer);
       clearInterval(keepTyping);
-      if (!isButton) await wa.sendReaction(to, waMessageId, "✅").catch(() => undefined);
+      if (!isButton) await wa.sendReaction(to, waMessageId, failed ? "" : "✅").catch(() => undefined);
     },
   };
 }
