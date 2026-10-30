@@ -121,4 +121,46 @@ pushed="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select string_agg(to_ch
 [[ "$pushed" == "2031-02-09,2031-02-19" ]] || { echo "✖ race: referral_reward — expected 2031-02-09,2031-02-19, got $pushed"; exit 1; }
 echo "ok - race: two parallel rewards of one friend → one reward, 30 days each"
 
+# otp_check (0020): two wrong guesses at once → both counted (the row lock), not one
+run -d "$DB_NAME" -c "
+  delete from public.auth_otps where email = 'race-otp@example.com';
+  select public.otp_issue('race-otp@example.com', 'race-otp@example.com', 'ip', 'chal', 'right', now() + interval '10 minutes', 60, 5, 10, null);"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select public.otp_check('race-otp@example.com', 'chal', 'wrong', 5); select pg_sleep(2); commit;" >/dev/null 2>&1 &
+pid_otp=$!
+sleep 0.7
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select public.otp_check('race-otp@example.com', 'chal', 'wrong', 5)" >/dev/null
+wait "$pid_otp" || { echo "✖ race: otp_check — the first guess failed"; exit 1; }
+otp_attempts="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select attempts from public.auth_otps where email = 'race-otp@example.com'")"
+[[ "$otp_attempts" == "2" ]] || { echo "✖ race: otp_check — expected 2 attempts, got $otp_attempts"; exit 1; }
+echo "ok - race: two parallel wrong guesses → 2 attempts"
+
+# otp_issue (0020): two sends at once for one mailbox → one code, the other cooldown (the advisory lock)
+issue_a="$(mktemp)"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select public.otp_issue('race-send@example.com', 'race-send@example.com', 'ip', 'c1', 'h1', now() + interval '10 minutes', 60, 5, 10, null) ->> 'status'; select pg_sleep(2); commit;" >"$issue_a" 2>&1 &
+pid_issue=$!
+sleep 0.7
+out_issue="$("${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select public.otp_issue('race-send@example.com', 'race-send@example.com', 'ip', 'c2', 'h2', now() + interval '10 minutes', 60, 5, 10, null) ->> 'status'")"
+wait "$pid_issue" || { cat "$issue_a"; echo "✖ race: otp_issue — the first send failed"; exit 1; }
+grep -qx "ok" "$issue_a" || { cat "$issue_a"; echo "✖ race: otp_issue — the first send was not ok"; exit 1; }
+rm -f "$issue_a"
+[[ "$out_issue" == "cooldown" ]] || { echo "✖ race: otp_issue — the second send got $out_issue"; exit 1; }
+echo "ok - race: two parallel sends → one code, the other cooldown"
+
+# link_token_consume (0020): one token from two phones at once → one phone linked
+run -d "$DB_NAME" -c "
+  insert into public.users (id, email) values ('c3333333-3333-4333-8333-333333333301', 'race-link@example.com');
+  insert into public.link_tokens (user_id, token_hash, expires_at) values ('c3333333-3333-4333-8333-333333333301', repeat('L', 43), now() + interval '15 minutes');"
+link_a="$(mktemp)"
+"${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "begin; select public.link_token_consume(repeat('L', 43), '+972507770001', null, null) ->> 'result'; select pg_sleep(2); commit;" >"$link_a" 2>&1 &
+pid_link=$!
+sleep 0.7
+out_link="$("${PSQL_CMD[@]}" -X -q -t -A -v ON_ERROR_STOP=1 -d "$DB_NAME" -c "select public.link_token_consume(repeat('L', 43), '+972507770002', null, null) ->> 'result'")"
+wait "$pid_link" || { cat "$link_a"; echo "✖ race: link_token_consume — the first call failed"; exit 1; }
+grep -qx "linked" "$link_a" || { cat "$link_a"; echo "✖ race: link_token_consume — the first call did not link"; exit 1; }
+rm -f "$link_a"
+[[ "$out_link" == "expired" ]] || { echo "✖ race: link_token_consume — the second phone got $out_link"; exit 1; }
+linked="$("${PSQL_CMD[@]}" -X -q -t -A -d "$DB_NAME" -c "select count(*) from public.wa_identities where user_id = 'c3333333-3333-4333-8333-333333333301' and status <> 'unlinked'")"
+[[ "$linked" == "1" ]] || { echo "✖ race: link_token_consume — $linked phones linked"; exit 1; }
+echo "ok - race: one link token from two phones at once → one phone"
+
 echo "SUPABASE LOCAL: ALL TESTS PASSED"

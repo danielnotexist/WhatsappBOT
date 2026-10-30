@@ -1,15 +1,7 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { connection } from "next/server";
+import { hasCronBearer } from "@/lib/cron-secret";
 import { isDemo } from "@/lib/demo";
 import { checkServerEnv, dataMode, liveAiInDemo } from "@/lib/env";
-
-/** Bearer CRON_SECRET (the scheduler's secret, app/api/jobs/tick) — compared in constant time, by digest. */
-function operator(request: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim() ?? "";
-  if (!secret) return false;
-  const digest = (s: string) => createHash("sha256").update(s).digest();
-  return timingSafeEqual(digest(request.headers.get("authorization") ?? ""), digest(`Bearer ${secret}`));
-}
 
 /**
  * GET /api/health — בדיקת חיות ל-Vercel/מוניטורינג.
@@ -20,7 +12,7 @@ export async function GET(request: Request) {
   // מסמן ל-Next (Cache Components) שהתשובה תלויה בבקשה ולא ניתנת ל-prerender.
   await connection();
   const headers = { "cache-control": "no-store" };
-  if (!operator(request)) return Response.json({ ok: true }, { headers });
+  if (!hasCronBearer(request)) return Response.json({ ok: true }, { headers });
 
   const env = checkServerEnv();
   // "demo-memory" / "demo-supabase" במצב הדגמה (lib/demo.ts) — בלי ערכים, רק המצב

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { derivedKey, hmac } from "@/lib/auth/keys";
+import { derivedKey, hmac, signedTokenParts } from "@/lib/auth/keys";
 
 /** One-time 30-minute link sent in chat: /api/auth/microsoft/start?t=<token> (PLAN §1 "חיבור מהשיחה"). */
 export const CONNECT_LINK_TTL_SECONDS = 30 * 60;
@@ -12,9 +12,9 @@ export function createConnectLinkToken(userId: string, provider: "microsoft" | "
 }
 
 export function verifyConnectLinkToken(token: string | null | undefined, opts: { key?: Buffer; now?: Date } = {}): { userId: string; provider: "microsoft" | "google" } | null {
-  if (!token) return null;
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return null;
+  const parts = signedTokenParts(token);
+  if (!parts) return null;
+  const { payload, sig } = parts;
   const key = opts.key ?? derivedKey("session");
   const expected = hmac(key, `connect:${payload}`);
   const given = Buffer.from(sig, "base64url");

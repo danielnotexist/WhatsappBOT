@@ -133,8 +133,9 @@ describe("the sign-up through the link", () => {
     const { code } = await referralLinkOf(db, a.id, "https://x");
     const deps: OtpDeps = { db, mailer, limiter: new MemoryRateLimiter(), otpKey: randomBytes(32), referralCode: code };
     const login = async (email: string) => {
-      expect((await sendOtp(deps, email, "1.1.1.1")).ok).toBe(true);
-      return verifyOtp(deps, email, mailer.sent.at(-1)!.code, "1.1.1.1");
+      const sent = await sendOtp(deps, email, "1.1.1.1");
+      expect(sent.ok).toBe(true);
+      return verifyOtp({ ...deps, challenge: sent.ok ? sent.challenge : null }, email, mailer.sent.at(-1)!.code, "1.1.1.1");
     };
     const r = await login("noa@example.com");
     expect(r).toMatchObject({ ok: true, isNewUser: true });

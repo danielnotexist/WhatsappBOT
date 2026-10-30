@@ -1197,3 +1197,17 @@ node render.mjs --full && node render.mjs --full --format wide   # out/*.mp4
 **בדיקות:** `lib/auth/session.test.ts`, `lib/auth/demo-auth.test.ts`, `lib/demo.test.ts`, `lib/flash.test.ts`, `lib/seo/seo.test.ts`, `proxy.test.ts`, `app/api/demo/chat/demo-chat-route.test.ts`, `app/api/pay/pay-routes.test.ts`, `app/pay/[token]/actions.test.ts`, `app/api/demo-routes.test.ts`, בדיקות ה-503 ב-otp / wa / google. e2e: `e2e/account.spec.ts` (הודעה חתומה מוצגת, מפוברקת לא), `e2e/demo.spec.ts` (health).
 
 **דרוש מדניאל (ב-Vercel, בעת כיבוי ההדגמה):** `DEMO_MODE=0` (או למחוק), `SESSION_EPOCH=2`, `WEB_CHAT=1`. לבדוק ב-Supabase שאריות מתקופת ההדגמה: תשלומים עם `raw->>'Sign'='mock'` / `ACode 0001234`, מנויים שהופעלו מהם, הפניות שתוגמלו, ו-audit_log (login, wa.link, ms.connect, google.connect) בחלון ההדגמה.
+
+### 2026-10-30 — אבטחה, אזור B: קודים, טוקנים ומגבלות
+
+**מה נעשה** (סבב תיקוני האבטחה, באישור דניאל)
+- **מיגרציה `0020_auth_atomic.sql`:** כל בדיקה ועדכון של מונה בפונקציית SQL אחת עם נעילה (במקום קריאה ואז כתיבה): `otp_issue` (המתנה, מכסות, ביטול הקוד הקודם והכנסה), `otp_check` (ניחושים מקבילים נספרים כל אחד; החמישי שורף את הקוד), `link_token_consume` (קוד הקישור, "טלפון אחד לחשבון" והקישור עצמו), `wa_identity_link` (מספר פעיל לא נדרס לעולם), `wa_link_attempt`, `login_token_consume`. MemoryDb מחקה את כולן.
+- **קוד במייל:** רק הדפדפן שביקש את הקוד יכול לנסות אותו (עוגיית `wb_otp`, `lib/auth/otp-challenge.ts`) - זר שיודע את הכתובת לא מנחש ולא "שורף". ההמתנה והמכסה (5 בשעה) לכל מבקש (IP, ב-IPv6 רשת ‎/64), גיבוי של 10 בשעה לתיבה (בלי +תגית ובלי נקודות ב-gmail), ותקרה כללית של 150 קודים בשעה. קוד שנשרף בניחושים לא מבטל את ההמתנה. כתובת עם `:` (כמו `admin:...`) לא מתקבלת יותר.
+- **Login CSRF:** `/api/auth/otp/send` ו-`/verify` מקבלים רק JSON מאותו אתר (`lib/same-origin.ts` `refuseCrossSitePost`: 403 / 415).
+- **קוד הקישור לוואטסאפ** לא נשמר בגלוי: `link_tokens.token_hash` (HMAC); הקוד מחושב מ-id השורה והמפתח, כך שרענון הדף עדיין מציג אותו. הודעה בלי קוד לא נספרת כניסיון (הפניה לאתר פעם בשעה), אחרי שחסימה פגה המונה מתאפס, ומשלוח חוזר של אותה הודעה לא נספר. מספר שכבר קיבל תקופת ניסיון לא מקבל ניסיון שני בחשבון חדש (`wa_trial_phones`).
+- **טוקנים חתומים** (תשלום, חיבור, הצעות, כניסה מוואטסאפ) - פורמט קפדני: נקודה אחת, base64url בלבד (`signedTokenParts`); `/pay/<token>.png` לא נפתח.
+- **`CRON_SECRET`** קצר מ-32 תווים נחשב כלא מוגדר (`lib/cron-secret.ts`). **יומן תקרת Google** שומר HMAC של המייל ולא sha256 חשוף (שורות ישנות מוכרות ועוברות למפתח בהסכמה הבאה). **מגביל הבקשות** בזיכרון: כל מפתח עם החלון שלו (ניקוי לא מוחק מונה שעתי), IPv6 נספר לפי ‎/64. **התראות הרשמה** לבעלים: עד 60 בשעה (כולן נרשמות).
+
+**בדיקות:** `supabase/tests/auth_atomic.test.sql` + 3 מבחני מקביליות ב-`run-local.sh`, `lib/auth/otp.test.ts`, `app/api/auth/otp/otp-routes.test.ts`, `lib/bot/linking.test.ts`, `lib/auth/link-token.test.ts`, `lib/rate-limit.test.ts`, `lib/google/user-cap.test.ts`, `lib/admin/alerts.test.ts`, `lib/billing/subscription.test.ts`, `app/api/jobs/jobs-routes.test.ts`.
+
+**דרוש מדניאל:** להריץ את `0020_auth_atomic.sql` ב-Supabase **לפני** הפריסה (הקוד החדש קורא לפונקציות; קודי קישור פתוחים נמחקים - תוקפם 15 דקות). לוודא ש-`CRON_SECRET` ב-Vercel וב-Vault (`cron_secret`) באורך 32 תווים לפחות, אחרת המתזמן נעצר.

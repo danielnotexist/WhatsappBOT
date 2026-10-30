@@ -10,6 +10,7 @@ import { referralCodeFromCookieHeader } from "@/lib/referrals/code";
 import { getWaSender } from "@/lib/wa";
 import { demoSessionClaims } from "./demo-user";
 import { oauthReturnUrl } from "./oauth-return";
+import { otpChallengeCookieHeader } from "./otp-challenge";
 import { sendOtpForRequest } from "./otp-service";
 import { SESSION_COOKIE, SESSION_TTL_SECONDS, createSessionToken } from "./session";
 import { signInVerifiedEmail, type SignInDeps } from "./sign-in";
@@ -135,7 +136,9 @@ export async function finishSsoSignIn(
       return null;
     });
     const wait = sent ? (sent.ok ? sent.cooldownSeconds : (sent.retryAfterSeconds ?? 0)) : 0;
-    return redirectWithCookies(ssoCodeUrl(appUrl, identity.email, wait, provider), [clearSsoCookieHeader()]);
+    // the code is bound to this browser (lib/auth/otp-challenge.ts), like a code asked for on the page
+    const challenge = sent?.ok && sent.challenge ? [otpChallengeCookieHeader(sent.challenge)] : [];
+    return redirectWithCookies(ssoCodeUrl(appUrl, identity.email, wait, provider), [clearSsoCookieHeader(), ...challenge]);
   }
 
   const { user, isNewUser } = await signInVerifiedEmail(signInDeps(db, request), identity.email, provider, decision.kind === "login" ? decision.user : null);

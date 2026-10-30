@@ -10,13 +10,13 @@ describe("MemoryDb", () => {
     db.seedConnection(u.id, "microsoft", "a@b.co");
     db.seedSubscription(u.id, "basic", "active");
     db.seedWaIdentity(u.id, "+972501234567");
-    await db.createLinkToken(u.id, "ABCD-2345", new Date(Date.now() + 60_000));
+    await db.createLinkToken(u.id, { id: "00000000-0000-4000-8000-000000000001", tokenHash: "h".repeat(43) }, new Date(Date.now() + 60_000));
     await db.deleteUser(u.id);
     expect(await db.getUser(u.id)).toBeNull();
     expect(await db.listConnections(u.id)).toEqual([]);
     expect(await db.listWaIdentities(u.id)).toEqual([]);
     expect(await db.getSubscription(u.id)).toBeNull();
-    expect(await db.findLinkToken("ABCD-2345")).toBeNull();
+    expect(await db.latestLinkToken(u.id)).toBeNull();
   });
 
   it("scopes revoke/unlink to the owner", async () => {

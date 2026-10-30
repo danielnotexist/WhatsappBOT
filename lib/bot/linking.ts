@@ -1,5 +1,5 @@
 import { trackServerEvent } from "@/lib/analytics/track";
-import { extractLinkToken } from "@/lib/auth/link-token";
+import { extractLinkToken, linkTokenHash, trialPhoneHash } from "@/lib/auth/link-token";
 import { copy, buttons } from "@/lib/copy/bot";
 import type { UserRow } from "@/lib/db/types";
 import type { InboundMessage } from "@/lib/wa/types";
@@ -9,44 +9,46 @@ import { startOnboarding } from "./onboarding";
 /**
  * A message from a number that is not linked to any account (PLAN §1 "קישור לוואטסאפ"):
  * token in the text → link (one phone per account, one account per phone) → welcome + onboarding.
- * No token → one-time pointer to the site. 3 bad tokens → silent block for 24h.
+ * No token → a pointer to the site (at most once an hour; never a strike). 3 bad tokens → silent block for 24h, then
+ * the count starts over (0020 wa_link_attempt).
  */
 export async function handleUnlinkedPhone(ctx: BotContext, msg: InboundMessage): Promise<{ handled: boolean; note: string }> {
   const phone = msg.fromE164;
   if (await ctx.db.isPhoneBlocked(phone)) return { handled: true, note: "blocked" };
   const token = msg.text ? extractLinkToken(msg.text) : null;
+  const attempt = (strike: boolean) =>
+    ctx.db.recordLinkAttempt(phone, { strike, waMessageId: msg.waMessageId ?? null, maxAttempts: LINK.maxTokenAttempts, blockMs: LINK.blockMs, pointerEveryMs: LINK.pointerEveryMs });
 
   if (!token) {
-    const { blocked } = await ctx.db.recordLinkAttempt(phone, LINK.maxTokenAttempts, LINK.blockMs);
-    if (!blocked) await ctx.wa.sendText(phone, copy["link.unknown_number"](siteLink(ctx, "/start")));
+    // a plain message is never a strike: the pointer to the site, at most once an hour (and once per delivery)
+    const { reply } = await attempt(false);
+    if (reply) await ctx.wa.sendText(phone, copy["link.unknown_number"](siteLink(ctx, "/start")));
     return { handled: true, note: "unknown number" };
   }
 
-  const row = await ctx.db.findLinkToken(token);
-  if (!row) {
-    const { blocked } = await ctx.db.recordLinkAttempt(phone, LINK.maxTokenAttempts, LINK.blockMs);
-    if (!blocked) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/ready")));
-    return { handled: true, note: "invalid token" };
+  // 0020 link_token_consume: the code (by its HMAC), one phone per account and the link itself — one locked step
+  const res = await ctx.db.consumeLinkToken({ tokenHash: linkTokenHash(token), phoneE164: phone, waName: msg.profileName, phoneHash: trialPhoneHash(phone) });
+  switch (res.result) {
+    case "invalid": {
+      const { reply } = await attempt(true);
+      if (reply) await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start/ready")));
+      return { handled: true, note: "invalid token" };
+    }
+    case "expired":
+    case "phone_taken":
+      await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/ready")));
+      return { handled: true, note: res.result === "expired" ? "expired token" : "phone taken" };
+    case "no_user":
+      await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start")));
+      return { handled: true, note: "token without user" };
+    case "second_phone":
+      await ctx.wa.sendText(phone, copy["link.second_phone"](maskPhone(res.otherPhone), siteLink(ctx, "/account?tab=whatsapp")));
+      return { handled: true, note: "account has another phone" };
   }
-  if (row.used_at || Date.parse(row.expires_at) <= ctx.now().getTime()) {
-    await ctx.wa.sendText(phone, copy["link.token_expired"](siteLink(ctx, "/start/ready")));
-    return { handled: true, note: "expired token" };
-  }
-  const user = await ctx.db.getUser(row.user_id);
-  if (!user) {
-    await ctx.wa.sendText(phone, copy["link.token_invalid"](siteLink(ctx, "/start")));
-    return { handled: true, note: "token without user" };
-  }
-  const existing = (await ctx.db.listWaIdentities(user.id)).find((w) => w.status !== "unlinked");
-  if (existing && existing.phone_e164 !== phone) {
-    await ctx.wa.sendText(phone, copy["link.second_phone"](maskPhone(existing.phone_e164), siteLink(ctx, "/account?tab=whatsapp")));
-    return { handled: true, note: "account has another phone" };
-  }
-
-  await ctx.db.createWaIdentity(user.id, phone, msg.profileName);
-  await ctx.db.markLinkTokenUsed(row.id);
+  const user = await ctx.db.getUser(res.userId);
+  if (!user) return { handled: true, note: "token without user" };
   await welcomeLinkedPhone(ctx, user, phone);
-  return { handled: true, note: "linked" };
+  return { handled: true, note: res.trialReused ? "linked (trial already used on this phone)" : "linked" };
 }
 
 /**

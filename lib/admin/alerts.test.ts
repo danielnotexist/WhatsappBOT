@@ -105,7 +105,7 @@ describe("notifyOwner — the mail", () => {
 });
 
 describe("rate limits per type", () => {
-  it("error_spike: at most one an hour; signup: never limited", async () => {
+  it("error_spike: at most one an hour; signup: 60 an hour, then limited (still recorded)", async () => {
     const spike = (slot: string): OwnerEvent => ({ type: "error_spike", count: 12, threshold: 10, top: [{ source: "bot", count: 12 }], slot });
     expect((await notifyOwner(spike("2026-10-21T12"), deps())).status).toBe("sent");
     clock = new Date(NOON.getTime() + 40 * 60_000);
@@ -114,7 +114,9 @@ describe("rate limits per type", () => {
     clock = new Date(NOON.getTime() + 61 * 60_000);
     expect((await notifyOwner(spike("2026-10-21T14"), deps())).status).toBe("sent");
 
-    for (let i = 0; i < 40; i++) expect((await notifyOwner(signup(`u-${i}`, `u${i}@example.co.il`), deps())).status).toBe("sent");
+    for (let i = 0; i < 60; i++) expect((await notifyOwner(signup(`u-${i}`, `u${i}@example.co.il`), deps())).status).toBe("sent");
+    expect((await notifyOwner(signup("u-60", "u60@example.co.il"), deps())).status).toBe("limited");
+    expect(db.ownerAlerts.find((a) => a.dedupe_key === "signup:u-60")!.status).toBe("limited");
   });
 
   it("payment_failed: 20 an hour, then limited (each still recorded)", async () => {

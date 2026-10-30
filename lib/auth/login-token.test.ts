@@ -34,6 +34,16 @@ describe("WhatsApp login tokens", () => {
     expect(await consumeLoginToken(db, b.token, { now, key })).toEqual({ ok: true, userId: user.id });
   });
 
+  it("two opens of one link at once sign in once (the atomic compare-and-remove)", async () => {
+    const db = new MemoryDb();
+    const user = await db.createUser("dana@example.com");
+    const now = new Date("2026-10-21T10:00:00Z");
+    const { token } = await issueLoginToken(db, user.id, { now, key });
+    const results = await Promise.all([consumeLoginToken(db, token, { now, key }), consumeLoginToken(db, token, { now, key })]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(db.audit.filter((a) => a.action === "auth.login_whatsapp")).toHaveLength(1);
+  });
+
   it("rejects tampered, foreign-key and malformed tokens", async () => {
     const db = new MemoryDb();
     const user = await db.createUser("dana@example.com");
@@ -45,5 +55,6 @@ describe("WhatsApp login tokens", () => {
     expect(await consumeLoginToken(db, token, { now, key: randomBytes(32) })).toEqual({ ok: false, reason: "invalid" });
     expect(peekLoginToken("nope", { now, key })).toBe("invalid");
     expect(peekLoginToken(`${token}.x`, { now, key })).toBe("invalid");
+    expect(peekLoginToken(`${token}!`, { now, key })).toBe("invalid");
   });
 });

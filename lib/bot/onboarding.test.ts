@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { issueLinkToken } from "@/lib/auth/link-token";
 import { processInbound } from "./process-inbound";
 import { makeHarness } from "./test-harness";
 
 async function linked(h: ReturnType<typeof makeHarness>) {
   const user = await h.db.createUser("dana@example.com");
-  await h.db.createLinkToken(user.id, "ABCD-2345", new Date(h.ctx.now().getTime() + 15 * 60_000));
-  await processInbound(h.ctx, h.inbound("ABCD-2345"));
+  const { token } = await issueLinkToken(h.db, user.id, h.ctx.now());
+  await processInbound(h.ctx, h.inbound(token));
   h.wa.sent.length = 0;
   return user;
 }

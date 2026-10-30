@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { derivedKey, hmac } from "@/lib/auth/keys";
+import { derivedKey, hmac, signedTokenParts } from "@/lib/auth/keys";
 
 /**
  * Signed links sent in WhatsApp (same scheme as pay-link.ts, separate purposes so one never opens another):
@@ -25,9 +25,9 @@ function sign(purpose: Purpose, userId: string, extra: string, opts: { key?: Buf
 }
 
 function verify(purpose: Purpose, token: string | null | undefined, opts: { key?: Buffer; now?: Date } = {}): { userId: string; extra: string } | null {
-  if (!token) return null;
-  const [payload, sig, ...rest] = token.split(".");
-  if (!payload || !sig || rest.length) return null;
+  const parts = signedTokenParts(token);
+  if (!parts) return null;
+  const { payload, sig } = parts;
   const key = opts.key ?? derivedKey("session");
   const expected = hmac(key, `${purpose}:${payload}`);
   const given = Buffer.from(sig, "base64url");

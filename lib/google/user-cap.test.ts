@@ -12,6 +12,7 @@ import {
   checkGoogleUserCapAlerts,
   countCapUsers,
   googleAccountHash,
+  legacyGoogleAccountHash,
   googleAccountOf,
   googleCapConfig,
   googleConnectShowsUnverified,
@@ -30,6 +31,10 @@ import {
 
 const CFG: GoogleCapConfig = { gmailReadEnabled: true, cap: 95, sensitiveVerified: false, realGoogle: true };
 const READ = [GOOGLE_SCOPES.gmailReadonly];
+
+// the ledger hash is keyed (TOKEN_ENC_KEY's "ledger" sub-key)
+beforeEach(() => vi.stubEnv("TOKEN_ENC_KEY", Buffer.alloc(32, 5).toString("base64")));
+afterEach(() => vi.unstubAllEnvs());
 
 /** n distinct Google accounts already in the ledger (as Google counts them). */
 async function seed(db: MemoryDb, n: number, scope: string = GOOGLE_SCOPES.gmailReadonly) {
@@ -64,8 +69,23 @@ describe("Google unverified-app user cap — configuration", () => {
     expect(alertLevels(50)).toEqual([50]);
   });
 
-  it("the account hash is sha256 of the lowercased email (same as the SQL backfill)", () => {
-    expect(googleAccountHash(" Dana.Levi@Gmail.com ")).toBe("6329af6e825cf5d306bd9ee890deeeadeca084acfc597c7801cb0c365e90e947");
+  it("the account hash is a keyed HMAC of the lowercased email, not a bare sha256 anyone can recompute", () => {
+    const key = Buffer.alloc(32, 9);
+    const legacy = "6329af6e825cf5d306bd9ee890deeeadeca084acfc597c7801cb0c365e90e947";
+    expect(legacyGoogleAccountHash(" Dana.Levi@Gmail.com ")).toBe(legacy); // = the 0008 SQL backfill
+    expect(googleAccountHash(" Dana.Levi@Gmail.com ", key)).toMatch(/^[0-9a-f]{64}$/);
+    expect(googleAccountHash(" Dana.Levi@Gmail.com ", key)).toBe(googleAccountHash("dana.levi@gmail.com", key));
+    expect(googleAccountHash("dana.levi@gmail.com", key)).not.toBe(legacy);
+    expect(googleAccountHash("dana.levi@gmail.com", key)).not.toBe(googleAccountHash("dana.levi@gmail.com", Buffer.alloc(32, 1)));
+  });
+
+  it("an account under the legacy hash still counts once, and moves to the keyed hash on its next consent", async () => {
+    const db = new MemoryDb();
+    await db.recordGoogleScopeGrant({ account_hash: legacyGoogleAccountHash("old@gmail.com"), scope: GOOGLE_SCOPES.gmailReadonly, user_id: null });
+    expect(await gmailReadAccess(db, "old@gmail.com", CFG)).toMatchObject({ allowed: true, reason: "already_counted" });
+    await recordGoogleGrants(db, { userId: "u-old", accountEmail: "old@gmail.com", granted: READ }, { cfg: CFG, notify: async () => undefined });
+    expect(db.googleScopeGrants.every((g) => g.account_hash === googleAccountHash("old@gmail.com"))).toBe(true);
+    expect(await countCapUsers(db)).toBe(1);
   });
 });
 

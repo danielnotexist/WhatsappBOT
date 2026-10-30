@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { derivedKey, hmac } from "@/lib/auth/keys";
+import { derivedKey, hmac, signedTokenParts } from "@/lib/auth/keys";
 
 /**
  * Personal payment link sent in WhatsApp: /pay/<token> where token = base64url(userId.exp).sig.
@@ -15,9 +15,9 @@ export function createPayLinkToken(userId: string, opts: { key?: Buffer; now?: D
 }
 
 export function verifyPayLinkToken(token: string | undefined | null, opts: { key?: Buffer; now?: Date } = {}): { userId: string } | null {
-  if (!token) return null;
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return null;
+  const parts = signedTokenParts(token);
+  if (!parts) return null;
+  const { payload, sig } = parts;
   const key = opts.key ?? derivedKey("session");
   const expected = hmac(key, `pay:${payload}`);
   const given = Buffer.from(sig, "base64url");

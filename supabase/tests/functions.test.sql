@@ -197,9 +197,9 @@ select pg_temp.check('purge_old_audit_log(730): deletes only the 800-day row',
 insert into public.auth_otps (email, code_hash, expires_at) values
   ('fn-trial@example.com', 'h', now() - interval '2 days'),
   ('fn-trial@example.com', 'h', now() + interval '5 minutes');
-insert into public.link_tokens (user_id, token, expires_at) values
-  ('33333333-3333-4333-8333-333333333333', 'FNOL-0001', now() - interval '10 days'),
-  ('33333333-3333-4333-8333-333333333333', 'FNNW-0002', now() + interval '10 minutes');
+insert into public.link_tokens (user_id, token_hash, expires_at) values
+  ('33333333-3333-4333-8333-333333333333', repeat('o', 43), now() - interval '10 days'),
+  ('33333333-3333-4333-8333-333333333333', repeat('n', 43), now() + interval '10 minutes');
 insert into public.wa_link_attempts (phone_e164, attempts, last_attempt_at) values
   ('+972509999001', 2, now() - interval '40 days'),
   ('+972509999002', 3, now() - interval '1 hour');

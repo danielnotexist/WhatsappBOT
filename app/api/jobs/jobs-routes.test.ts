@@ -105,13 +105,18 @@ describe("/api/jobs/run (Milestone 5 kinds) and /api/jobs/tick", () => {
       tickGet(new Request("https://app.example.co.il/api/jobs/tick", { headers: auth ? { authorization: auth } : {} }));
     vi.stubEnv("CRON_SECRET", "");
     expect((await get("Bearer anything")).status).toBe(503);
+    // shorter than 32 characters: treated as unset, even with the right bearer
     vi.stubEnv("CRON_SECRET", "cron-secret-0123456789");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await get("Bearer cron-secret-0123456789")).status).toBe(503);
+    log.mockRestore();
+    vi.stubEnv("CRON_SECRET", "cron-secret-0123456789-0123456789");
     expect((await get()).status).toBe(401);
     expect((await get("Bearer wrong-secret-0123456789")).status).toBe(401);
     expect(queue.jobs).toHaveLength(0);
     vi.stubEnv("DATA_MODE", "memory");
     await dueReminder();
-    const res = await get("Bearer cron-secret-0123456789");
+    const res = await get("Bearer cron-secret-0123456789-0123456789");
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, failed: 0 });
     expect(queue.jobs.some((j) => (j.body as { kind: string }).kind === "reminder")).toBe(true);

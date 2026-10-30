@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { issueLinkToken } from "@/lib/auth/link-token";
 import { activateSubscription } from "@/lib/billing/subscription";
 import { processInbound } from "@/lib/bot/process-inbound";
 import { makeHarness } from "@/lib/bot/test-harness";
@@ -32,8 +33,8 @@ describe("the server-side funnel steps (lib/analytics/track.ts)", () => {
   it("the WhatsApp link records wa_linked for the account", async () => {
     const { ctx, inbound, db } = makeHarness();
     const user = await db.createUser("dana@example.com");
-    await db.createLinkToken(user.id, "ABCD-2345", new Date(ctx.now().getTime() + 15 * 60_000));
-    expect((await processInbound(ctx, inbound("היי! לקשר את החשבון שלי: ABCD-2345"))).note).toBe("linked");
+    const { token } = await issueLinkToken(db, user.id, ctx.now());
+    expect((await processInbound(ctx, inbound(`היי! לקשר את החשבון שלי: ${token}`))).note).toBe("linked");
     await flushServerEvents();
     expect(db.pageEvents).toEqual([expect.objectContaining({ event: "wa_linked", user_id: user.id, path: null })]);
   });

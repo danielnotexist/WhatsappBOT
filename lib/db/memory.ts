@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { DEFAULT_MAX_OUTBOUND, agentRowViolation } from "@/lib/agents/constraints";
 import { customAgentLimit, effectivePlan, type EffectivePlan } from "@/lib/billing/plans";
 import { addDays, compareDates, dateKey, localDateOf, parseDateKey, zonedToUtc } from "@/lib/time/zoned";
@@ -26,11 +26,16 @@ import type {
   JobRow,
   PaymentRow,
   SubscriptionSecret,
+  LinkAttemptInput,
   LinkAttemptResult,
+  LinkConsumeResult,
   LinkTokenRow,
   MessageRow,
   NewMessage,
   NewReminder,
+  OtpCheckResult,
+  OtpIssueInput,
+  OtpIssueResult,
   OtpRow,
   PendingActionKind,
   PendingActionRow,
@@ -93,7 +98,9 @@ export class MemoryDb implements Db {
   messages: MessageRow[] = [];
   states = new Map<string, ConversationStateRow>();
   pendingActions: PendingActionRow[] = [];
-  linkAttempts = new Map<string, { attempts: number; last: number; blockedUntil: number | null }>();
+  linkAttempts = new Map<string, { attempts: number; last: number; blockedUntil: number | null; pointerAt: number | null; lastMessageId: string | null }>();
+  /** wa_trial_phones (0020): phone HMAC → the account that had its trial on it (null once that account is deleted) */
+  trialPhones = new Map<string, string | null>();
   secrets = new Map<string, SubscriptionSecret>();
   connectionSecrets = new Map<string, ConnectionSecret>();
   graphSubscriptions: GraphSubscriptionRow[] = [];
@@ -193,6 +200,7 @@ export class MemoryDb implements Db {
   async deleteUser(id: string): Promise<void> {
     this.users.delete(id);
     this.linkTokens = this.linkTokens.filter((t) => t.user_id !== id);
+    for (const [k, v] of this.trialPhones) if (v === id) this.trialPhones.set(k, null); // 0020: on delete set null (the phone stays counted)
     this.waIdentities = this.waIdentities.filter((w) => w.user_id !== id);
     this.connections = this.connections.filter((c) => c.user_id !== id);
     this.subscriptions.delete(id);
@@ -218,57 +226,74 @@ export class MemoryDb implements Db {
     this.referrals = this.referrals.filter((r) => r.referrer_id !== id && r.referred_user_id !== id);
   }
 
-  async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
+  /** Mirrors public.otp_issue() (0020). */
+  async issueOtp(input: OtpIssueInput): Promise<OtpIssueResult> {
+    const t = (input.now ?? this.now()).getTime();
+    const hourAgo = t - 3_600_000;
+    const mine = this.otps.filter((o) => o.mailbox === input.mailbox && o.requester === input.requester);
+    const last = mine.reduce((m, o) => Math.max(m, Date.parse(o.created_at)), -Infinity);
+    if (last > t - input.cooldownMs) return { status: "cooldown", retryAfterSeconds: Math.max(1, Math.ceil((last + input.cooldownMs - t) / 1000)) };
+    if (mine.filter((o) => Date.parse(o.created_at) > hourAgo).length >= input.maxPerRequester) return { status: "too_many", retryAfterSeconds: 3600 };
+    if (this.otps.filter((o) => o.mailbox === input.mailbox && Date.parse(o.created_at) > hourAgo).length >= input.maxPerMailbox) return { status: "too_many", retryAfterSeconds: 3600 };
+    if (input.maxGlobal !== null && this.otps.filter((o) => Date.parse(o.created_at) > hourAgo).length >= input.maxGlobal) return { status: "busy", retryAfterSeconds: 600 };
+    for (const o of this.otps) if (o.email === input.email && o.requester === input.requester && !o.used_at) o.used_at = iso(new Date(t));
     const row: OtpRow = {
       id: randomUUID(),
-      email,
-      code_hash: codeHash,
-      expires_at: iso(expiresAt),
+      email: input.email,
+      mailbox: input.mailbox,
+      requester: input.requester,
+      challenge_hash: input.challengeHash,
+      code_hash: input.codeHash,
+      expires_at: iso(input.expiresAt),
       attempts: 0,
       used_at: null,
-      created_at: iso(),
+      created_at: iso(new Date(t)),
     };
     this.otps.push(row);
-    return row;
+    return { status: "ok", id: row.id };
   }
 
-  async latestOtp(email: string): Promise<OtpRow | null> {
-    const rows = this.otps.filter((o) => o.email === email && !o.used_at);
-    return rows.length ? rows[rows.length - 1]! : null;
-  }
-
-  async countOtpsSince(email: string, since: Date): Promise<number> {
-    return this.otps.filter((o) => o.email === email && o.created_at >= iso(since)).length;
-  }
-
-  async incrementOtpAttempts(id: string): Promise<number> {
-    const row = this.otps.find((o) => o.id === id);
-    if (!row) throw new Error("otp not found");
+  /** Mirrors public.otp_check() (0020). */
+  async checkOtp(input: { email: string; challengeHash: string | null; codeHash: string; maxAttempts: number; now?: Date }): Promise<OtpCheckResult> {
+    const t = (input.now ?? this.now()).getTime();
+    const rows = this.otps.filter((o) => o.email === input.email && !o.used_at && o.challenge_hash === input.challengeHash);
+    const row = rows.length ? rows[rows.length - 1]! : null;
+    if (!row) return { status: "no_code", attemptsLeft: 0 };
+    const at = iso(new Date(t));
+    if (Date.parse(row.expires_at) <= t) {
+      row.used_at = at;
+      return { status: "expired", attemptsLeft: 0 };
+    }
+    if (row.attempts >= input.maxAttempts) {
+      row.used_at = at;
+      return { status: "too_many_attempts", attemptsLeft: 0 };
+    }
+    const a = Buffer.from(row.code_hash);
+    const b = Buffer.from(input.codeHash);
+    if (a.length === b.length && timingSafeEqual(a, b)) {
+      row.used_at = at;
+      return { status: "ok", attemptsLeft: input.maxAttempts - row.attempts };
+    }
     row.attempts += 1;
-    return row.attempts;
+    if (row.attempts >= input.maxAttempts) {
+      row.used_at = at;
+      return { status: "too_many_attempts", attemptsLeft: 0 };
+    }
+    return { status: "invalid", attemptsLeft: input.maxAttempts - row.attempts };
   }
 
-  async markOtpUsed(id: string): Promise<void> {
-    const row = this.otps.find((o) => o.id === id);
-    if (row) row.used_at = iso();
-  }
-
-  async createLinkToken(userId: string, token: string, expiresAt: Date): Promise<LinkTokenRow> {
-    if (this.linkTokens.some((t) => t.token === token)) throw new Error("duplicate token");
+  async createLinkToken(userId: string, token: { id: string; tokenHash: string }, expiresAt: Date): Promise<LinkTokenRow> {
+    if (this.linkTokens.some((t) => t.token_hash === token.tokenHash || t.id === token.id)) throw new Error("duplicate token");
     const row: LinkTokenRow = {
-      id: randomUUID(),
+      id: token.id,
       user_id: userId,
-      token,
+      token_hash: token.tokenHash,
       expires_at: iso(expiresAt),
       used_at: null,
-      created_at: iso(),
+      created_at: iso(this.now()),
     };
     this.linkTokens.push(row);
     return row;
-  }
-
-  async findLinkToken(token: string): Promise<LinkTokenRow | null> {
-    return this.linkTokens.find((t) => t.token === token) ?? null;
   }
 
   async latestLinkToken(userId: string): Promise<LinkTokenRow | null> {
@@ -276,9 +301,47 @@ export class MemoryDb implements Db {
     return rows.length ? rows[rows.length - 1]! : null;
   }
 
-  async markLinkTokenUsed(id: string): Promise<void> {
-    const row = this.linkTokens.find((t) => t.id === id);
-    if (row) row.used_at = iso();
+  /** Mirrors public.link_token_consume() (0020). */
+  async consumeLinkToken(input: { tokenHash: string; phoneE164: string; waName: string | null; phoneHash: string | null }): Promise<LinkConsumeResult> {
+    const token = this.linkTokens.find((t) => t.token_hash === input.tokenHash);
+    if (!token) return { result: "invalid" };
+    if (token.used_at || Date.parse(token.expires_at) <= this.now().getTime()) return { result: "expired" };
+    const user = await this.getUser(token.user_id);
+    if (!user) return { result: "no_user" };
+    const other = this.waIdentities.find((w) => w.user_id === user.id && w.status !== "unlinked" && w.phone_e164 !== input.phoneE164);
+    if (other) return { result: "second_phone", userId: user.id, otherPhone: other.phone_e164 };
+    const phone = this.waIdentities.find((w) => w.phone_e164 === input.phoneE164);
+    if (phone && phone.status !== "unlinked" && (phone.user_id !== user.id || phone.status === "blocked")) return { result: "phone_taken" };
+    if (phone && phone.status === "active") phone.wa_name = input.waName;
+    else await this.createWaIdentity(user.id, input.phoneE164, input.waName);
+    token.used_at = iso(this.now());
+    let trialReused = false;
+    if (input.phoneHash && this.planOf(user.id) === "trial") {
+      const seen = this.trialPhones.get(input.phoneHash);
+      if (seen === undefined) this.trialPhones.set(input.phoneHash, user.id);
+      else if (seen !== user.id) {
+        trialReused = true;
+        const period = user.created_at.slice(0, 10);
+        const row = this.usage.find((u) => u.user_id === user.id && u.period_start === period);
+        if (row) row.free_remaining = 0;
+        else this.usage.push({ user_id: user.id, period_start: period, counted_messages: 0, free_remaining: 0, plan_limit: 10 });
+      }
+    }
+    return { result: "linked", userId: user.id, trialReused };
+  }
+
+  /** Mirrors public.login_token_consume() (0020). */
+  async consumeLoginToken(userId: string, nonceHash: string): Promise<boolean> {
+    const user = await this.getUser(userId);
+    const stored = (user?.profile.login_token as { nonce_hash?: unknown } | null | undefined)?.nonce_hash;
+    if (!user || typeof stored !== "string") return false;
+    const a = Buffer.from(stored);
+    const b = Buffer.from(nonceHash);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+    const { login_token: _gone, ...rest } = user.profile;
+    void _gone;
+    user.profile = rest;
+    return true;
   }
 
   async listWaIdentities(userId: string): Promise<WaIdentityRow[]> {
@@ -311,15 +374,31 @@ export class MemoryDb implements Db {
     return row;
   }
 
-  async recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult> {
+  /** Mirrors public.wa_link_attempt() (0020). */
+  async recordLinkAttempt(phoneE164: string, input: LinkAttemptInput): Promise<LinkAttemptResult> {
     const t = this.now().getTime();
-    const cur = this.linkAttempts.get(phoneE164) ?? { attempts: 0, last: t, blockedUntil: null };
-    if (cur.blockedUntil && cur.blockedUntil > t) return { attempts: cur.attempts, blocked: true };
-    cur.attempts += 1;
-    cur.last = t;
-    if (cur.attempts >= maxAttempts) cur.blockedUntil = t + blockMs;
+    const cur = this.linkAttempts.get(phoneE164) ?? { attempts: 0, last: t, blockedUntil: null, pointerAt: null, lastMessageId: null };
     this.linkAttempts.set(phoneE164, cur);
-    return { attempts: cur.attempts, blocked: cur.blockedUntil !== null && cur.blockedUntil > t };
+    if (input.waMessageId !== null && cur.lastMessageId === input.waMessageId) {
+      return { attempts: cur.attempts, blocked: cur.blockedUntil !== null && cur.blockedUntil > t, reply: false };
+    }
+    if (cur.blockedUntil !== null && cur.blockedUntil > t) return { attempts: cur.attempts, blocked: true, reply: false };
+    if (cur.blockedUntil !== null) {
+      cur.attempts = 0; // a block that ran out starts over
+      cur.blockedUntil = null;
+    }
+    let reply = false;
+    if (input.strike) {
+      cur.attempts += 1;
+      if (cur.attempts >= input.maxAttempts) cur.blockedUntil = t + input.blockMs;
+      else reply = true;
+    } else if (cur.pointerAt === null || cur.pointerAt <= t - input.pointerEveryMs) {
+      reply = true;
+      cur.pointerAt = t;
+    }
+    cur.last = t;
+    if (input.waMessageId !== null) cur.lastMessageId = input.waMessageId;
+    return { attempts: cur.attempts, blocked: cur.blockedUntil !== null, reply };
   }
 
   async isPhoneBlocked(phoneE164: string): Promise<boolean> {
@@ -490,6 +569,14 @@ export class MemoryDb implements Db {
   // ---- google_scope_grants / ops_flags (migration 0008): survive revoke and user deletion (deleteUser sets user_id null), like the SQL table ----
   googleScopeGrants: import("./types").GoogleScopeGrantRow[] = [];
   opsFlags = new Map<string, import("./types").OpsFlagRow>();
+
+  async rekeyGoogleScopeGrants(from: string, to: string): Promise<void> {
+    if (from === to) return;
+    for (const g of this.googleScopeGrants.filter((x) => x.account_hash === from)) {
+      if (this.googleScopeGrants.some((x) => x.account_hash === to && x.scope === g.scope)) this.googleScopeGrants.splice(this.googleScopeGrants.indexOf(g), 1);
+      else g.account_hash = to;
+    }
+  }
 
   async recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean> {
     if (this.googleScopeGrants.some((g) => g.account_hash === row.account_hash && g.scope === row.scope)) return false;

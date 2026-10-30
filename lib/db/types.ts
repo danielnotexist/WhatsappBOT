@@ -52,6 +52,12 @@ export interface SignupSource {
 export interface OtpRow {
   id: string;
   email: string;
+  /** the canonical mailbox the hourly caps count (lib/auth/otp.ts mailboxKey); null on rows before 0020 */
+  mailbox: string | null;
+  /** HMAC of the requester's IP (IPv6 /64) — the cooldown and the first cap are per requester */
+  requester: string | null;
+  /** hash of the browser's challenge cookie (wb_otp); null = the admin code */
+  challenge_hash: string | null;
   code_hash: string;
   expires_at: string;
   attempts: number;
@@ -59,14 +65,44 @@ export interface OtpRow {
   created_at: string;
 }
 
+/** SQL: public.otp_issue() (0020) — cooldown, caps, supersede and insert in one locked step. */
+export interface OtpIssueInput {
+  email: string;
+  mailbox: string;
+  requester: string;
+  challengeHash: string | null;
+  codeHash: string;
+  expiresAt: Date;
+  cooldownMs: number;
+  maxPerRequester: number;
+  maxPerMailbox: number;
+  /** all codes of the last hour, every address (the mail quota); null = no ceiling */
+  maxGlobal: number | null;
+  /** MemoryDb only (the test clock); SQL uses the database time */
+  now?: Date;
+}
+export type OtpIssueResult = { status: "ok"; id: string } | { status: "cooldown" | "too_many" | "busy"; retryAfterSeconds: number };
+/** SQL: public.otp_check() (0020) — the code checked against the locked row; a wrong one counted, the 5th burns it. */
+export interface OtpCheckResult {
+  status: "ok" | "no_code" | "expired" | "too_many_attempts" | "invalid";
+  attemptsLeft: number;
+}
+
 export interface LinkTokenRow {
   id: string;
   user_id: string;
-  token: string;
+  /** HMAC of the XXXX-XXXX code (lib/auth/link-token.ts) — the code itself is never stored */
+  token_hash: string;
   expires_at: string;
   used_at: string | null;
   created_at: string;
 }
+
+/** SQL: public.link_token_consume() (0020). */
+export type LinkConsumeResult =
+  | { result: "linked"; userId: string; trialReused: boolean }
+  | { result: "second_phone"; userId: string; otherPhone: string }
+  | { result: "invalid" | "expired" | "no_user" | "phone_taken" };
 
 export interface WaIdentityRow {
   id: string;
@@ -416,6 +452,20 @@ export interface AdminReferralRow extends ReferralRow {
 export interface LinkAttemptResult {
   attempts: number;
   blocked: boolean;
+  /** answer this message (a bad token before the block; a plain message at most once per pointer window) */
+  reply: boolean;
+}
+
+/** SQL: public.wa_link_attempt() (0020). */
+export interface LinkAttemptInput {
+  /** a bad token (counts toward the block); false = a message without a token (never a strike) */
+  strike: boolean;
+  /** the same delivery twice counts once */
+  waMessageId: string | null;
+  maxAttempts: number;
+  blockMs: number;
+  /** a plain message gets the pointer to the site at most once per this window */
+  pointerEveryMs: number;
 }
 
 export interface AuditEntry {
@@ -745,19 +795,19 @@ export interface Db {
   /** Hard delete — cascades to every dependent table (PLAN §12.7). */
   deleteUser(id: string): Promise<void>;
 
-  // auth_otps
-  createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow>;
-  /** Latest unused OTP for the email (expired or not — the caller decides). */
-  latestOtp(email: string): Promise<OtpRow | null>;
-  countOtpsSince(email: string, since: Date): Promise<number>;
-  incrementOtpAttempts(id: string): Promise<number>;
-  markOtpUsed(id: string): Promise<void>;
+  // auth_otps (0020: atomic — no read-then-write anywhere)
+  issueOtp(input: OtpIssueInput): Promise<OtpIssueResult>;
+  /** The latest unused code of (email, challenge); `challengeHash` null = the admin code. */
+  checkOtp(input: { email: string; challengeHash: string | null; codeHash: string; maxAttempts: number; now?: Date }): Promise<OtpCheckResult>;
 
   // link_tokens
-  createLinkToken(userId: string, token: string, expiresAt: Date): Promise<LinkTokenRow>;
-  findLinkToken(token: string): Promise<LinkTokenRow | null>;
+  /** `id` is chosen by the caller: the shown code is derived from it (lib/auth/link-token.ts). */
+  createLinkToken(userId: string, token: { id: string; tokenHash: string }, expiresAt: Date): Promise<LinkTokenRow>;
   latestLinkToken(userId: string): Promise<LinkTokenRow | null>;
-  markLinkTokenUsed(id: string): Promise<void>;
+  /** The code → the phone linked, atomically (single use, one phone per account, an active phone never taken over). */
+  consumeLinkToken(input: { tokenHash: string; phoneE164: string; waName: string | null; phoneHash: string | null }): Promise<LinkConsumeResult>;
+  /** The WhatsApp sign-in link (lib/auth/login-token.ts): true for the one call that removed the matching nonce hash. */
+  consumeLoginToken(userId: string, nonceHash: string): Promise<boolean>;
 
   /** user whose profile.oauth_pending.<provider>.state equals `state` (OAuth callback lookup) */
   findUserByOauthState(provider: "microsoft" | "google", state: string): Promise<UserRow | null>;
@@ -771,7 +821,7 @@ export interface Db {
   createWaIdentity(userId: string, phoneE164: string, waName: string | null): Promise<WaIdentityRow>;
 
   // wa_link_attempts (unlinked numbers trying tokens; blocked after 3 — PLAN §2.3)
-  recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult>;
+  recordLinkAttempt(phoneE164: string, input: LinkAttemptInput): Promise<LinkAttemptResult>;
   isPhoneBlocked(phoneE164: string): Promise<boolean>;
 
   // messages
@@ -811,6 +861,8 @@ export interface Db {
   // google_scope_grants / ops_flags (migration 0008) — Google's unverified-app user cap (lib/google/user-cap.ts)
   /** idempotent; true when the (account, scope) pair was not recorded before */
   recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean>;
+  /** Moves an account's ledger rows from one hash to another (scopes already under `to` stay, the duplicates go). */
+  rekeyGoogleScopeGrants(from: string, to: string): Promise<void>;
   /** distinct accounts that granted any of `scopes` (ever) */
   countGoogleScopeAccounts(scopes: string[]): Promise<number>;
   hasGoogleScopeGrant(accountHash: string, scopes: string[]): Promise<boolean>;

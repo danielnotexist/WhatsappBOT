@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { derivedKey, hmac } from "@/lib/auth/keys";
 import { BRAND } from "@/lib/brand";
 import { gcopy } from "@/lib/copy/bot-google";
 import type { ConnectionProvider, ConnectionRow, Db } from "@/lib/db/types";
@@ -63,9 +64,23 @@ export function countedScopes(cfg: Pick<GoogleCapConfig, "sensitiveVerified">): 
   return cfg.sensitiveVerified ? [...RESTRICTED_SCOPES] : [...CAP_LEDGER_SCOPES];
 }
 
-/** sha256 hex of the lowercased account email — the ledger never stores the address (SQL backfill: same formula). */
-export function googleAccountHash(email: string): string {
+/**
+ * HMAC-SHA256 hex (the "ledger" sub-key of TOKEN_ENC_KEY) of the lowercased account email — the ledger never stores
+ * the address, and without the key nobody can test an address against it (security round B; it was a bare sha256).
+ */
+export function googleAccountHash(email: string, key: Buffer = derivedKey("ledger")): string {
+  return hmac(key, `google-account:${email.trim().toLowerCase()}`).toString("hex");
+}
+
+/** The pre-round-B formula (and the 0008 SQL backfill): rows written with it are still recognised, and re-keyed on the next consent. */
+export function legacyGoogleAccountHash(email: string): string {
   return createHash("sha256").update(email.trim().toLowerCase(), "utf8").digest("hex");
+}
+
+/** Did Google already count this account (under the current or the legacy hash)? */
+async function accountCounted(db: Db, email: string): Promise<boolean> {
+  const scopes = [...CAP_LEDGER_SCOPES];
+  return (await db.hasGoogleScopeGrant(googleAccountHash(email), scopes)) || (await db.hasGoogleScopeGrant(legacyGoogleAccountHash(email), scopes));
 }
 
 export async function countCapUsers(db: Db): Promise<number> {
@@ -90,7 +105,7 @@ export function restrictedReadEnabled(cfg: Pick<GoogleCapConfig, "gmailReadEnabl
  */
 export async function restrictedReadAccess(db: Db, accountEmail: string | null, read: RestrictedRead, cfg: GoogleCapConfig = googleCapConfig()): Promise<RestrictedReadAccess> {
   if (!restrictedReadEnabled(cfg, read)) return { allowed: false, reason: "disabled", count: null, cap: cfg.cap };
-  if (accountEmail && (await db.hasGoogleScopeGrant(googleAccountHash(accountEmail), [...CAP_LEDGER_SCOPES]))) return { allowed: true, reason: "already_counted", count: null, cap: cfg.cap };
+  if (accountEmail && (await accountCounted(db, accountEmail))) return { allowed: true, reason: "already_counted", count: null, cap: cfg.cap };
   const count = await countCapUsers(db);
   return count < cfg.cap ? { allowed: true, reason: "under_cap", count, cap: cfg.cap } : { allowed: false, reason: "cap_reached", count, cap: cfg.cap };
 }
@@ -151,7 +166,7 @@ export async function keepGrantedRestrictedRead(
   try {
     const c = cfg ?? googleCapConfig();
     if (!restrictedReadEnabled(c, read)) return { keep: false, reason: "disabled" };
-    if (await db.hasGoogleScopeGrant(googleAccountHash(input.accountEmail), [...CAP_LEDGER_SCOPES])) return { keep: true, reason: "already_counted" };
+    if (await accountCounted(db, input.accountEmail)) return { keep: true, reason: "already_counted" };
     if (!hasScope(input.requested, scope)) return { keep: false, reason: "not_requested" };
     if (input.startReason === "already_counted" && (await countCapUsers(db)) >= c.cap) return { keep: false, reason: "cap_reached" };
     return { keep: true, reason: "requested" };
@@ -187,6 +202,8 @@ export async function recordGoogleGrants(
   const scopes = countedScopes(cfg).filter((s) => hasScope(input.granted, s));
   if (!scopes.length) return { recorded: [], count: await countCapUsers(db), alerts: [] };
   const hash = googleAccountHash(input.accountEmail);
+  // an account recorded under the legacy sha256 moves to the keyed hash (one account, counted once)
+  await db.rekeyGoogleScopeGrants(legacyGoogleAccountHash(input.accountEmail), hash);
   const recorded: string[] = [];
   for (const scope of scopes) if (await db.recordGoogleScopeGrant({ account_hash: hash, scope, user_id: input.userId })) recorded.push(scope);
   const count = await countCapUsers(db);

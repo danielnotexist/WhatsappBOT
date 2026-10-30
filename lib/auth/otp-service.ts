@@ -6,6 +6,7 @@ import { getMailer } from "@/lib/mail";
 import { clientIp, getRateLimiter } from "@/lib/rate-limit";
 import { referralCodeFromCookieHeader } from "@/lib/referrals/code";
 import { sendOtp, verifyOtp, type OtpDeps, type OtpSendResult, type OtpVerifyResult } from "./otp";
+import { otpChallengeFrom } from "./otp-challenge";
 
 /**
  * Wires the OTP logic to the process-wide db / mailer / limiter. Used by the route handlers and the server actions.
@@ -24,10 +25,11 @@ function deps(headers?: Headers): OtpDeps {
   };
 }
 
+/** The ok result carries `challenge` for the wb_otp cookie (lib/auth/otp-challenge.ts): set it, never send it in a body. */
 export async function sendOtpForRequest(email: unknown, headers: Headers): Promise<OtpSendResult> {
   return sendOtp(deps(), email, clientIp(headers));
 }
 
 export async function verifyOtpForRequest(email: unknown, code: unknown, headers: Headers): Promise<OtpVerifyResult> {
-  return verifyOtp(deps(headers), email, code, clientIp(headers));
+  return verifyOtp({ ...deps(headers), challenge: otpChallengeFrom(headers) }, email, code, clientIp(headers));
 }

@@ -131,15 +131,25 @@ export async function sendAdminCode(user: UserRow, db: Db = getDb(), now: Date =
     }
     throw e;
   }
-  const key = codeKey(user.email);
-  const latest = await db.latestOtp(key);
-  if (latest && t - Date.parse(latest.created_at) < ADMIN_CODE_POLICY.resendCooldownMs) return { ok: false, message: ADMIN_MESSAGES.cooldown };
   if (!limiter.hit(`admin:send:user:${user.id}`, ADMIN_CODE_POLICY.maxPerHour, 3_600_000, t)) return { ok: false, message: ADMIN_MESSAGES.too_many };
-  if ((await db.countOtpsSince(key, new Date(t - 3_600_000))) >= ADMIN_CODE_POLICY.maxPerHour) return { ok: false, message: ADMIN_MESSAGES.too_many };
-
+  const key = codeKey(user.email);
   const code = newCode();
-  if (latest) await db.markOtpUsed(latest.id);
-  await db.createOtp(key, codeHash(user.email, code), new Date(t + ADMIN_CODE_POLICY.ttlMs));
+  // 0020 otp_issue: the cooldown, the hourly cap, the old code superseded and the insert — one locked step
+  const issued = await db.issueOtp({
+    email: key,
+    mailbox: key,
+    requester: "admin",
+    challengeHash: null,
+    codeHash: codeHash(user.email, code),
+    expiresAt: new Date(t + ADMIN_CODE_POLICY.ttlMs),
+    cooldownMs: ADMIN_CODE_POLICY.resendCooldownMs,
+    maxPerRequester: ADMIN_CODE_POLICY.maxPerHour,
+    maxPerMailbox: ADMIN_CODE_POLICY.maxPerHour,
+    maxGlobal: null,
+    now,
+  });
+  if (issued.status === "cooldown") return { ok: false, message: ADMIN_MESSAGES.cooldown };
+  if (issued.status !== "ok") return { ok: false, message: ADMIN_MESSAGES.too_many };
   try {
     await mailer.sendOtp({ to: user.email, code, ttlMinutes: ADMIN_CODE_POLICY.ttlMs / 60_000, purpose: "admin" });
   } catch (e) {
@@ -176,24 +186,15 @@ export async function verifyAdminCode(user: UserRow, rawCode: unknown, db: Db = 
   // never the demo's sign-in code, whatever the store says
   if (code.length !== 6 || sameText(code, DEMO_OTP_CODE)) return failAttempt(db, user, ADMIN_MESSAGES.invalid);
 
-  const latest = await db.latestOtp(codeKey(user.email));
-  if (latest) {
-    if (Date.parse(latest.expires_at) <= t) {
-      await db.markOtpUsed(latest.id);
-      return { ok: false, message: ADMIN_MESSAGES.expired };
-    }
-    if (latest.attempts >= ADMIN_CODE_POLICY.maxAttempts) return { ok: false, message: ADMIN_MESSAGES.too_many_attempts };
-    if (!sameText(codeHash(user.email, code), latest.code_hash)) {
-      const attempts = await db.incrementOtpAttempts(latest.id);
-      if (attempts >= ADMIN_CODE_POLICY.maxAttempts) {
-        await db.markOtpUsed(latest.id);
-        store.delete({ name: ADMIN_CODE_COOKIE, path: "/admin" });
-        return failAttempt(db, user, ADMIN_MESSAGES.too_many_attempts);
-      }
-      return failAttempt(db, user, ADMIN_MESSAGES.invalid);
-    }
-    await db.markOtpUsed(latest.id);
-  } else {
+  // 0020 otp_check: the stored code is checked against its locked row — parallel guesses are each counted
+  const checked = await db.checkOtp({ email: codeKey(user.email), challengeHash: null, codeHash: codeHash(user.email, code), maxAttempts: ADMIN_CODE_POLICY.maxAttempts, now });
+  if (checked.status === "expired") return { ok: false, message: ADMIN_MESSAGES.expired };
+  if (checked.status === "too_many_attempts") {
+    store.delete({ name: ADMIN_CODE_COOKIE, path: "/admin" });
+    return failAttempt(db, user, ADMIN_MESSAGES.too_many_attempts);
+  }
+  if (checked.status === "invalid") return failAttempt(db, user, ADMIN_MESSAGES.invalid);
+  if (checked.status === "no_code") {
     // a persistent store that has no live code: it was used, expired or blocked — the cookie alone opens nothing
     if (dataMode() !== "memory") return { ok: false, message: ADMIN_MESSAGES.no_code };
     if (!limiter.hit(`admin:verify:challenge:${challenge.exp}:${user.id}`, ADMIN_CODE_POLICY.maxAttempts, ADMIN_CODE_POLICY.ttlMs, t)) {

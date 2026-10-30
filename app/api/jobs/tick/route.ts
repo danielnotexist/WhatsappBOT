@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { connection } from "next/server";
 import { scheduleOwnerAlertsJob } from "@/lib/admin/alerts";
+import { CRON_SECRET_MIN_LENGTH, cronSecret, hasCronBearer } from "@/lib/cron-secret";
 import { getDb } from "@/lib/db";
 import { isDemo } from "@/lib/demo";
 import { dataMode } from "@/lib/env";
@@ -36,12 +37,11 @@ export async function POST(request: Request) {
  */
 export async function GET(request: Request) {
   await connection();
-  const secret = process.env.CRON_SECRET?.trim() ?? "";
-  if (!secret) {
-    console.error("[jobs] CRON_SECRET חסר: המתזמן לא יכול להפעיל את /api/jobs/tick. להגדיר CRON_SECRET (16 תווים לפחות) ב-Vercel, ואותו ערך ב-Vault של Supabase בשם cron_secret.");
+  if (!cronSecret()) {
+    console.error(`[jobs] CRON_SECRET חסר או קצר מדי: המתזמן לא יכול להפעיל את /api/jobs/tick. להגדיר CRON_SECRET (${CRON_SECRET_MIN_LENGTH} תווים לפחות) ב-Vercel, ואותו ערך ב-Vault של Supabase בשם cron_secret.`);
     return new Response("CRON_SECRET חסר", { status: 503 });
   }
-  if (!safeEqual(request.headers.get("authorization") ?? "", `Bearer ${secret}`)) return new Response("invalid cron secret", { status: 401 });
+  if (!hasCronBearer(request)) return new Response("invalid cron secret", { status: 401 });
   return tick(request);
 }
 

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureOwnerAlerts, stopCapturingOwnerAlerts } from "@/lib/admin/alerts";
 import { MemoryDb } from "@/lib/db/memory";
 import { MockHypGateway } from "@/lib/hyp/client";
+import { createConnectLinkToken, verifyConnectLinkToken } from "@/lib/ms/connect-link";
 import { createPayLinkToken, verifyPayLinkToken } from "./pay-link";
 import { addOneMonth } from "./plans";
 import { activateSubscription, chargeSubscription, resumeAfterCardUpdate, saveCardToken, scheduleCharge } from "./subscription";
@@ -24,6 +25,10 @@ describe("billing", () => {
     expect(verifyPayLinkToken(t, { key: randomBytes(32), now })).toBeNull();
     expect(verifyPayLinkToken(t, { key, now: new Date(now.getTime() + 8 * 86_400_000) })).toBeNull();
     expect(verifyPayLinkToken("x.y", { key })).toBeNull();
+    // strict shape: one dot, base64url only — no ".png" suffix, no junk the base64url decoder would skip
+    for (const bad of [`${t}.png`, `${t}!`, `${t} `, `${t}%2E`, `${t.replace(".", "..")}`, `${t}A`]) expect(verifyPayLinkToken(bad, { key, now })).toBeNull();
+    expect(verifyConnectLinkToken(`${createConnectLinkToken("123e4567-e89b-42d3-a456-426614174000", "google", { key, now })}.x`, { key, now })).toBeNull();
+    expect(verifyConnectLinkToken(createConnectLinkToken("123e4567-e89b-42d3-a456-426614174000", "google", { key, now }), { key, now })).toMatchObject({ provider: "google" });
   });
 
   it("activates after a verified payment, stores the token encrypted and schedules the monthly charge", async () => {

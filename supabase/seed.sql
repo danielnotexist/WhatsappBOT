@@ -21,10 +21,11 @@ values
    now() - interval '40 days');
 
 -- ---------- link_tokens (שניהם כבר נוצלו) ----------
-insert into public.link_tokens (user_id, token, expires_at, used_at, created_at)
+-- (0020: רק HMAC של הקוד נשמר; כאן גיבוב מדומה באורך הנכון)
+insert into public.link_tokens (user_id, token_hash, expires_at, used_at, created_at)
 values
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'DANA-0001', now() - interval '3 days' + interval '15 minutes', now() - interval '3 days' + interval '2 minutes', now() - interval '3 days'),
-  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'YOSI-0002', now() - interval '40 days' + interval '15 minutes', now() - interval '40 days' + interval '5 minutes', now() - interval '40 days');
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', repeat('d', 43), now() - interval '3 days' + interval '15 minutes', now() - interval '3 days' + interval '2 minutes', now() - interval '3 days'),
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', repeat('y', 43), now() - interval '40 days' + interval '15 minutes', now() - interval '40 days' + interval '5 minutes', now() - interval '40 days');
 
 -- ---------- wa_identities ----------
 insert into public.wa_identities (id, user_id, phone_e164, wa_name, linked_at, status)

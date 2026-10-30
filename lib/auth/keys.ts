@@ -7,7 +7,7 @@ import { globalSingleton } from "@/lib/global-singleton";
  * Sub-keys derived from TOKEN_ENC_KEY with HKDF, so one secret in Vercel covers token encryption,
  * session signing and OTP hashing without three env vars. Different `info` → independent keys.
  */
-export type KeyPurpose = "session" | "otp" | "internal" | "demo" | "admin" | "analytics" | "sso";
+export type KeyPurpose = "session" | "otp" | "internal" | "demo" | "admin" | "analytics" | "sso" | "link" | "ledger";
 
 function masterKey(): Buffer {
   const fromEnv = process.env.TOKEN_ENC_KEY;
@@ -47,4 +47,15 @@ export function derivedKey(purpose: KeyPurpose, master: Buffer = masterKey()): B
 
 export function hmac(key: Buffer, data: string): Buffer {
   return createHmac("sha256", key).update(data).digest();
+}
+
+/**
+ * `<base64url payload>.<base64url HMAC-SHA256>` and nothing else: exactly one dot, only base64url characters and a
+ * 43-character signature. Base64url decoding skips foreign characters, so a lax split would also accept
+ * `<token>.png` or a signature with junk around it (security round B). null when the shape is off.
+ */
+export function signedTokenParts(token: string | null | undefined): { payload: string; sig: string } | null {
+  if (!token) return null;
+  const m = /^([A-Za-z0-9_-]{1,2048})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  return m ? { payload: m[1]!, sig: m[2]! } : null;
 }

@@ -124,8 +124,8 @@ insert into public.audit_log (user_id, action, target) values
 insert into public.agents (user_id, name, role) values
   ('22222222-2222-4222-8222-222222222222', 'סוכן B', 'custom');
 
-insert into public.link_tokens (user_id, token, expires_at) values
-  ('11111111-1111-4111-8111-111111111111', 'RLSA-0001', now() + interval '15 minutes');
+insert into public.link_tokens (user_id, token_hash, expires_at) values
+  ('11111111-1111-4111-8111-111111111111', repeat('r', 43), now() + interval '15 minutes');
 
 insert into public.auth_otps (email, code_hash, expires_at) values
   ('rls-a@example.com', 'hash', now() + interval '10 minutes');
@@ -231,7 +231,7 @@ select pg_temp.expect_denied('A: update usage denied',
 select pg_temp.expect_denied('A: insert into jobs denied',
   $$insert into public.jobs (user_id, kind) values ('11111111-1111-4111-8111-111111111111', 'charge')$$);
 select pg_temp.expect_denied('A: insert into link_tokens denied',
-  $$insert into public.link_tokens (user_id, token, expires_at) values ('11111111-1111-4111-8111-111111111111', 'HACK-0001', now())$$);
+  $$insert into public.link_tokens (user_id, token_hash, expires_at) values ('11111111-1111-4111-8111-111111111111', repeat('h', 43), now())$$);
 select pg_temp.expect_denied('A: insert into pending_actions denied',
   $$insert into public.pending_actions (user_id, kind) values ('11111111-1111-4111-8111-111111111111', 'send_mail')$$);
 select pg_temp.expect_denied('A: update pending_actions (self-approve) denied',

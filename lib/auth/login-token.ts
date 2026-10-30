@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Db } from "@/lib/db/types";
-import { derivedKey, hmac } from "./keys";
+import { derivedKey, hmac, signedTokenParts } from "./keys";
 
 /**
  * "Joined through WhatsApp? Sign in here" (round plan §3 row 7): the user writes "כניסה" to עלזה, the bot answers
@@ -31,8 +31,9 @@ export async function issueLoginToken(db: Db, userId: string, opts: { now?: Date
 
 /** Signature + expiry only (no db, nothing consumed) — for rendering the confirm page. */
 export function peekLoginToken(token: string, opts: { now?: Date; key?: Buffer } = {}): { userId: string; exp: number; nonce: string } | "invalid" | "expired" {
-  const [payload, sig, extra] = token.split(".");
-  if (!payload || !sig || extra !== undefined) return "invalid";
+  const parts = signedTokenParts(token);
+  if (!parts) return "invalid";
+  const { payload, sig } = parts;
   const key = opts.key ?? derivedKey("session");
   const expected = hmac(key, `login:${payload}`);
   const given = Buffer.from(sig, "base64url");
@@ -50,9 +51,8 @@ export async function consumeLoginToken(db: Db, token: string, opts: { now?: Dat
   if (peek === "invalid" || peek === "expired") return { ok: false, reason: peek };
   const user = await db.getUser(peek.userId);
   if (!user) return { ok: false, reason: "invalid" };
-  const stored = user.profile[PROFILE_KEY] as { nonce_hash?: string; exp?: number } | null | undefined;
-  if (!stored?.nonce_hash || stored.nonce_hash !== sha256(peek.nonce)) return { ok: false, reason: "used" };
-  await db.mergeUserProfile(user.id, { [PROFILE_KEY]: null });
+  // one atomic compare-and-remove (0020 login_token_consume; constant-time in MemoryDb): two opens of one link → one session
+  if (!(await db.consumeLoginToken(user.id, sha256(peek.nonce)))) return { ok: false, reason: "used" };
   await db.addAudit({ user_id: user.id, action: "auth.login_whatsapp", result: "ok" });
   return { ok: true, userId: user.id };
 }

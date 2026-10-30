@@ -33,12 +33,16 @@ import type {
   JobRow,
   PaymentRow,
   SubscriptionSecret,
+  LinkAttemptInput,
   LinkAttemptResult,
+  LinkConsumeResult,
   LinkTokenRow,
   MessageRow,
   NewMessage,
   NewReminder,
-  OtpRow,
+  OtpCheckResult,
+  OtpIssueInput,
+  OtpIssueResult,
   PendingActionKind,
   PendingActionRow,
   PendingActionStatus,
@@ -184,33 +188,25 @@ export class SupabaseDb implements Db {
   }
 
   async createWaIdentity(userId: string, phoneE164: string, waName: string | null): Promise<WaIdentityRow> {
-    // phone_e164 is unique: an unlinked row for the same number is re-assigned instead of inserted
-    const { data, error } = await this.client
-      .from("wa_identities")
-      .upsert({ user_id: userId, phone_e164: phoneE164, wa_name: waName, status: "active", linked_at: new Date().toISOString() }, { onConflict: "phone_e164" })
-      .select("id,user_id,phone_e164,wa_name,linked_at,status")
-      .single();
+    // 0020 wa_identity_link: an unlinked row of the same number is re-assigned; an active / blocked one is never taken over
+    const { data, error } = await this.client.rpc("wa_identity_link", { p_user_id: userId, p_phone: phoneE164, p_wa_name: waName });
     if (error) this.fail("createWaIdentity", error);
-    return data as unknown as WaIdentityRow;
+    const r = data as unknown as WaIdentityRow & { created_at?: string; updated_at?: string };
+    return { id: r.id, user_id: r.user_id, phone_e164: r.phone_e164, wa_name: r.wa_name, linked_at: r.linked_at, status: r.status };
   }
 
-  async recordLinkAttempt(phoneE164: string, maxAttempts: number, blockMs: number): Promise<LinkAttemptResult> {
-    const now = new Date();
-    const { data: cur, error: readError } = await this.client
-      .from("wa_link_attempts")
-      .select("attempts,blocked_until")
-      .eq("phone_e164", phoneE164)
-      .maybeSingle();
-    if (readError) this.fail("recordLinkAttempt", readError);
-    const row = cur as { attempts: number; blocked_until: string | null } | null;
-    if (row?.blocked_until && Date.parse(row.blocked_until) > now.getTime()) return { attempts: row.attempts, blocked: true };
-    const attempts = (row?.attempts ?? 0) + 1;
-    const blockedUntil = attempts >= maxAttempts ? new Date(now.getTime() + blockMs).toISOString() : null;
-    const { error } = await this.client
-      .from("wa_link_attempts")
-      .upsert({ phone_e164: phoneE164, attempts, last_attempt_at: now.toISOString(), blocked_until: blockedUntil }, { onConflict: "phone_e164" });
+  async recordLinkAttempt(phoneE164: string, input: LinkAttemptInput): Promise<LinkAttemptResult> {
+    const { data, error } = await this.client.rpc("wa_link_attempt", {
+      p_phone: phoneE164,
+      p_strike: input.strike,
+      p_message_id: input.waMessageId,
+      p_max_attempts: input.maxAttempts,
+      p_block_seconds: Math.ceil(input.blockMs / 1000),
+      p_pointer_seconds: Math.ceil(input.pointerEveryMs / 1000),
+    });
     if (error) this.fail("recordLinkAttempt", error);
-    return { attempts, blocked: blockedUntil !== null };
+    const r = data as { attempts: number; blocked: boolean; reply: boolean };
+    return { attempts: Number(r.attempts), blocked: Boolean(r.blocked), reply: Boolean(r.reply) };
   }
 
   async isPhoneBlocked(phoneE164: string): Promise<boolean> {
@@ -325,78 +321,44 @@ export class SupabaseDb implements Db {
     if (error) this.fail("deleteUser", error);
   }
 
-  async createOtp(email: string, codeHash: string, expiresAt: Date): Promise<OtpRow> {
-    const { data, error } = await this.client
-      .from("auth_otps")
-      .insert({ email, code_hash: codeHash, expires_at: expiresAt.toISOString() })
-      .select("*")
-      .single();
-    if (error) this.fail("createOtp", error);
-    return data as unknown as OtpRow;
+  async issueOtp(input: OtpIssueInput): Promise<OtpIssueResult> {
+    const { data, error } = await this.client.rpc("otp_issue", {
+      p_email: input.email,
+      p_mailbox: input.mailbox,
+      p_requester: input.requester,
+      p_challenge_hash: input.challengeHash,
+      p_code_hash: input.codeHash,
+      p_expires_at: input.expiresAt.toISOString(),
+      p_cooldown_seconds: Math.ceil(input.cooldownMs / 1000),
+      p_max_per_requester: input.maxPerRequester,
+      p_max_per_mailbox: input.maxPerMailbox,
+      p_max_global: input.maxGlobal,
+    });
+    if (error) this.fail("issueOtp", error);
+    const r = data as { status: OtpIssueResult["status"]; retry_after?: number; id?: string };
+    return r.status === "ok" ? { status: "ok", id: String(r.id) } : { status: r.status, retryAfterSeconds: Number(r.retry_after ?? 60) };
   }
 
-  async latestOtp(email: string): Promise<OtpRow | null> {
-    const { data, error } = await this.client
-      .from("auth_otps")
-      .select("*")
-      .eq("email", email)
-      .is("used_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) this.fail("latestOtp", error);
-    return (data as unknown as OtpRow | null) ?? null;
+  async checkOtp(input: { email: string; challengeHash: string | null; codeHash: string; maxAttempts: number }): Promise<OtpCheckResult> {
+    const { data, error } = await this.client.rpc("otp_check", {
+      p_email: input.email,
+      p_challenge_hash: input.challengeHash,
+      p_code_hash: input.codeHash,
+      p_max_attempts: input.maxAttempts,
+    });
+    if (error) this.fail("checkOtp", error);
+    const r = data as { status: OtpCheckResult["status"]; attempts_left?: number };
+    return { status: r.status, attemptsLeft: Number(r.attempts_left ?? 0) };
   }
 
-  async countOtpsSince(email: string, since: Date): Promise<number> {
-    const { count, error } = await this.client
-      .from("auth_otps")
-      .select("id", { count: "exact", head: true })
-      .eq("email", email)
-      .gte("created_at", since.toISOString());
-    if (error) this.fail("countOtpsSince", error);
-    return count ?? 0;
-  }
-
-  async incrementOtpAttempts(id: string): Promise<number> {
-    const { data: row, error: readError } = await this.client
-      .from("auth_otps")
-      .select("attempts")
-      .eq("id", id)
-      .single();
-    if (readError) this.fail("incrementOtpAttempts", readError);
-    const attempts = ((row as { attempts: number }).attempts ?? 0) + 1;
-    const { error } = await this.client.from("auth_otps").update({ attempts }).eq("id", id);
-    if (error) this.fail("incrementOtpAttempts", error);
-    return attempts;
-  }
-
-  async markOtpUsed(id: string): Promise<void> {
-    const { error } = await this.client
-      .from("auth_otps")
-      .update({ used_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) this.fail("markOtpUsed", error);
-  }
-
-  async createLinkToken(userId: string, token: string, expiresAt: Date): Promise<LinkTokenRow> {
+  async createLinkToken(userId: string, token: { id: string; tokenHash: string }, expiresAt: Date): Promise<LinkTokenRow> {
     const { data, error } = await this.client
       .from("link_tokens")
-      .insert({ user_id: userId, token, expires_at: expiresAt.toISOString() })
+      .insert({ id: token.id, user_id: userId, token_hash: token.tokenHash, expires_at: expiresAt.toISOString() })
       .select("*")
       .single();
     if (error) this.fail("createLinkToken", error);
     return data as unknown as LinkTokenRow;
-  }
-
-  async findLinkToken(token: string): Promise<LinkTokenRow | null> {
-    const { data, error } = await this.client
-      .from("link_tokens")
-      .select("*")
-      .eq("token", token)
-      .maybeSingle();
-    if (error) this.fail("findLinkToken", error);
-    return (data as unknown as LinkTokenRow | null) ?? null;
   }
 
   async latestLinkToken(userId: string): Promise<LinkTokenRow | null> {
@@ -411,12 +373,25 @@ export class SupabaseDb implements Db {
     return (data as unknown as LinkTokenRow | null) ?? null;
   }
 
-  async markLinkTokenUsed(id: string): Promise<void> {
-    const { error } = await this.client
-      .from("link_tokens")
-      .update({ used_at: new Date().toISOString() })
-      .eq("id", id);
-    if (error) this.fail("markLinkTokenUsed", error);
+  async consumeLinkToken(input: { tokenHash: string; phoneE164: string; waName: string | null; phoneHash: string | null }): Promise<LinkConsumeResult> {
+    const { data, error } = await this.client.rpc("link_token_consume", {
+      p_token_hash: input.tokenHash,
+      p_phone: input.phoneE164,
+      p_wa_name: input.waName,
+      p_phone_hash: input.phoneHash,
+    });
+    if (error) this.fail("consumeLinkToken", error);
+    const r = data as { result: LinkConsumeResult["result"]; user_id?: string; other_phone?: string; trial_reused?: boolean };
+    if (r.result === "linked") return { result: "linked", userId: String(r.user_id), trialReused: Boolean(r.trial_reused) };
+    if (r.result === "second_phone") return { result: "second_phone", userId: String(r.user_id), otherPhone: String(r.other_phone) };
+    return { result: r.result };
+  }
+
+  async consumeLoginToken(userId: string, nonceHash: string): Promise<boolean> {
+    if (!UUID_RE.test(userId)) return false;
+    const { data, error } = await this.client.rpc("login_token_consume", { p_user_id: userId, p_nonce_hash: nonceHash });
+    if (error) this.fail("consumeLoginToken", error);
+    return data === true;
   }
 
   async listWaIdentities(userId: string): Promise<WaIdentityRow[]> {
@@ -494,6 +469,20 @@ export class SupabaseDb implements Db {
   }
 
   // ---- google_scope_grants / ops_flags (migration 0008) ----
+
+  async rekeyGoogleScopeGrants(from: string, to: string): Promise<void> {
+    if (from === to) return;
+    const { data, error } = await this.client.from("google_scope_grants").select("scope").eq("account_hash", from);
+    if (error) this.fail("rekeyGoogleScopeGrants", error);
+    for (const { scope } of (data as { scope: string }[] | null) ?? []) {
+      const { error: moveError } = await this.client.from("google_scope_grants").update({ account_hash: to }).eq("account_hash", from).eq("scope", scope);
+      if (moveError?.code === "23505") {
+        // already recorded under the new hash: the legacy duplicate goes
+        const { error: delError } = await this.client.from("google_scope_grants").delete().eq("account_hash", from).eq("scope", scope);
+        if (delError) this.fail("rekeyGoogleScopeGrants", delError);
+      } else if (moveError) this.fail("rekeyGoogleScopeGrants", moveError);
+    }
+  }
 
   async recordGoogleScopeGrant(row: { account_hash: string; scope: string; user_id: string | null }): Promise<boolean> {
     const { error } = await this.client.from("google_scope_grants").insert(row);

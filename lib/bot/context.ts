@@ -36,6 +36,8 @@ export interface BotContext {
 export const LINK = {
   maxTokenAttempts: 3,
   blockMs: 24 * 3_600_000,
+  /** a message without a token gets the pointer to the site at most once per hour */
+  pointerEveryMs: 3_600_000,
 } as const;
 
 /** One-time 30-minute OAuth start link for the chat: /api/auth/{microsoft|google}/start?t=<signed token>. */

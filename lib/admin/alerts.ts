@@ -126,7 +126,8 @@ const HOUR = 3_600_000;
 
 /** At most `max` alerts of a type within `windowMs` (the dedupe key already makes every event once). null = no limit. */
 export const RATE_LIMITS: Record<OwnerAlertType, { max: number; windowMs: number } | null> = {
-  signup: null,
+  // every signup is recorded; the mail stops at 60 an hour (a scripted signup flood must not flood the owner's inbox)
+  signup: { max: 60, windowMs: HOUR },
   ticket: { max: 30, windowMs: HOUR },
   system_request: { max: 30, windowMs: HOUR },
   payment_failed: { max: 20, windowMs: HOUR },
