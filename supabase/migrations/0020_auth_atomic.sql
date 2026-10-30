@@ -66,8 +66,10 @@ begin
 
   select max(o.created_at) into v_last
     from public.auth_otps o
-   where o.mailbox = p_mailbox and o.requester = p_requester;
-  -- the cooldown counts the latest row of ANY status: a code burned by wrong guesses does not open a new send at once
+   where o.mailbox = p_mailbox and o.requester = p_requester
+     and (o.used_at is null or o.attempts > 0);
+  -- the cooldown counts the latest open code or one burned by wrong guesses (a burned code does not open a new send at
+  -- once); a code spent by a clean sign-in does not hold the next one back
   if v_last is not null and v_last > now() - make_interval(secs => p_cooldown_seconds) then
     return jsonb_build_object('status', 'cooldown',
       'retry_after', greatest(1, ceil(extract(epoch from (v_last + make_interval(secs => p_cooldown_seconds) - now()))))::integer);

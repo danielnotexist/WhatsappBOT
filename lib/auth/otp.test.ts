@@ -219,6 +219,13 @@ describe("abuse (security round B)", () => {
     expect(await send("dana@example.com", "1.1.1.1")).toMatchObject({ ok: false, code: "cooldown" });
   });
 
+  it("a code spent by a clean sign-in does not hold the next send back", async () => {
+    const { deps, mailer, send } = setup();
+    await send("dana@example.com", "1.1.1.1");
+    expect((await verifyOtp(deps, "dana@example.com", mailer.sent[0]!.code, "1.1.1.1")).ok).toBe(true);
+    expect((await send("dana@example.com", "1.1.1.1")).ok).toBe(true);
+  });
+
   it("a stranger's sends neither kill the owner's code nor use up the owner's hour", async () => {
     const { deps, mailer, advance, send } = setup();
     await send("dana@example.com", "1.1.1.1");

@@ -91,3 +91,13 @@ describe("MemoryDb", () => {
     expect(await db.getJob("nope")).toBeNull();
   });
 });
+
+describe("MemoryDb.restoreUser", () => {
+  it("parallel restores of the same session user (layout and page) both get the one user", async () => {
+    const db = new MemoryDb();
+    const id = "fe2967f0-3cd1-4519-b321-b160b95e9b50";
+    const [a, b] = await Promise.all([db.restoreUser(id, "dana@example.com"), db.restoreUser(id, "dana@example.com")]);
+    expect(a?.id).toBe(id);
+    expect(b?.id).toBe(id);
+  });
+});

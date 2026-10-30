@@ -152,6 +152,9 @@ export class MemoryDb implements Db {
     const existing = this.users.get(id);
     if (existing) return existing.deleted_at ? null : existing;
     const sameEmail = await this.findUserByEmail(email);
+    // a parallel render of the same request (layout and page) may have restored it while this one awaited
+    const restored = this.users.get(id);
+    if (restored) return restored.deleted_at ? null : restored;
     if (sameEmail) return null;
     const user = this.insertUser(id, email);
     this.audit.push({ user_id: id, action: "demo.restore_user", target: email, result: "ok", created_at: iso() });
@@ -251,7 +254,8 @@ export class MemoryDb implements Db {
     const t = (input.now ?? this.now()).getTime();
     const hourAgo = t - 3_600_000;
     const mine = this.otps.filter((o) => o.mailbox === input.mailbox && o.requester === input.requester);
-    const last = mine.reduce((m, o) => Math.max(m, Date.parse(o.created_at)), -Infinity);
+    // 0020: an open code or one burned by wrong guesses holds the next send back; one spent by a clean sign-in does not
+    const last = mine.filter((o) => !o.used_at || o.attempts > 0).reduce((m, o) => Math.max(m, Date.parse(o.created_at)), -Infinity);
     if (last > t - input.cooldownMs) return { status: "cooldown", retryAfterSeconds: Math.max(1, Math.ceil((last + input.cooldownMs - t) / 1000)) };
     if (mine.filter((o) => Date.parse(o.created_at) > hourAgo).length >= input.maxPerRequester) return { status: "too_many", retryAfterSeconds: 3600 };
     if (this.otps.filter((o) => o.mailbox === input.mailbox && Date.parse(o.created_at) > hourAgo).length >= input.maxPerMailbox) return { status: "too_many", retryAfterSeconds: 3600 };

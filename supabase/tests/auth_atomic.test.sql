@@ -57,6 +57,12 @@ select pg_temp.check('otp_issue: the new code superseded that requester''s earli
   (select count(*) from public.auth_otps where email = 'otp-a@example.com' and requester = 'ip2' and used_at is null) = 1
   and (select challenge_hash from public.auth_otps where email = 'otp-a@example.com' and requester = 'ip2' and used_at is null) = 'chC');
 
+-- a code spent by a clean sign-in (no wrong guesses) does not hold the next send back
+select pg_temp.issue('otp-c@example.com', 'ip7', 'chS', 'hS');
+update public.auth_otps set used_at = now() where email = 'otp-c@example.com';
+select pg_temp.check('otp_issue: a code spent by a clean sign-in lifts the cooldown',
+  pg_temp.issue('otp-c@example.com', 'ip7', 'chS2', 'hS2') ->> 'status' = 'ok');
+
 -- per-requester cap (5 / hour)
 insert into public.auth_otps (email, mailbox, requester, code_hash, expires_at, created_at)
 select 'otp-b@example.com', 'otp-b@example.com', 'ip9', 'x', now(), now() - interval '10 minutes' from generate_series(1, 5);
